@@ -21,6 +21,17 @@ do
   dolt table import -u ts_a_stock_eod_price /investment_data/tushare/index/$file; 
 done
 
+echo "Updating fundamentals"
+# Try to get last date from fundamentals table; fallback if missing
+fund_startdate=$(dolt sql -q "select date_format(max(trade_date), '%Y%m%d') from ts_a_stock_fundamental" -r csv 2>/dev/null || true)
+fund_startdate=$(echo "$fund_startdate" | tail -1)
+if [ -z "$fund_startdate" ] || [ "$fund_startdate" = "NULL" ]; then fund_startdate=19900101; fi
+python3 /investment_data/tushare/dump_a_stock_fundamental.py --start_date=$fund_startdate
+for file in $(ls /investment_data/tushare/astock_fundamental/); 
+do  
+  dolt table import -u -pk ts_code,trade_date ts_a_stock_fundamental /investment_data/tushare/astock_fundamental/$file; 
+done
+
 echo "Updating stock price"
 dolt sql-server &
 sleep 5 && python3 /investment_data/tushare/update_a_stock_eod_price_to_latest.py

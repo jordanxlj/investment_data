@@ -48,6 +48,60 @@ WHERE tradedate >
 ) ts_raw_table
 LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol;
 
+/* ========================= */
+/* Fill in fundamentals from ts */
+/* ========================= */
+
+/* Create final table for fundamentals if it does not exist */
+CREATE TABLE IF NOT EXISTS final_a_stock_fundamental (
+  tradedate DATE,
+  symbol VARCHAR(16),
+  turnover_rate DOUBLE,
+  turnover_rate_f DOUBLE,
+  volume_ratio DOUBLE,
+  pe DOUBLE,
+  pe_ttm DOUBLE,
+  pb DOUBLE,
+  ps DOUBLE,
+  ps_ttm DOUBLE,
+  dv_ratio DOUBLE,
+  dv_ttm DOUBLE,
+  total_share DOUBLE,
+  float_share DOUBLE,
+  free_share DOUBLE,
+  total_mv DOUBLE,
+  circ_mv DOUBLE,
+  PRIMARY KEY (tradedate, symbol)
+);
+
+/* Append newly imported ts fundamentals into final table */
+INSERT IGNORE INTO final_a_stock_fundamental (
+  tradedate, symbol, turnover_rate, turnover_rate_f, volume_ratio,
+  pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm,
+  total_share, float_share, free_share, total_mv, circ_mv
+)
+SELECT 
+  STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+  ts_link_table.w_symbol AS symbol,
+  ts_raw.turnover_rate / 100.0,
+  ts_raw.turnover_rate_f / 100.0,
+  ts_raw.volume_ratio,
+  ts_raw.pe,
+  ts_raw.pe_ttm,
+  ts_raw.pb,
+  ts_raw.ps,
+  ts_raw.ps_ttm,
+  ts_raw.dv_ratio / 100.0,
+  ts_raw.dv_ttm / 100.0,
+  ts_raw.total_share * 10000.0,
+  ts_raw.float_share * 10000.0,
+  ts_raw.free_share * 10000.0,
+  ts_raw.total_mv * 10000.0,
+  ts_raw.circ_mv * 10000.0
+FROM ts_a_stock_fundamental ts_raw
+LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > COALESCE((SELECT MAX(tradedate) FROM final_a_stock_fundamental), '1990-01-01');
+
 /* Fill in stock price from ts */
 INSERT IGNORE INTO final_a_stock_eod_price (tradedate, symbol, high, low, open, close, volume, adjclose, amount) 
 select ts_raw_table.tradedate, 
