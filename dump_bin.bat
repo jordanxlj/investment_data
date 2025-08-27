@@ -32,7 +32,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-where "%PYTHON%" >nul 2>&1
+::where "%PYTHON%" >nul 2>&1
 if errorlevel 1 (
   echo ERROR: %PYTHON% not found in PATH. Please install Python and ensure it is available.
   exit /b 1
@@ -65,12 +65,12 @@ if not exist "%QLIB_DIR%" (
 
 :: Start dolt SQL server
 pushd "%DOLT_REPO_DIR%"
-dolt pull origin master || exit /b 1
+::dolt pull origin master || exit /b 1
 start "dolt-sql-server" dolt sql-server
 popd
 
 :: wait for sql server start
-timeout /t 5 /nobreak >nul
+timeout /t 10 /nobreak >nul
 
 :: Run conversion pipeline from project directory
 pushd "%PROJECT_DIR%"
