@@ -66,16 +66,16 @@ if not exist "%QLIB_DIR%" (
 :: Start dolt SQL server
 pushd "%DOLT_REPO_DIR%"
 ::dolt pull origin master || exit /b 1
-start "dolt-sql-server" dolt sql-server
+::start "dolt-sql-server" dolt sql-server
 popd
 
 :: wait for sql server start
-timeout /t 10 /nobreak >nul
+timeout /t 15 /nobreak >nul
 
 :: Run conversion pipeline from project directory
 pushd "%PROJECT_DIR%"
 if not exist ".\qlib\qlib_source" mkdir ".\qlib\qlib_source"
-"%PYTHON%" ".\qlib\dump_all_to_qlib_source.py"
+"%PYTHON%" ".\qlib\perf_dump_all_qlib_source.py"
 
 set "PYTHONPATH=%PYTHONPATH%;%QLIB_DIR%\scripts"
 "%PYTHON%" ".\qlib\normalize.py" normalize_data --source_dir ".\qlib\qlib_source" --normalize_dir ".\qlib\qlib_normalize" --max_workers=16 --date_field_name="tradedate"

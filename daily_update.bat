@@ -47,7 +47,7 @@ echo Updating index price
 
 echo Updating stock price
 start "dolt-sql-server" dolt sql-server
-timeout /t 5 /nobreak >nul
+timeout /t 10 /nobreak >nul
 ::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\update_a_stock_eod_price_to_latest.py"
 taskkill /IM dolt.exe /F >nul 2>&1
 
@@ -61,7 +61,7 @@ dolt sql -q "CREATE TABLE IF NOT EXISTS ts_a_stock_fundamental ( ts_code VARCHAR
 :: Alternative method: write fundamentals directly into Dolt via SQL server
 start "dolt-sql-server" dolt sql-server
 timeout /t 5 /nobreak >nul
-"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\update_a_stock_fundamental.py"
+::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\update_a_stock_fundamental.py"
 taskkill /IM dolt.exe /F >nul 2>&1
 
 ::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\dump_a_stock_fundamental.py" --start_date=%fund_startdate%
