@@ -35,15 +35,15 @@ set "startdate="
 for /f "skip=1 delims=" %%A in ('dolt sql -q "select * from max_index_date" -r csv') do set "startdate=%%A"
 echo startdate=!startdate!
 ::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\dump_index_weight.py" --start_date=!startdate!
-for %%F in ("%INVESTMENT_DATA_DIR%tushare\index_weight\*.*") do (
-  dolt table import -u ts_index_weight "%%~fF"
-)
+::for %%F in ("%INVESTMENT_DATA_DIR%tushare\index_weight\*.*") do (
+  ::dolt table import -u ts_index_weight "%%~fF"
+::)
 
 echo Updating index price
 ::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\dump_index_eod_price.py"
-for %%F in ("%INVESTMENT_DATA_DIR%tushare\index\*.*") do (
-  dolt table import -u ts_a_stock_eod_price "%%~fF"
-)
+::for %%F in ("%INVESTMENT_DATA_DIR%tushare\index\*.*") do (
+::  dolt table import -u ts_a_stock_eod_price "%%~fF"
+::)
 
 echo Updating stock price
 start "dolt-sql-server" dolt sql-server
@@ -52,24 +52,22 @@ timeout /t 5 /nobreak >nul
 taskkill /IM dolt.exe /F >nul 2>&1
 
 echo Updating fundamentals
-set "fund_startdate="
+set "fund_startdate=20080101"
 for /f "skip=1 delims=" %%A in ('dolt sql -q "select date_format(max(trade_date), '%%Y%%m%%d') from ts_a_stock_fundamental" -r csv 2^>nul') do set "fund_startdate=%%A"
-if "%fund_startdate%"=="" set "fund_startdate=20000101"
-if /I "%fund_startdate%"=="NULL" set "fund_startdate=20000101"
 
-:: ensure ts_a_stock_fundamental exists
-dolt sql -q "CREATE TABLE IF NOT EXISTS ts_a_stock_fundamental ( ts_code VARCHAR(16) NOT NULL, trade_date VARCHAR(8) NOT NULL, turnover_rate DOUBLE, turnover_rate_f DOUBLE, volume_ratio DOUBLE, pe DOUBLE, pe_ttm DOUBLE, pb DOUBLE, ps DOUBLE, ps_ttm DOUBLE, dv_ratio DOUBLE, dv_ttm DOUBLE, total_share DOUBLE, float_share DOUBLE, free_share DOUBLE, total_mv DOUBLE, circ_mv DOUBLE, PRIMARY KEY (ts_code, trade_date))"
+:: ensure ts_a_stock_fundamental exists (rates float, shares/mv decimal)
+dolt sql -q "CREATE TABLE IF NOT EXISTS ts_a_stock_fundamental ( ts_code VARCHAR(16) NOT NULL, trade_date VARCHAR(8) NOT NULL, turnover_rate FLOAT, turnover_rate_f FLOAT, volume_ratio FLOAT, pe FLOAT, pe_ttm FLOAT, pb FLOAT, ps FLOAT, ps_ttm FLOAT, dv_ratio FLOAT, dv_ttm FLOAT, total_share DECIMAL(16,4), float_share DECIMAL(16,4), free_share DECIMAL(16,4), total_mv DECIMAL(16,4), circ_mv DECIMAL(16,4), PRIMARY KEY (ts_code, trade_date))"
 
 :: Alternative method: write fundamentals directly into Dolt via SQL server
-::start "dolt-sql-server" dolt sql-server
-::timeout /t 5 /nobreak >nul
-::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\update_a_stock_fundamental.py"
-::taskkill /IM dolt.exe /F >nul 2>&1
+start "dolt-sql-server" dolt sql-server
+timeout /t 5 /nobreak >nul
+"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\update_a_stock_fundamental.py"
+taskkill /IM dolt.exe /F >nul 2>&1
 
 ::"%PYTHON%" "%INVESTMENT_DATA_DIR%tushare\dump_a_stock_fundamental.py" --start_date=%fund_startdate%
-for %%F in ("%INVESTMENT_DATA_DIR%tushare\astock_fundamental\*.*") do (
-  dolt table import -u -pk ts_code,trade_date ts_a_stock_fundamental "%%~fF"
-)
+::for %%F in ("%INVESTMENT_DATA_DIR%tushare\astock_fundamental\*.*") do (
+::  dolt table import -u -pk ts_code,trade_date ts_a_stock_fundamental "%%~fF"
+::)
 
 dolt sql --file "%INVESTMENT_DATA_DIR%tushare\regular_update.sql"
 

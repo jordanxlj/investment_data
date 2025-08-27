@@ -17,7 +17,7 @@ def dump_all_to_sqlib_source(skip_exists=True):
       f.pe_ttm as pe,
       f.pb,
       f.ps_ttm as ps,
-      f.dv_ttm as dividend_rate,
+      f.dv_ttm as dividend_ratio,
       f.float_share,
       f.circ_mv as market_cap
     from final_a_stock_eod_price p
