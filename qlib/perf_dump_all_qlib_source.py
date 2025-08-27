@@ -77,9 +77,12 @@ def perf_dump_all_qlib_source(
         cursorclass=pymysql.cursors.SSCursor,  # server-side streaming
     )
 
+    print(f"connected sqlserver successfully...")
     price_cur = conn.cursor()
     fund_cur = conn.cursor()
+    print(f"execute {price_sql}")
     price_cur.execute(price_sql)
+    print(f"execute {fund_sql}")
     fund_cur.execute(fund_sql)
 
     price_row = _next(price_cur)
@@ -89,32 +92,51 @@ def perf_dump_all_qlib_source(
     writer = None
     file_handle = None
     skip_symbol = False
+    cutoff_for_symbol: Optional[dt.date] = None
 
-    def ensure_writer(symbol: str):
-        nonlocal current_symbol, writer, file_handle, skip_symbol
+    def _read_last_tradedate_from_csv(path: str) -> Optional[dt.date]:
+        if not os.path.isfile(path):
+            return None
+        try:
+            last = None
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        last = line.strip()
+            if not last:
+                return None
+            first = last.split(",", 1)[0]
+            return dt.datetime.strptime(first, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    def ensure_writer(symbol: str) -> Optional[dt.date]:
+        nonlocal current_symbol, writer, file_handle
         if symbol == current_symbol:
-            return
+            return None
         # close previous
         if file_handle:
             file_handle.flush()
             file_handle.close()
         current_symbol = symbol
         filename = os.path.join(output_dir, f"{symbol}.csv")
-        if skip_exists and os.path.isfile(filename):
-            skip_symbol = True
-            writer = None
-            file_handle = None
-            return
-        skip_symbol = False
-        file_handle = open(filename, "w", newline="", encoding="utf-8")
-        writer = csv.writer(file_handle)
-        writer.writerow([
-            "tradedate","symbol","high","low","open","close","volume","amount","adjclose","vwap",
-            "turnover","volume_ratio","pe","pb","ps","dividend_ratio","float_share","market_cap"
-        ])
+        cutoff: Optional[dt.date] = None
+        if os.path.isfile(filename):
+            cutoff = _read_last_tradedate_from_csv(filename)
+            file_handle = open(filename, "a", newline="", encoding="utf-8")
+            writer = csv.writer(file_handle)
+        else:
+            file_handle = open(filename, "w", newline="", encoding="utf-8")
+            writer = csv.writer(file_handle)
+            writer.writerow([
+                "tradedate","symbol","high","low","open","close","volume","amount","adjclose","vwap",
+                "turnover","volume_ratio","pe","pb","ps","dividend_ratio","float_share","market_cap"
+            ])
+        return cutoff
 
     # Merge loop
     rows_written = 0
+    print(f"update the csv file by the symbol and date...")
     while price_row is not None:
         p_symbol, p_date, p_high, p_low, p_open, p_close, p_vol, p_amt, p_adj = price_row
 
@@ -129,14 +151,17 @@ def perf_dump_all_qlib_source(
             f_vals = (f_turnover, f_volr, f_pe, f_pb, f_ps, f_div, f_float, f_mcap)
 
         # write row
-        ensure_writer(p_symbol)
-        if not skip_symbol and writer:
-            vwap = (p_amt / p_vol * 10.0) if (p_vol and p_vol != 0) else None
-            writer.writerow([
-                p_date.strftime("%Y-%m-%d"), p_symbol, p_high, p_low, p_open, p_close, p_vol, p_amt, p_adj, vwap,
-                *f_vals
-            ])
-            rows_written += 1
+        new_cutoff = ensure_writer(p_symbol)
+        if new_cutoff is not None:
+            cutoff_for_symbol = new_cutoff
+        if writer:
+            if not cutoff_for_symbol or p_date > cutoff_for_symbol:
+                vwap = (p_amt / p_vol * 10.0) if (p_vol and p_vol != 0) else None
+                writer.writerow([
+                    p_date.strftime("%Y-%m-%d"), p_symbol, p_high, p_low, p_open, p_close, p_vol, p_amt, p_adj, vwap,
+                    *f_vals
+                ])
+                rows_written += 1
 
         # advance price
         price_row = _next(price_cur)
