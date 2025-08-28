@@ -100,7 +100,7 @@ def update_astock_fundamental_to_latest(
     """
 
     sql_engine = create_engine(
-        "mysql+pymysql://root:@127.0.0.1/investment_data", pool_recycle=3600
+        "mysql+pymysql://root:@127.0.0.1:3307/investment_data_new", pool_recycle=3600
     )
     db_conn = sql_engine.raw_connection()
 
