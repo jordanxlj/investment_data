@@ -4,8 +4,8 @@ import pandas as pd
 import fire
 import os
 
-def dump_all_to_sqlib_source(skip_exists=True):
-  sqlEngine = create_engine('mysql+pymysql://root:@127.0.0.1/investment_data', pool_recycle=3600)
+def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', skip_exists=True):
+  sqlEngine = create_engine(mysql_url, pool_recycle=3600)
   dbConnection = sqlEngine.raw_connection()
   stock_df = pd.read_sql(
     """

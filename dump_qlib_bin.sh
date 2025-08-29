@@ -2,8 +2,15 @@ set -e
 set -x
 WORKING_DIR=${1} 
 
+MYSQL_HOST=${MYSQL_HOST:-127.0.0.1}
+MYSQL_PORT=${MYSQL_PORT:-3307}
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+MYSQL_DB=${MYSQL_DB:-investment_data_new}
+MYSQL_URL="mysql+pymysql://${MYSQL_USER}:@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DB}"
+
 mkdir -p ./qlib/qlib_source
-python3 ./qlib/dump_all_to_qlib_source.py
+python3 ./qlib/dump_all_to_qlib_source.py --mysql_url="${MYSQL_URL}"
 
 export PYTHONPATH=$PYTHONPATH:$WORKING_DIR/qlib_enhanced/scripts
 python3 ./qlib/normalize.py normalize_data --source_dir ./qlib/qlib_source/ --normalize_dir ./qlib/qlib_normalize --max_workers=16 --date_field_name="tradedate" 
@@ -12,7 +19,6 @@ python3 $WORKING_DIR/qlib/scripts/dump_bin.py dump_all --data_path ./qlib/qlib_n
 mkdir -p ./qlib/qlib_index/
 python3 ./qlib/dump_index_weight.py 
 python3 ./tushare/dump_day_calendar.py $WORKING_DIR/qlib_bin/
-killall dolt
 
 cp qlib/qlib_index/csi* $WORKING_DIR/qlib_bin/instruments/
 
