@@ -27,7 +27,7 @@ echo "Updating index weight (dump CSV and import to MySQL)"
 PASS_OPT=""
 if [[ -n "${MYSQL_PASSWORD}" ]]; then PASS_OPT="-p${MYSQL_PASSWORD}"; fi
 IDX_WEIGHT_START=$(mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} -N -s -e \
-  "SELECT IFNULL(DATE_FORMAT(MAX(trade_date),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_index_weight" 2>/dev/null || echo "19900101")
+  "SELECT IFNULL(DATE_FORMAT(DATE_ADD(MAX(trade_date), INTERVAL 1 DAY),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_index_weight" 2>/dev/null || echo "19900101")
 python3 "${SCRIPT_DIR}/tushare/dump_index_weight.py" --start_date="${IDX_WEIGHT_START}"
 
 # Import all CSVs under tushare/index_weight into ts_index_weight
@@ -40,7 +40,7 @@ echo "Updating index price (dump CSV and import to MySQL)"
 # Compute start date from existing index symbols in ts_a_stock_eod_price
 INDEX_LIST="('399300.SZ','000905.SH','000300.SH','000906.SH','000852.SH','000985.SH')"
 IDX_PRICE_START=$(mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} -N -s -e \
-  "SELECT IFNULL(DATE_FORMAT(MAX(tradedate),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_a_stock_eod_price WHERE symbol IN ${INDEX_LIST}" 2>/dev/null || echo "19900101")
+  "SELECT IFNULL(DATE_FORMAT(DATE_ADD(MAX(tradedate), INTERVAL 1 DAY),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_a_stock_eod_price WHERE symbol IN ${INDEX_LIST}" 2>/dev/null || echo "19900101")
 python3 "${SCRIPT_DIR}/tushare/dump_index_eod_price.py" --start_date="${IDX_PRICE_START}"
 
 # Import index CSVs into ts_a_stock_eod_price
