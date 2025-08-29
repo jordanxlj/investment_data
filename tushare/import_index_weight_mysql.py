@@ -19,14 +19,22 @@ def import_index_weight_mysql(
         try:
             df = pd.read_csv(path)
             cols = list(df.columns)
-            needed = ['index_code','con_code','trade_date','weight']
+            needed = ['index_code','stock_code','trade_date','weight']
             missing = [c for c in needed if c not in cols]
             if missing:
                 print('skip (missing cols):', path, missing)
                 continue
-            if 'stock_code' not in cols:
-                df['stock_code'] = df['con_code']
-            df[needed + ['stock_code']].to_sql(
+            # Map to destination schema: index_code, stock_code, trade_date(YYYY-MM-DD), weight
+            out = pd.DataFrame()
+            out['index_code'] = df['index_code']
+            out['stock_code'] = df['stock_code']
+            out['trade_date'] = pd.to_datetime(df['trade_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+            out['weight'] = df['weight']
+            out = out.dropna(subset=['index_code','stock_code','trade_date'])
+            if out.empty:
+                print('skip (no valid rows after mapping):', path)
+                continue
+            out[['index_code','stock_code','trade_date','weight']].to_sql(
                 'ts_index_weight', engine, if_exists='append', index=False, method='multi', chunksize=chunksize
             )
             print('imported', path)
