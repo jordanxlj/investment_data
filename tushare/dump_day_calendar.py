@@ -6,8 +6,8 @@ import os
 import datetime
 from pathlib import Path
 
-def dump_calendar_to_qlib_dir(qlib_dir, skip_exists=False):
-  sqlEngine = create_engine('mysql+pymysql://root:@127.0.0.1/investment_data', pool_recycle=3600)
+def dump_calendar_to_qlib_dir(mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', qlib_dir=None, skip_exists=False):
+  sqlEngine = create_engine(mysql_url, pool_recycle=3600)
   dbConnection = sqlEngine.raw_connection()
 
   old_days_file =Path(qlib_dir) / "calendars/day.txt"
