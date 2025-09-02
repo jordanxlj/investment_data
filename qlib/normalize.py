@@ -13,11 +13,13 @@ except ImportError as e:
 class CrowdSourceNormalize(yahoo_collector.YahooNormalizeCN1d):
   # Add vwap so that vwap will be adjusted during normalization
   COLUMNS = ["open", "close", "high", "low", "vwap", "volume"]
-
+  EXCLUDES = ['amount', 'turnover', 'volume_ratio', 'dividend_ratio', 'pe', 'pb', 'ps', 'market_cap', 'float_share']
   def _manual_adj_data(self, df: pd.DataFrame) -> pd.DataFrame:
     # amount should be kept as original value, so that adjusted volume * adjust vwap = amount
     result_df = super()._manual_adj_data(df)
-    result_df["amount"] = df["amount"]
+    for column in self.EXCLUDES:
+        if column in result_df.columns and column in df.columns:
+            result_df[column] = df[column]
     return result_df
 
 def normalize_crowd_source_data(source_dir=None, normalize_dir=None, max_workers=1, interval="1d", date_field_name="tradedate", symbol_field_name="symbol"):
