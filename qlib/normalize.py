@@ -1,5 +1,6 @@
 import fire
 import pandas as pd
+import os
 
 try:
   from data_collector.base import Normalize
@@ -22,7 +23,34 @@ class CrowdSourceNormalize(yahoo_collector.YahooNormalizeCN1d):
             result_df[column] = df[column]
     return result_df
 
-def normalize_crowd_source_data(source_dir=None, normalize_dir=None, max_workers=1, interval="1d", date_field_name="tradedate", symbol_field_name="symbol"):
+def _clean_empty_files(directory: str) -> None:
+    if not directory or not os.path.isdir(directory):
+        return
+    removed = 0
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            if os.path.getsize(path) == 0:
+                os.remove(path)
+                removed += 1
+                continue
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                chunk = f.read(256)
+                if not chunk.strip():
+                    os.remove(path)
+                    removed += 1
+        except Exception:
+            # ignore unreadable files
+            continue
+    if removed:
+        print(f"Pre-clean: removed {removed} empty files from {directory}")
+
+
+def normalize_crowd_source_data(source_dir=None, normalize_dir=None, max_workers=1, interval="1d", date_field_name="tradedate", symbol_field_name="symbol", preclean_empty: bool = True):
+    if preclean_empty and source_dir:
+        _clean_empty_files(source_dir)
     yc = Normalize(
         source_dir=source_dir,
         target_dir=normalize_dir,
