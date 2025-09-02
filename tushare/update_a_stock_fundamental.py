@@ -111,6 +111,7 @@ def update_astock_fundamental_to_latest(
         from (
             select trade_date, count(1) as symbol_count
             from ts_a_stock_fundamental
+            where trade_date > "20250501" 
             group by trade_date
         ) t
         where symbol_count > {min_symbols}
