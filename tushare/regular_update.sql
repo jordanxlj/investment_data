@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS final_a_stock_fundamental (
   free_share BIGINT UNSIGNED,
   total_mv BIGINT UNSIGNED,
   circ_mv BIGINT UNSIGNED,
-  PRIMARY KEY (tradedate, symbol)
+  PRIMARY KEY (tradedate, symbol),
+  KEY idx_fund_symbol_tradedate (tradedate, symbol)
 );
 
 /* Append newly imported ts fundamentals into final table */
