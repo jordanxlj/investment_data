@@ -6,7 +6,7 @@ from typing import Optional, List
 import fire
 import pandas
 import tushare as ts
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.types import Float, DECIMAL, String
 import pymysql  # noqa: F401 - required by SQLAlchemy URL
 
@@ -114,7 +114,7 @@ def update_astock_moneyflow_to_latest(
 
     sql_engine = create_engine(mysql_url, pool_recycle=3600)
     with sql_engine.begin() as conn:
-        conn.execute(str(CREATE_TABLE_DDL))
+        conn.execute(text(CREATE_TABLE_DDL))
 
     db_conn = sql_engine.raw_connection()
 
