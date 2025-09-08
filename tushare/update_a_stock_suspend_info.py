@@ -69,13 +69,31 @@ def _flush_batch(
         "suspend_type": String(1),
     }
 
+    # Use INSERT IGNORE to skip duplicates without updating
+    def insert_ignore_method(table, conn, keys, data_iter):
+        data = [dict(zip(keys, row)) for row in data_iter]
+        if not data:
+            return
+        # Build INSERT IGNORE statement
+        columns = ', '.join(f'`{k}`' for k in keys)
+        values_placeholders = ', '.join(f':{k}' for k in keys)
+        insert_stmt = f"INSERT IGNORE INTO `{table.table.name}` ({columns}) VALUES ({values_placeholders})"
+
+        # Execute in batches
+        from sqlalchemy.sql import text
+        for row in data:
+            try:
+                conn.execute(text(insert_stmt), row)
+            except Exception as e:
+                print(f"Skip conflict row: {row.get('ts_code', 'unknown')}-{row.get('trade_date', 'unknown')}, error: {e}")
+
     written = batch_df.to_sql(
         "ts_a_stock_suspend_info",
         sql_engine,
         if_exists="append",
         index=False,
         chunksize=chunksize,
-        method="multi",
+        method=insert_ignore_method,
         dtype=dtype,
     )
     pending_frames.clear()
