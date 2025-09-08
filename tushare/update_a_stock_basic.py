@@ -70,8 +70,8 @@ def _generate_industry_codes(df: pd.DataFrame) -> pd.DataFrame:
     industry_code_map = {}
 
     for industry in unique_industries:
-        if industry == "" or industry is None:
-            industry_code_map[industry] = None
+        if industry == "" or industry is None or str(industry).strip() == "":
+            industry_code_map[industry] = "99999"
         else:
             # Generate a consistent 5-digit code using hash
             # Use only the last 5 digits to ensure it's 5 characters
