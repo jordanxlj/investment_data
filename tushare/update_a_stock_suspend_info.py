@@ -14,6 +14,17 @@ import pymysql  # noqa: F401 - required by SQLAlchemy URL
 ts.set_token(os.environ["TUSHARE"])
 pro = ts.pro_api()
 
+TABLE_NAME = "ts_a_stock_suspend_info"
+
+CREATE_TABLE_DDL = f"""
+CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
+   ts_code  varchar(16) NOT NULL,
+   trade_date  varchar(8) NOT NULL,
+   suspend_timing  String(8) NOT NULL,
+   suspend_type  String(1) NOT NULL,
+  PRIMARY KEY ( ts_code , trade_date )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
+"""
 
 def get_trade_cal(start_date: str, end_date: str) -> pandas.DataFrame:
     df = pro.trade_cal(
@@ -72,6 +83,7 @@ def _flush_batch(
 
 
 def update_astock_suspend_to_latest(
+    mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
     min_symbols_per_day: int = 1000,
     max_days_per_batch: int = 30,
     max_rows_per_batch: int = 50000,
@@ -84,9 +96,10 @@ def update_astock_suspend_to_latest(
     - Fetches daily_basic and appends to table
     """
 
-    sql_engine = create_engine(
-        "mysql+pymysql://root:@127.0.0.1:3307/investment_data_new", pool_recycle=3600
-    )
+    sql_engine = create_engine(mysql_url, pool_recycle=3600)
+    with sql_engine.begin() as conn:
+        conn.execute(text(CREATE_TABLE_DDL))
+
     db_conn = sql_engine.raw_connection()
 
     # Determine latest fully populated trade_date present

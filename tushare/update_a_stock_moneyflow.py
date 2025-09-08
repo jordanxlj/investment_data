@@ -16,7 +16,6 @@ pro = ts.pro_api()
 
 TABLE_NAME = "ts_a_stock_moneyflow"
 
-
 CREATE_TABLE_DDL = f"""
 CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    ts_code  varchar(16) NOT NULL,
