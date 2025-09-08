@@ -140,14 +140,41 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
 def _fetch_stock_basic() -> Optional[pd.DataFrame]:
     """Fetch all stock basic information from Tushare."""
     try:
-        # Get all stocks including listed, delisted, and suspended
         # Exclude industry_code as it's not provided by Tushare API
         fetch_columns = [col for col in ALL_COLUMNS if col != "industry_code"]
-        df = pro.stock_basic(
+
+        all_data = []
+
+        # First fetch listed stocks (L)
+        print("Fetching listed stocks...")
+        df_listed = pro.stock_basic(
             exchange='',
+            list_status='L',
             fields=','.join(fetch_columns)
         )
-        return df
+        if df_listed is not None and not df_listed.empty:
+            print(f"Fetched {len(df_listed)} listed stocks")
+            all_data.append(df_listed)
+
+        # Then fetch delisted stocks (D)
+        print("Fetching delisted stocks...")
+        df_delisted = pro.stock_basic(
+            exchange='',
+            list_status='D',
+            fields=','.join(fetch_columns)
+        )
+        if df_delisted is not None and not df_delisted.empty:
+            print(f"Fetched {len(df_delisted)} delisted stocks")
+            all_data.append(df_delisted)
+
+        # Combine all data
+        if not all_data:
+            return pd.DataFrame(columns=fetch_columns)
+
+        combined_df = pd.concat(all_data, ignore_index=True)
+        print(f"Total stocks fetched: {len(combined_df)}")
+        return combined_df
+
     except Exception as e:
         print(f"Tushare API error: {e}")
         return None
