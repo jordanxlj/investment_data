@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 
 import fire
 import pandas as pd
+import numpy as np
 import tushare as ts
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -76,8 +77,10 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         out["report_type"] = out["report_type"].astype(str).str.slice(0, 64)
         out["classify"] = out["classify"].astype(str).str.slice(0, 64)
         out["quarter"] = out["quarter"].astype(str).str.slice(0, 16)
-        # Replace NaN/NaT with None so MySQL accepts NULL instead of NaN
-        out = out.where(out.notna(), None)
+        # Ensure DB NULLs: cast to object then replace NaN with None
+        out = out.astype(object).where(pd.notna(out), None)
+        # Extra safety for numpy.nan
+        out = out.replace({np.nan: None})
     return out
 
 
