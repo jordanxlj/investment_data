@@ -120,25 +120,17 @@ def update_astock_suspend_to_latest(
 
     db_conn = sql_engine.raw_connection()
 
-    # Determine latest fully populated trade_date present
-    latest_sql = (
-        """
-        select max(trade_date) as trade_date
-        from (
-            select trade_date, count(1) as symbol_count
-            from ts_a_stock_suspend_info
-            group by trade_date
-        ) t
-        where symbol_count > {min_symbols}
-        """
-    ).format(min_symbols=min_symbols_per_day)
-
+    # Determine latest trade_date present (no symbol threshold; suspend rows per day may be sparse)
     latest_trade_date: Optional[str] = None
     try:
-        latest_df = pandas.read_sql(latest_sql, db_conn)
-        val = latest_df["trade_date"][0]
-        if pandas.notna(val):
-            latest_trade_date = str(val)
+        with sql_engine.begin() as econn:
+            latest_df = pandas.read_sql_query(
+                "SELECT MAX(trade_date) AS trade_date FROM ts_a_stock_suspend_info",
+                econn,
+            )
+            val = latest_df["trade_date"].iloc[0] if not latest_df.empty else None
+            if pandas.notna(val):
+                latest_trade_date = str(val)
     except Exception as e:
         print("Failed to read latest trade_date:", e)
 
