@@ -73,7 +73,6 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         out["report_title"] = out["report_title"].astype(str).str.slice(0, 512)
         out["author_name"] = out["author_name"].astype(str).str.slice(0, 256)
         out["org_name"] = out["org_name"].astype(str).str.slice(0, 128)
-        out["name"] = out["name"].astype(str).str.slice(0, 128)
         out["rating"] = out["rating"].astype(str).str.slice(0, 64)
         out["report_type"] = out["report_type"].astype(str).str.slice(0, 64)
         out["classify"] = out["classify"].astype(str).str.slice(0, 64)
@@ -119,7 +118,7 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
             update_map: Dict[str, Any] = {
                 c: getattr(stmt.inserted, c)
                 for c in ALL_COLUMNS
-                if c not in ("ts_code", "report_date", "org_name", "report_title")
+                if c not in ("ts_code", "report_date", "org_name")
             }
             ondup = stmt.on_duplicate_key_update(**update_map)
             result = conn.execute(ondup)
