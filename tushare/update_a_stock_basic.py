@@ -209,7 +209,7 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
 
 def update_a_stock_basic(
     mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
-    force_refresh: bool = False,
+    force_refresh: bool = True,
 ) -> None:
     """
     Update stock basic information from Tushare into MySQL.
