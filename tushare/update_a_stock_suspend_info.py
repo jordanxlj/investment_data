@@ -6,7 +6,7 @@ from typing import Optional, List
 import fire
 import pandas
 import tushare as ts
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.types import Float, DECIMAL, String
 import pymysql  # noqa: F401 - required by SQLAlchemy URL
 
@@ -20,8 +20,8 @@ CREATE_TABLE_DDL = f"""
 CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    ts_code  varchar(16) NOT NULL,
    trade_date  varchar(8) NOT NULL,
-   suspend_timing  String(8) NOT NULL,
-   suspend_type  String(1) NOT NULL,
+   suspend_timing  varchar(8) NOT NULL,
+   suspend_type  varchar(1) NOT NULL,
   PRIMARY KEY ( ts_code , trade_date )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
