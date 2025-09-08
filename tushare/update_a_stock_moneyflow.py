@@ -114,7 +114,7 @@ def update_astock_moneyflow_to_latest(
 
     sql_engine = create_engine(mysql_url, pool_recycle=3600)
     with sql_engine.begin() as conn:
-        conn.execute(text(CREATE_TABLE_DDL))
+        conn.execute(str(CREATE_TABLE_DDL))
 
     db_conn = sql_engine.raw_connection()
 
