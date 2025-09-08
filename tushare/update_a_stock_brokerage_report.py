@@ -71,7 +71,6 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         out["report_date"] = out["report_date"].astype(str).str.replace("-", "").str.slice(0, 8)
         # Trim long strings
         out["report_title"] = out["report_title"].astype(str).str.slice(0, 512)
-        out["author_name"] = out["author_name"].astype(str).str.slice(0, 256)
         out["org_name"] = out["org_name"].astype(str).str.slice(0, 128)
         out["rating"] = out["rating"].astype(str).str.slice(0, 64)
         out["report_type"] = out["report_type"].astype(str).str.slice(0, 64)
