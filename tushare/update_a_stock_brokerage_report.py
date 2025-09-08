@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   report_title VARCHAR(128) NULL,
   report_type  VARCHAR(16)  NULL,
   classify     VARCHAR(16)  NULL,
-  org_name     VARCHAR(32) NULL,
+  org_name     VARCHAR(32)  NOT NULL,
   quarter      VARCHAR(16)  NULL,
   rating       VARCHAR(16)  NULL,
   op_rt        FLOAT NULL,
