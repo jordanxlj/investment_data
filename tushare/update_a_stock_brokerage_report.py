@@ -76,6 +76,8 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         out["report_type"] = out["report_type"].astype(str).str.slice(0, 64)
         out["classify"] = out["classify"].astype(str).str.slice(0, 64)
         out["quarter"] = out["quarter"].astype(str).str.slice(0, 16)
+        # Replace NaN/NaT with None so MySQL accepts NULL instead of NaN
+        out = out.where(out.notna(), None)
     return out
 
 
