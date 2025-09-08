@@ -145,7 +145,6 @@ def _fetch_stock_basic() -> Optional[pd.DataFrame]:
         fetch_columns = [col for col in ALL_COLUMNS if col != "industry_code"]
         df = pro.stock_basic(
             exchange='',
-            list_status='',
             fields=','.join(fetch_columns)
         )
         return df
