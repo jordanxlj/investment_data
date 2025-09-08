@@ -23,7 +23,7 @@ CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    suspend_timing  String(8) NOT NULL,
    suspend_type  String(1) NOT NULL,
   PRIMARY KEY ( ts_code , trade_date )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
 def get_trade_cal(start_date: str, end_date: str) -> pandas.DataFrame:

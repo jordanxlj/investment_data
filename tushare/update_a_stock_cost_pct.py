@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   winner_rate FLOAT NULL,
   PRIMARY KEY (ts_code, trade_date),
   KEY idx_trade_date (trade_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
 

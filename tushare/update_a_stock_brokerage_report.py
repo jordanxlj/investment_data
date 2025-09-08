@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   max_price    FLOAT NULL,
   min_price    FLOAT NULL,
   PRIMARY KEY (ts_code, report_date, org_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
 
