@@ -576,11 +576,11 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 # Start from the first data source and gradually merge other data sources
                 merged_df = financial_statements[0]
                 for i, df in enumerate(financial_statements[1:], 1):
-                merged_df = merged_df.merge(
-                    df,
-                    on=API_COMMON_FIELDS,
-                    how='outer'
-                )
+                    merged_df = merged_df.merge(
+                        df,
+                        on=API_COMMON_FIELDS,
+                        how='outer'
+                    )
                 print(f"Successfully merged {len(financial_statements)} financial statements: {len(merged_df)} records")
             except Exception as e:
                 print(f"Error merging financial statements: {e}")
