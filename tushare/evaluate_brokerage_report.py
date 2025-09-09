@@ -769,6 +769,7 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
                 AND report_type IS NOT NULL
                 AND quarter LIKE :next_year_pattern
             """)
+            logger.debug(f"Query: {query}")
 
             df = pd.read_sql(query, conn, params={
                 'ts_code': ts_code,
@@ -839,6 +840,7 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 ORDER BY ann_date DESC
                 LIMIT 1
             """)
+            logger.debug(f"Query: {query}")
 
             df = pd.read_sql(query, conn, params={
                 'ts_code': ts_code,
@@ -861,6 +863,7 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 ORDER BY trade_date DESC
                 LIMIT 1
             """)
+            logger.debug(f"Query: {fundamental_query}")
 
             pe_value = None
             dv_ratio_value = None
