@@ -616,8 +616,8 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 indicator_keys = indicator_df.groupby(['ts_code', 'ann_date', 'end_date']).size()
 
                 print(f"Financial indicators merge:")
-                print(f"  Base data: {len(base_keys)} unique combinations, {before_count} total records")
-                print(f"  Indicators: {len(indicator_keys)} unique combinations, {len(indicator_df)} total records")
+                print(f"Base data: {len(base_keys)} unique combinations, {before_count} total records")
+                print(f"Indicators: {len(indicator_keys)} unique combinations, {len(indicator_df)} total records")
 
                 merged_df = merged_df.merge(
                     indicator_df,
@@ -640,7 +640,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
             print(f"No usable data after merging for period {report_period}")
             return pd.DataFrame()
 
-        print(f"merged_df: {merged_df}")
         # Add unified fields
         try:
             merged_df['ts_code'] = merged_df['ts_code']
