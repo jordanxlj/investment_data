@@ -592,6 +592,8 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
     Returns:
         Dictionary with consensus data including current and next year forecasts or None if no data
     """
+    # Ensure eval_date is a string
+    eval_date = str(eval_date)
     logger.debug(f"Getting brokerage consensus for {ts_code}, eval_date: {eval_date}, min_quarter: {min_quarter}")
     try:
         with engine.begin() as conn:
@@ -748,6 +750,9 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
     Returns:
         Dictionary with next year consensus data or None if no data
     """
+    # Ensure eval_date is a string
+    eval_date = str(eval_date)
+    logger.debug(f"Getting next year consensus for {ts_code}, eval_date: {eval_date}, next_year: {next_year}")
     try:
         with engine.begin() as conn:
             # Get brokerage reports within date window
@@ -820,6 +825,8 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
     Returns:
         Dictionary with annual report data or None
     """
+    # Ensure eval_date is a string
+    eval_date = str(eval_date)
     logger.debug(f"Getting annual report data for {ts_code}, period: {report_period}, eval_date: {eval_date}")
     try:
         with engine.begin() as conn:
