@@ -69,20 +69,42 @@ RATING_MAPPING = {
 
 # Report type weight mapping
 REPORT_TYPE_WEIGHTS = {
+    # 深度分析 - 最高权重
     '深度': 5.0,      # Depth analysis - highest weight
     'depth': 5.0,
+    'comprehensive': 5.0,
+    'detailed': 5.0,
+
+    # 调研报告 - 高权重
     '调研': 4.0,      # Field research - high weight
     'research': 4.0,
     'field': 4.0,
+    'visit': 4.0,
+    'survey': 4.0,
+
+    # 点评/会议纪要 - 中等权重
     '点评': 3.0,      # Commentary - medium weight
     'commentary': 3.0,
     'comment': 3.0,
-    '一般': 2.0,      # General - low weight
+    'analysis': 3.0,
+    'review': 3.0,
+    '会议纪要': 3.0,   # Meeting minutes - medium weight
+    '会议': 3.0,
+
+    # 一般报告 - 默认权重
+    '一般': 2.0,      # General - default weight
     'general': 2.0,
+    'regular': 2.0,
+    'standard': 2.0,
+
+    # 特殊类型报告 - 较低权重
+    '新股': 1.5,      # New stock IPO reports
+    '港股': 1.5,      # Hong Kong stock reports
     '非各股': 1.0,    # Non-stock specific - lowest weight
     'non-stock': 1.0,
     'industry': 1.0,
-    'strategy': 1.0
+    'strategy': 1.0,
+    'sector': 1.0
 }
 
 DEFAULT_REPORT_WEIGHT = 2.0  # Default weight for unrecognized types
@@ -217,12 +239,12 @@ def categorize_report_type(report_type: str) -> str:
         return 'research'
 
     # Check for commentary reports
-    if any(keyword in report_type_lower for keyword in ['点评', 'commentary', 'comment', 'analysis', 'review']):
+    if any(keyword in report_type_lower for keyword in ['点评', 'commentary', 'comment', 'analysis', 'review', '会议纪要', '会议']):
         logger.debug(f"Categorized '{report_type}' as 'commentary'")
         return 'commentary'
 
     # Check for general reports
-    if any(keyword in report_type_lower for keyword in ['一般', 'general', 'regular', 'standard']):
+    if any(keyword in report_type_lower for keyword in ['一般', 'general', 'regular', 'standard', '新股', '港股']):
         logger.debug(f"Categorized '{report_type}' as 'general'")
         return 'general'
 
