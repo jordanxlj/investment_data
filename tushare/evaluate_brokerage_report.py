@@ -88,6 +88,73 @@ REPORT_TYPE_WEIGHTS = {
 DEFAULT_REPORT_WEIGHT = 2.0  # Default weight for unrecognized types
 
 
+CREATE_TABLE_DDL = f"""
+CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+  ts_code              VARCHAR(16)  NOT NULL,
+  eval_date            VARCHAR(8)   NOT NULL,  -- 评估日期
+  report_period        VARCHAR(10)  NOT NULL,  -- 报告期 (2024Q4, 2025, etc.)
+
+  -- 券商报告统计信息
+  total_reports        INT          NOT NULL,  -- 总报告数
+  sentiment_pos        INT          NOT NULL,  -- 看多个数 (BUY + HOLD)
+  sentiment_neg        INT          NOT NULL,  -- 看空个数 (NEUTRAL + SELL)
+  buy_count            INT          NOT NULL,  -- BUY评级数量
+  hold_count           INT          NOT NULL,  -- HOLD评级数量
+  neutral_count        INT          NOT NULL,  -- NEUTRAL评级数量
+  sell_count           INT          NOT NULL,  -- SELL评级数量
+
+  -- 研报类型权重统计
+  depth_reports        INT          NOT NULL DEFAULT 0,  -- 深度研报数量
+  research_reports     INT          NOT NULL DEFAULT 0,  -- 调研研报数量
+  commentary_reports   INT          NOT NULL DEFAULT 0,  -- 点评研报数量
+  general_reports      INT          NOT NULL DEFAULT 0,  -- 一般研报数量
+  other_reports        INT          NOT NULL DEFAULT 0,  -- 其他研报数量
+  avg_report_weight    FLOAT        NULL,               -- 平均研报权重
+
+  -- 当前周期预测数据 (根据sentiment_pos vs sentiment_neg选择数据源)
+  eps                  FLOAT NULL,   -- 每股收益预测
+  pe                   FLOAT NULL,   -- 市盈率预测
+  rd                   FLOAT NULL,   -- 研发费用预测
+  roe                  FLOAT NULL,   -- 净资产收益率预测
+  ev_ebitda           FLOAT NULL,   -- EV/EBITDA预测
+  max_price           FLOAT NULL,   -- 最高价预测
+  min_price           FLOAT NULL,   -- 最低价预测
+
+  -- 下一年度预测数据
+  next_year_eps        FLOAT NULL,   -- 下一年每股收益预测
+  next_year_pe         FLOAT NULL,   -- 下一年市盈率预测
+  next_year_roe        FLOAT NULL,   -- 下一年净资产收益率预测
+  next_year_ev_ebitda  FLOAT NULL,   -- 下一年EV/EBITDA预测
+
+  -- 下一年度统计信息
+  next_year_reports    INT          NOT NULL DEFAULT 0,  -- 下一年报告数
+  next_year_avg_weight FLOAT        NULL,               -- 下一年平均研报权重
+
+  -- 数据来源标记
+  data_source          VARCHAR(32)  NULL,   -- 'brokerage_consensus' or 'annual_report'
+  last_updated         DATETIME     NOT NULL,
+
+  PRIMARY KEY (ts_code, eval_date, report_period),
+  INDEX idx_eval_date (eval_date),
+  INDEX idx_ts_code (ts_code),
+  INDEX idx_report_period (report_period)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
+"""
+
+
+ALL_COLUMNS = [
+    "ts_code", "eval_date", "report_period",
+    "total_reports", "sentiment_pos", "sentiment_neg",
+    "buy_count", "hold_count", "neutral_count", "sell_count",
+    "depth_reports", "research_reports", "commentary_reports",
+    "general_reports", "other_reports", "avg_report_weight",
+    "eps", "pe", "rd", "roe", "ev_ebitda", "max_price", "min_price",
+    "next_year_eps", "next_year_pe", "next_year_roe", "next_year_ev_ebitda",
+    "next_year_reports", "next_year_avg_weight",
+    "data_source", "last_updated"
+]
+
+
 def get_report_weight(report_type: str) -> float:
     """
     Get weight for a report type
@@ -165,76 +232,6 @@ def categorize_report_type(report_type: str) -> str:
 
     logger.debug(f"No category match for '{report_type}', defaulting to 'other'")
     return 'other'
-
-
-def classify_rating(rating: str) -> str:
-
-
-CREATE_TABLE_DDL = f"""
-CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-  ts_code              VARCHAR(16)  NOT NULL,
-  eval_date            VARCHAR(8)   NOT NULL,  -- 评估日期
-  report_period        VARCHAR(10)  NOT NULL,  -- 报告期 (2024Q4, 2025, etc.)
-
-  -- 券商报告统计信息
-  total_reports        INT          NOT NULL,  -- 总报告数
-  sentiment_pos        INT          NOT NULL,  -- 看多个数 (BUY + HOLD)
-  sentiment_neg        INT          NOT NULL,  -- 看空个数 (NEUTRAL + SELL)
-  buy_count            INT          NOT NULL,  -- BUY评级数量
-  hold_count           INT          NOT NULL,  -- HOLD评级数量
-  neutral_count        INT          NOT NULL,  -- NEUTRAL评级数量
-  sell_count           INT          NOT NULL,  -- SELL评级数量
-
-  -- 研报类型权重统计
-  depth_reports        INT          NOT NULL DEFAULT 0,  -- 深度研报数量
-  research_reports     INT          NOT NULL DEFAULT 0,  -- 调研研报数量
-  commentary_reports   INT          NOT NULL DEFAULT 0,  -- 点评研报数量
-  general_reports      INT          NOT NULL DEFAULT 0,  -- 一般研报数量
-  other_reports        INT          NOT NULL DEFAULT 0,  -- 其他研报数量
-  avg_report_weight    FLOAT        NULL,               -- 平均研报权重
-
-  -- 当前周期预测数据 (根据sentiment_pos vs sentiment_neg选择数据源)
-  eps                  FLOAT NULL,   -- 每股收益预测
-  pe                   FLOAT NULL,   -- 市盈率预测
-  rd                   FLOAT NULL,   -- 研发费用预测
-  roe                  FLOAT NULL,   -- 净资产收益率预测
-  ev_ebitda           FLOAT NULL,   -- EV/EBITDA预测
-  max_price           FLOAT NULL,   -- 最高价预测
-  min_price           FLOAT NULL,   -- 最低价预测
-
-  -- 下一年度预测数据
-  next_year_eps        FLOAT NULL,   -- 下一年每股收益预测
-  next_year_pe         FLOAT NULL,   -- 下一年市盈率预测
-  next_year_roe        FLOAT NULL,   -- 下一年净资产收益率预测
-  next_year_ev_ebitda  FLOAT NULL,   -- 下一年EV/EBITDA预测
-
-  -- 下一年度统计信息
-  next_year_reports    INT          NOT NULL DEFAULT 0,  -- 下一年报告数
-  next_year_avg_weight FLOAT        NULL,               -- 下一年平均研报权重
-
-  -- 数据来源标记
-  data_source          VARCHAR(32)  NULL,   -- 'brokerage_consensus' or 'annual_report'
-  last_updated         DATETIME     NOT NULL,
-
-  PRIMARY KEY (ts_code, eval_date, report_period),
-  INDEX idx_eval_date (eval_date),
-  INDEX idx_ts_code (ts_code),
-  INDEX idx_report_period (report_period)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
-"""
-
-
-ALL_COLUMNS = [
-    "ts_code", "eval_date", "report_period",
-    "total_reports", "sentiment_pos", "sentiment_neg",
-    "buy_count", "hold_count", "neutral_count", "sell_count",
-    "depth_reports", "research_reports", "commentary_reports",
-    "general_reports", "other_reports", "avg_report_weight",
-    "eps", "pe", "rd", "roe", "ev_ebitda", "max_price", "min_price",
-    "next_year_eps", "next_year_pe", "next_year_roe", "next_year_ev_ebitda",
-    "next_year_reports", "next_year_avg_weight",
-    "data_source", "last_updated"
-]
 
 
 def classify_rating(rating: str) -> str:
