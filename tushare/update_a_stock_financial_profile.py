@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 # === Data source field grouping definitions ===
 
 # Base fields (shared by all data sources)
-BASE_COLUMNS = ["ts_code", "ann_date", "end_date", "report_period", "period", "currency"]
+BASE_COLUMNS = ["ts_code", "ann_date", "report_period", "period", "currency"]
 
 # Income statement fields
 INCOME_COLUMNS = [
@@ -431,11 +431,17 @@ INDICATOR_COLUMNS = [
 # === Data source field configuration ===
 
 # API field name list (all three major financial statements contain these base fields)
-# Note: Since Tushare API field names are identical to database field names, no mapping table is needed
-COMMON_FIELDS = ['ts_code', 'ann_date', 'end_date', 'report_type']
+# Note: API returns 'end_date' but database stores as 'ann_date'
+API_COMMON_FIELDS = ['ts_code', 'ann_date', 'end_date', 'report_type']
+
+# Database column mapping (API field -> DB column)
+API_TO_DB_MAPPING = {
+    'end_date': 'ann_date',  # API end_date maps to DB ann_date
+    'ann_date': 'ann_date'   # API ann_date stays as ann_date
+}
 
 # Financial indicators base fields (does not include report_type)
-INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']
+INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']  # Keep end_date for API call, will be mapped later
 
 # === Merged total field list (used for database operations) ===
 ALL_COLUMNS: List[str] = BASE_COLUMNS + INCOME_COLUMNS + BALANCE_COLUMNS + CASHFLOW_COLUMNS + INDICATOR_COLUMNS
@@ -504,7 +510,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         print(f"Fetching financial data for period: {report_period}")
 
         # 1. Get income statement data (with retry mechanism)
-        income_fields = COMMON_FIELDS + INCOME_COLUMNS
+        income_fields = API_COMMON_FIELDS + INCOME_COLUMNS
         income_df = call_tushare_api_with_retry(
             pro.income_vip,
             period=report_period,
@@ -512,7 +518,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         )
 
         # 2. Get balance sheet data (with retry mechanism)
-        balance_fields = COMMON_FIELDS + BALANCE_COLUMNS
+        balance_fields = API_COMMON_FIELDS + BALANCE_COLUMNS
         balance_df = call_tushare_api_with_retry(
             pro.balancesheet_vip,
             period=report_period,
@@ -520,7 +526,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         )
 
         # 3. Get cash flow statement data (with retry mechanism)
-        cashflow_fields = COMMON_FIELDS + CASHFLOW_COLUMNS
+        cashflow_fields = API_COMMON_FIELDS + CASHFLOW_COLUMNS
         cashflow_df = call_tushare_api_with_retry(
             pro.cashflow_vip,
             period=report_period,
@@ -570,11 +576,11 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 # Start from the first data source and gradually merge other data sources
                 merged_df = financial_statements[0]
                 for i, df in enumerate(financial_statements[1:], 1):
-                    merged_df = merged_df.merge(
-                        df,
-                        on=['ts_code', 'ann_date', 'end_date', 'report_type'],
-                        how='outer'
-                    )
+                merged_df = merged_df.merge(
+                    df,
+                    on=API_COMMON_FIELDS,
+                    how='outer'
+                )
                 print(f"Successfully merged {len(financial_statements)} financial statements: {len(merged_df)} records")
             except Exception as e:
                 print(f"Error merging financial statements: {e}")
@@ -606,9 +612,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         # Add unified fields
         try:
             merged_df['ts_code'] = merged_df['ts_code']
+            merged_df['ann_date'] = merged_df['end_date']  # Map API end_date to database ann_date
             merged_df['report_period'] = merged_df['end_date'].astype(str).str[:4] + '-' + merged_df['end_date'].astype(str).str[4:6] + '-' + merged_df['end_date'].astype(str).str[6:8]
             merged_df['period'] = 'annual' if report_period.endswith('1231') else 'quarter'
             merged_df['currency'] = 'CNY'  # A-share default currency is CNY
+
+            # Remove API-specific fields that don't exist in database
+            if 'end_date' in merged_df.columns:
+                merged_df = merged_df.drop('end_date', axis=1)
 
             print(f"Successfully processed {len(merged_df)} financial records for period {report_period}")
             return merged_df
@@ -716,8 +727,8 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
 def update_a_stock_financial_profile(
     mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
     end_date: Optional[str] = None,
-    period: str = "annual",
-    limit: int = 1,
+    period: str = "quarter",
+    limit: int = 10,
     chunksize: int = 1000,
 ) -> None:
     """
