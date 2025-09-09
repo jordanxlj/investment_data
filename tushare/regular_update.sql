@@ -2,8 +2,8 @@
    - percentages/ratios stored as FLOAT (already divided by 100 in SELECT)
    - shares/market cap stored in base units (×10000), as BIGINT UNSIGNED */
 CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
-  tradedate DATE,
-  symbol VARCHAR(16),
+  tradedate DATE NOT NULL,
+  symbol VARCHAR(16) NOT NULL,
   high FLOAT,
   low FLOAT,
   open FLOAT,
@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   main_inflow_ratio FLOAT,
   small_inflow_ratio FLOAT,
   net_inflow_ratio FLOAT,
+  cost_5pct FLOAT,
+  cost_15pct FLOAT,
+  cost_50pct FLOAT,
+  cost_85pct FLOAT,
+  cost_95pct FLOAT,
+  weight_avg FLOAT,
+  winner_rate FLOAT,
+  suspend BOOL,
   PRIMARY KEY (tradedate, symbol),
   KEY idx_comb_symbol_tradedate (symbol, tradedate)
 ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
@@ -172,7 +180,7 @@ AND final.tradedate IS NULL;
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_moneyflow */
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
-  SELECT 
+  SELECT
     STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
     ts_link_table.w_symbol AS symbol,
     CASE
@@ -182,7 +190,7 @@ INNER JOIN (
     END AS main_inflow_ratio,
     CASE
       WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN (ts_raw.buy_sm_amount - ts_raw.sell_sm_amount) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
+      THEN ((ts_raw.buy_sm_amount + ts_raw.buy_md_amount) - (ts_raw.sell_sm_amount + ts_raw.sell_md_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
       ELSE 0
     END AS small_inflow_ratio,
     CASE
@@ -198,3 +206,64 @@ SET
   final.main_inflow_ratio = updates.main_inflow_ratio,
   final.small_inflow_ratio = updates.small_inflow_ratio,
   final.net_inflow_ratio = updates.net_inflow_ratio;
+
+/* First, identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info */
+SELECT
+  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+FROM ts_a_stock_cost_pct ts_raw
+LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > COALESCE((SELECT MAX(tradedate) FROM final_a_stock_comb_info), '2008-01-01')
+AND final.tradedate IS NULL;
+
+/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_cost_pct */
+UPDATE final_a_stock_comb_info final
+INNER JOIN (
+  SELECT
+    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_link_table.w_symbol AS symbol,
+    ts_raw.cost_5pct AS cost_5pct,
+    ts_raw.cost_15pct AS cost_15pct,
+    ts_raw.cost_50pct AS cost_50pct,
+    ts_raw.cost_85pct AS cost_85pct,
+    ts_raw.cost_95pct AS cost_95pct,
+    ts_raw.weight_avg AS weight_avg,
+    ts_raw.winner_rate AS winner_rate
+  FROM ts_a_stock_cost_pct ts_raw
+  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > COALESCE((SELECT MAX(tradedate) FROM final_a_stock_comb_info), '2008-01-01')
+) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
+SET
+  final.cost_5pct = updates.cost_5pct,
+  final.cost_15pct = updates.cost_15pct,
+  final.cost_50pct = updates.cost_50pct,
+  final.cost_85pct = updates.cost_85pct,
+  final.cost_95pct = updates.cost_95pct,
+  final.weight_avg = updates.weight_avg,
+  final.winner_rate = updates.winner_rate;
+
+/* First, identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info */
+SELECT
+  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+FROM ts_a_stock_suspend_info ts_raw
+LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > COALESCE((SELECT MAX(tradedate) FROM final_a_stock_comb_info), '2008-01-01')
+AND final.tradedate IS NULL;
+
+/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_suspend_info */
+UPDATE final_a_stock_comb_info final
+INNER JOIN (
+  SELECT
+    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_link_table.w_symbol AS symbol,
+    CASE
+      WHEN ts_raw.suspend_type = 'S' THEN TRUE
+      ELSE FALSE
+    END AS suspend
+  FROM ts_a_stock_suspend_info ts_raw
+  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > COALESCE((SELECT MAX(tradedate) FROM final_a_stock_comb_info), '2008-01-01')
+) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
+SET
+  final.suspend = updates.suspend;
