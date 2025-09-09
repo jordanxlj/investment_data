@@ -507,7 +507,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         income_fields = API_COMMON_FIELDS + INCOME_COLUMNS
         income_df = call_tushare_api_with_retry(
             pro.income_vip,
-            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(income_fields)
         )
@@ -516,7 +515,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         balance_fields = API_COMMON_FIELDS + BALANCE_COLUMNS
         balance_df = call_tushare_api_with_retry(
             pro.balancesheet_vip,
-            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(balance_fields)
         )
@@ -525,7 +523,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         cashflow_fields = API_COMMON_FIELDS + CASHFLOW_COLUMNS
         cashflow_df = call_tushare_api_with_retry(
             pro.cashflow_vip,
-            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(cashflow_fields)
         )
@@ -534,7 +531,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
         indicator_df = call_tushare_api_with_retry(
             pro.fina_indicator_vip,
-            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(indicator_fields)
         )
@@ -558,68 +554,13 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
 
         # Debug: Print record counts for each data source
         for name, df in available_sources.items():
-            print(f"  {name}: {len(df)} records")
             if len(df) > 0:
-                print(f"    Sample ts_code: {df['ts_code'].iloc[0] if 'ts_code' in df.columns else 'N/A'}")
-                print(f"    Sample ann_date: {df['ann_date'].iloc[0] if 'ann_date' in df.columns else 'N/A'}")
-                print(f"    Sample end_date: {df['end_date'].iloc[0] if 'end_date' in df.columns else 'N/A'}")
-                print(f"    Sample f_ann_date: {df['f_ann_date'].iloc[0] if 'f_ann_date' in df.columns else 'N/A'}")
-
-                # Check for duplicates within each data source
-                if len(df) > 1:
-                    duplicate_keys = df.groupby(['ts_code', 'ann_date', 'end_date']).size()
-                    duplicates = duplicate_keys[duplicate_keys > 1]
-                    if len(duplicates) > 0:
-                        print(f"    ⚠️  Found duplicates in {name}:")
-                        for (ts_code, ann_date, end_date), count in duplicates.items():
-                            print(f"      {ts_code} {ann_date} {end_date}: {count} duplicates")
-
-                    # Show all records if there are duplicates
-                    if len(df) <= 3:  # Only show if not too many records
-                        print(f"    All records in {name}:")
-                        for i, row in df.iterrows():
-                            report_type = row.get('report_type', 'N/A')
-                            print(f"      Record {i}: ts_code={row['ts_code']}, ann_date={row['ann_date']}, end_date={row['end_date']}, report_type={report_type}")
-
-                            # Show first 5 financial data columns to check for differences
-                            financial_cols = [col for col in df.columns if col not in ['ts_code', 'ann_date', 'end_date', 'report_type']]
-                            if financial_cols:
-                                sample_data = []
-                                for col in financial_cols[:5]:  # Show first 5 financial columns
-                                    if col in row.index and pd.notna(row[col]):
-                                        sample_data.append(f"{col}={row[col]}")
-                                if sample_data:
-                                    print(f"        Financial data: {', '.join(sample_data[:3])}...")
-                                    if len(sample_data) > 3:
-                                        print(f"        ... and {len(sample_data) - 3} more fields")
-
-                        # Check if records are exactly identical
-                        if len(df) == 2:
-                            record1 = df.iloc[0]
-                            record2 = df.iloc[1]
-                            are_identical = record1.equals(record2)
-                            print(f"    Records are exactly identical: {are_identical}")
-
-                            if not are_identical:
-                                # Find differing columns
-                                differing_cols = []
-                                for col in df.columns:
-                                    if not pd.isna(record1[col]) or not pd.isna(record2[col]):
-                                        if str(record1[col]) != str(record2[col]):
-                                            differing_cols.append(col)
-
-                                if differing_cols:
-                                    print(f"    Differing columns: {differing_cols}")
-                                    for col in differing_cols[:5]:  # Show first 5 differences
-                                        print(f"      {col}: '{record1[col]}' vs '{record2[col]}'")
-                                    print(f"    → Will keep Record 2 (latest) with values like: {', '.join([f'{col}={record2[col]}' for col in differing_cols[:3]])}")
-
                 # Remove duplicates within each data source before merging
                 # Keep the last record (potentially more updated/corrected data)
                 initial_len = len(df)
                 df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='last')
                 if len(df) < initial_len:
-                    print(f"    🧹 Removed {initial_len - len(df)} duplicates from {name} (kept latest)")
+                    print(f"Removed {initial_len - len(df)} duplicates from {name} (kept latest)")
 
                 available_sources[name] = df
 
@@ -650,19 +591,13 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                     merge_keys_check = merged_df.groupby(API_COMMON_FIELDS).size()
                     incoming_keys_check = df.groupby(API_COMMON_FIELDS).size()
 
-                    print(f"  Merge step {i} ({source_name}):")
-                    print(f"    Before: {before_count} records")
-                    print(f"    Adding: {len(df)} records")
-                    print(f"    Merge keys in base: {len(merge_keys_check)} unique combinations")
-                    print(f"    Merge keys incoming: {len(incoming_keys_check)} unique combinations")
-
                     merged_df = merged_df.merge(
                         df,
                         on=API_COMMON_FIELDS,
                         how='outer'
                     )
                     after_count = len(merged_df)
-                    print(f"    After: {after_count} records (+{after_count - before_count})")
+                    print(f"After: {after_count} records (+{after_count - before_count})")
 
                 print(f"Successfully merged {len(financial_statements)} financial statements: {len(merged_df)} records")
             except Exception as e:
