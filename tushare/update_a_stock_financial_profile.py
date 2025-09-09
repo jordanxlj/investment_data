@@ -611,12 +611,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                                     print(f"    Differing columns: {differing_cols}")
                                     for col in differing_cols[:5]:  # Show first 5 differences
                                         print(f"      {col}: '{record1[col]}' vs '{record2[col]}'")
+                                    print(f"    → Will keep Record 2 (latest) with values like: {', '.join([f'{col}={record2[col]}' for col in differing_cols[:3]])}")
 
                 # Remove duplicates within each data source before merging
+                # Keep the last record (potentially more updated/corrected data)
                 initial_len = len(df)
-                df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='first')
+                df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='last')
                 if len(df) < initial_len:
-                    print(f"    🧹 Removed {initial_len - len(df)} duplicates from {name}")
+                    print(f"    🧹 Removed {initial_len - len(df)} duplicates from {name} (kept latest)")
 
                 available_sources[name] = df
 
@@ -716,6 +718,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 merged_df = merged_df.drop('end_date', axis=1)
 
             # Remove duplicates based on primary key (ts_code, report_period)
+            # Keep the last record (potentially more updated/corrected data)
             initial_count = len(merged_df)
 
             # Debug: Check for duplicates before removal
@@ -726,11 +729,11 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 for (ts_code, report_period), count in duplicates_found.items():
                     print(f"  {ts_code} {report_period}: {count} duplicates")
 
-            merged_df = merged_df.drop_duplicates(subset=['ts_code', 'report_period'], keep='first')
+            merged_df = merged_df.drop_duplicates(subset=['ts_code', 'report_period'], keep='last')
             final_count = len(merged_df)
 
             if initial_count != final_count:
-                print(f"Removed {initial_count - final_count} duplicate records, kept {final_count} unique records")
+                print(f"Removed {initial_count - final_count} duplicate records, kept {final_count} unique records (latest)")
             else:
                 print(f"No duplicates found, kept {final_count} records")
 
