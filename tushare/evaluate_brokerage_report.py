@@ -22,59 +22,41 @@ import os
 import sys
 import time
 import datetime
-from typing import Optional, List, Dict, Any, Tuple
-from functools import wraps
+import logging
+from typing import Optional, List, Dict, Any, Tuple, Union
+from functools import wraps, lru_cache
 from collections import defaultdict
+import concurrent.futures
 
 import fire
 import pandas as pd
 import numpy as np
-from sqlalchemy import create_engine, text, and_, or_, func
+from sqlalchemy import create_engine, text, and_, or_, func, MetaData, Table
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 import pymysql  # noqa: F401 - required by SQLAlchemy URL
 import tushare as ts
 
 
-# Tushare init
-ts.set_token(os.environ["TUSHARE"])  # expects env var set
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('evaluate_brokerage_report.log', mode='a')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+# Tushare init with validation
+TUSHARE_TOKEN = os.environ.get("TUSHARE")
+if not TUSHARE_TOKEN:
+    logger.error("TUSHARE environment variable not set")
+    sys.exit(1)
+
+ts.set_token(TUSHARE_TOKEN)
 pro = ts.pro_api()
-
-
-def retry_on_failure(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
-    """
-    Decorator: Add retry mechanism to function
-
-    Args:
-        max_retries: Maximum number of retries
-        delay: Initial delay time (seconds)
-        backoff: Delay multiplier
-    """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            current_delay = delay
-
-            for attempt in range(max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-
-                    if attempt < max_retries:
-                        print(f"Function {func.__name__} call failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
-                        print(f"Waiting {current_delay:.1f} seconds before retry...")
-                        time.sleep(current_delay)
-                        current_delay *= backoff  # exponential backoff
-                    else:
-                        print(f"Function {func.__name__} failed after {max_retries + 1} attempts: {e}")
-                        raise last_exception
-
-            # This line won't be executed, but for type checker
-            raise last_exception
-
-        return wrapper
-    return decorator
 
 
 # Rating classification mapping
@@ -85,8 +67,93 @@ RATING_MAPPING = {
     'SELL': ['SELL', 'Sell', '卖出', 'Underweight']
 }
 
+# Report type weight mapping
+REPORT_TYPE_WEIGHTS = {
+    '深度': 5.0,      # Depth analysis - highest weight
+    'depth': 5.0,
+    '调研': 4.0,      # Field research - high weight
+    'research': 4.0,
+    'field': 4.0,
+    '点评': 3.0,      # Commentary - medium weight
+    'commentary': 3.0,
+    'comment': 3.0,
+    '一般': 2.0,      # General - low weight
+    'general': 2.0,
+    '非各股': 1.0,    # Non-stock specific - lowest weight
+    'non-stock': 1.0,
+    'industry': 1.0,
+    'strategy': 1.0
+}
 
-TABLE_NAME = "ts_a_stock_consensus_report"
+DEFAULT_REPORT_WEIGHT = 2.0  # Default weight for unrecognized types
+
+
+def get_report_weight(report_type: str) -> float:
+    """
+    Get weight for a report type
+
+    Args:
+        report_type: Report type string
+
+    Returns:
+        Weight value (1.0 to 5.0)
+    """
+    if not report_type:
+        return DEFAULT_REPORT_WEIGHT
+
+    report_type_lower = str(report_type).strip().lower()
+
+    # Direct match first
+    if report_type in REPORT_TYPE_WEIGHTS:
+        return REPORT_TYPE_WEIGHTS[report_type]
+
+    # Partial match
+    for key, weight in REPORT_TYPE_WEIGHTS.items():
+        if key.lower() in report_type_lower:
+            return weight
+
+    return DEFAULT_REPORT_WEIGHT
+
+
+def categorize_report_type(report_type: str) -> str:
+    """
+    Categorize report type into main categories
+
+    Args:
+        report_type: Report type string
+
+    Returns:
+        Category string ('depth', 'research', 'commentary', 'general', 'other')
+    """
+    if not report_type:
+        return 'other'
+
+    report_type_lower = str(report_type).strip().lower()
+
+    # Check for depth reports
+    if any(keyword in report_type_lower for keyword in ['深度', 'depth', 'comprehensive', 'detailed']):
+        return 'depth'
+
+    # Check for research reports
+    if any(keyword in report_type_lower for keyword in ['调研', 'research', 'field', 'visit', 'survey']):
+        return 'research'
+
+    # Check for commentary reports
+    if any(keyword in report_type_lower for keyword in ['点评', 'commentary', 'comment', 'analysis', 'review']):
+        return 'commentary'
+
+    # Check for general reports
+    if any(keyword in report_type_lower for keyword in ['一般', 'general', 'regular', 'standard']):
+        return 'general'
+
+    # Check for non-stock specific reports
+    if any(keyword in report_type_lower for keyword in ['非各股', 'non-stock', 'industry', 'strategy', 'sector']):
+        return 'other'
+
+    return 'other'
+
+
+def classify_rating(rating: str) -> str:
 
 
 CREATE_TABLE_DDL = f"""
@@ -94,7 +161,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code              VARCHAR(16)  NOT NULL,
   eval_date            VARCHAR(8)   NOT NULL,  -- 评估日期
   report_period        VARCHAR(10)  NOT NULL,  -- 报告期 (2024Q4, 2025, etc.)
-  prediction_type      VARCHAR(16)  NOT NULL,  -- 预测类型: 'current_period', 'next_year'
 
   -- 券商报告统计信息
   total_reports        INT          NOT NULL,  -- 总报告数
@@ -105,7 +171,15 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   neutral_count        INT          NOT NULL,  -- NEUTRAL评级数量
   sell_count           INT          NOT NULL,  -- SELL评级数量
 
-  -- 预测数据 (根据sentiment_pos vs sentiment_neg选择数据源)
+  -- 研报类型权重统计
+  depth_reports        INT          NOT NULL DEFAULT 0,  -- 深度研报数量
+  research_reports     INT          NOT NULL DEFAULT 0,  -- 调研研报数量
+  commentary_reports   INT          NOT NULL DEFAULT 0,  -- 点评研报数量
+  general_reports      INT          NOT NULL DEFAULT 0,  -- 一般研报数量
+  other_reports        INT          NOT NULL DEFAULT 0,  -- 其他研报数量
+  avg_report_weight    FLOAT        NULL,               -- 平均研报权重
+
+  -- 当前周期预测数据 (根据sentiment_pos vs sentiment_neg选择数据源)
   eps                  FLOAT NULL,   -- 每股收益预测
   pe                   FLOAT NULL,   -- 市盈率预测
   rd                   FLOAT NULL,   -- 研发费用预测
@@ -114,11 +188,21 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   max_price           FLOAT NULL,   -- 最高价预测
   min_price           FLOAT NULL,   -- 最低价预测
 
+  -- 下一年度预测数据
+  next_year_eps        FLOAT NULL,   -- 下一年每股收益预测
+  next_year_pe         FLOAT NULL,   -- 下一年市盈率预测
+  next_year_roe        FLOAT NULL,   -- 下一年净资产收益率预测
+  next_year_ev_ebitda  FLOAT NULL,   -- 下一年EV/EBITDA预测
+
+  -- 下一年度统计信息
+  next_year_reports    INT          NOT NULL DEFAULT 0,  -- 下一年报告数
+  next_year_avg_weight FLOAT        NULL,               -- 下一年平均研报权重
+
   -- 数据来源标记
   data_source          VARCHAR(32)  NULL,   -- 'brokerage_consensus' or 'annual_report'
   last_updated         DATETIME     NOT NULL,
 
-  PRIMARY KEY (ts_code, eval_date, report_period, prediction_type),
+  PRIMARY KEY (ts_code, eval_date, report_period),
   INDEX idx_eval_date (eval_date),
   INDEX idx_ts_code (ts_code),
   INDEX idx_report_period (report_period)
@@ -127,10 +211,14 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
 
 ALL_COLUMNS = [
-    "ts_code", "eval_date", "report_period", "prediction_type",
+    "ts_code", "eval_date", "report_period",
     "total_reports", "sentiment_pos", "sentiment_neg",
     "buy_count", "hold_count", "neutral_count", "sell_count",
+    "depth_reports", "research_reports", "commentary_reports",
+    "general_reports", "other_reports", "avg_report_weight",
     "eps", "pe", "rd", "roe", "ev_ebitda", "max_price", "min_price",
+    "next_year_eps", "next_year_pe", "next_year_roe", "next_year_ev_ebitda",
+    "next_year_reports", "next_year_avg_weight",
     "data_source", "last_updated"
 ]
 
@@ -158,6 +246,28 @@ def classify_rating(rating: str) -> str:
     return 'NEUTRAL'
 
 
+def get_trade_cal(start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    Get trading calendar from Tushare API
+
+    Args:
+        start_date: Start date in YYYYMMDD format
+        end_date: End date in YYYYMMDD format
+
+    Returns:
+        DataFrame with trading dates
+    """
+    try:
+        df = pro.trade_cal(exchange='SSE', is_open='1',
+                          start_date=start_date,
+                          end_date=end_date,
+                          fields='cal_date')
+        return df
+    except Exception as e:
+        logger.error(f"Error getting trade calendar: {e}")
+        return pd.DataFrame()
+
+
 def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     """
     Get date window for brokerage report filtering
@@ -179,9 +289,63 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     return start_date, end_date
 
 
+def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
+    """
+    Get comprehensive fiscal period information for the evaluation date
+
+    Args:
+        eval_date: Evaluation date in YYYYMMDD format
+
+    Returns:
+        Dictionary with fiscal period information
+    """
+    eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
+    year = eval_dt.year
+    month = eval_dt.month
+
+    # Determine current fiscal periods
+    if month <= 3:
+        current_quarter = f"{year}Q1"
+        current_year = f"{year}"
+        next_year = f"{year + 1}"
+        # For Q1 evaluation, we look at previous year Q4 data
+        current_fiscal_year = f"{year - 1}"
+        current_fiscal_period = f"{year - 1}1231"  # Previous year end
+    elif month <= 6:
+        current_quarter = f"{year}Q2"
+        current_year = f"{year}"
+        next_year = f"{year + 1}"
+        current_fiscal_year = f"{year}"
+        current_fiscal_period = f"{year}0331"  # Q1 end
+    elif month <= 9:
+        current_quarter = f"{year}Q3"
+        current_year = f"{year}"
+        next_year = f"{year + 1}"
+        current_fiscal_year = f"{year}"
+        current_fiscal_period = f"{year}0630"  # H1 end
+    else:
+        current_quarter = f"{year}Q4"
+        current_year = f"{year}"
+        next_year = f"{year + 1}"
+        current_fiscal_year = f"{year}"
+        current_fiscal_period = f"{year}0930"  # Q3 end
+
+    return {
+        'eval_date': eval_date,
+        'eval_datetime': eval_dt,
+        'current_quarter': current_quarter,
+        'current_year': current_year,
+        'next_year': next_year,
+        'current_fiscal_year': current_fiscal_year,
+        'current_fiscal_period': current_fiscal_period,
+        'next_fiscal_year': f"{year + 1}",
+        'next_fiscal_period': f"{year + 1}0331" if month <= 3 else f"{year + 1}1231"
+    }
+
+
 def get_quarter_info(eval_date: str) -> Tuple[str, str, str]:
     """
-    Get quarter information for the evaluation date
+    Get quarter information for the evaluation date (backward compatibility)
 
     Args:
         eval_date: Evaluation date in YYYYMMDD format
@@ -189,29 +353,8 @@ def get_quarter_info(eval_date: str) -> Tuple[str, str, str]:
     Returns:
         Tuple of (current_quarter, current_year, next_year)
     """
-    eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
-    year = eval_dt.year
-    month = eval_dt.month
-
-    # Determine current quarter
-    if month <= 3:
-        current_quarter = f"{year}Q1"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
-    elif month <= 6:
-        current_quarter = f"{year}Q2"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
-    elif month <= 9:
-        current_quarter = f"{year}Q3"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
-    else:
-        current_quarter = f"{year}Q4"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
-
-    return current_quarter, current_year, next_year
+    info = get_fiscal_period_info(eval_date)
+    return info['current_quarter'], info['current_year'], info['next_year']
 
 
 def parse_quarter(quarter_str: str) -> Tuple[int, int]:
@@ -265,7 +408,7 @@ def compare_quarters(quarter1: str, quarter2: str) -> int:
 
 def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, Any]:
     """
-    Aggregate forecast data based on sentiment source
+    Aggregate forecast data based on sentiment source with robust handling and weighting
 
     Args:
         df: DataFrame with brokerage reports
@@ -275,62 +418,157 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
         Dictionary with aggregated forecast values
     """
     if df.empty:
+        logger.debug("Empty DataFrame provided for aggregation")
         return {
             'eps': None, 'pe': None, 'rd': None, 'roe': None,
             'ev_ebitda': None, 'max_price': None, 'min_price': None
         }
+
+    # Add weights to the dataframe
+    df = df.copy()
+    df['report_weight'] = df['report_type'].apply(get_report_weight)
 
     forecast_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price']
 
     result = {}
     for field in forecast_fields:
         if field in df.columns:
-            values = df[field].dropna()
+            # Get values and weights for valid data points
+            field_data = df[[field, 'report_weight']].dropna()
+
+            if field_data.empty:
+                result[field] = None
+                logger.debug(f"{field}: no valid values after filtering")
+                continue
+
+            values = field_data[field]
+            weights = field_data['report_weight']
+
+            # Remove extreme outliers (beyond 3 standard deviations)
+            if len(values) > 2:
+                mean_val = values.mean()
+                std_val = values.std()
+                if std_val > 0:
+                    valid_mask = (values >= mean_val - 3 * std_val) & (values <= mean_val + 3 * std_val)
+                    values = values[valid_mask]
+                    weights = weights[valid_mask]
+
+            # Remove unrealistic values based on field type
+            if field == 'eps':
+                valid_mask = (values >= -50) & (values <= 50)  # EPS between -50 and 50
+            elif field in ['pe', 'ev_ebitda']:
+                valid_mask = (values > 0) & (values <= 500)  # Positive, reasonable multiples
+            elif field == 'roe':
+                valid_mask = (values >= -200) & (values <= 200)  # ROE between -200% and 200%
+            elif field in ['max_price', 'min_price']:
+                valid_mask = (values > 0) & (values <= 10000)  # Positive, reasonable prices
+            else:
+                valid_mask = pd.Series(True, index=values.index)
+
+            values = values[valid_mask]
+            weights = weights[valid_mask]
+
             if not values.empty:
-                result[field] = float(values.mean())
+                # Use weighted median for robustness
+                if len(values) == 1:
+                    result[field] = float(values.iloc[0])
+                else:
+                    # Calculate weighted median
+                    result[field] = float(weighted_median(values.values, weights.values))
+
+                logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}, "
+                           f"{sentiment_source} weighted median = {result[field]:.2f}")
             else:
                 result[field] = None
+                logger.debug(f"{field}: no valid values after filtering")
         else:
             result[field] = None
+            logger.debug(f"{field}: column not found in DataFrame")
 
     return result
 
 
-def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: str,
-                          prediction_type: str) -> Optional[Dict[str, Any]]:
+def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     """
-    Get brokerage consensus for a specific stock and period
+    Calculate weighted median
+
+    Args:
+        values: Array of values
+        weights: Array of weights corresponding to values
+
+    Returns:
+        Weighted median value
+    """
+    if len(values) != len(weights):
+        raise ValueError("Values and weights must have the same length")
+
+    if len(values) == 0:
+        raise ValueError("Cannot calculate median of empty array")
+
+    # Sort values and corresponding weights
+    sorted_indices = np.argsort(values)
+    sorted_values = values[sorted_indices]
+    sorted_weights = weights[sorted_indices]
+
+    # Calculate cumulative weights
+    cum_weights = np.cumsum(sorted_weights)
+    total_weight = cum_weights[-1]
+
+    # Find the weighted median
+    median_weight = total_weight / 2
+    median_index = np.searchsorted(cum_weights, median_weight, side='right')
+
+    if median_index == 0:
+        return sorted_values[0]
+    elif median_index >= len(sorted_values):
+        return sorted_values[-1]
+    else:
+        return sorted_values[median_index - 1]
+
+
+@lru_cache(maxsize=1000)
+def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: str) -> Optional[Dict[str, Any]]:
+    """
+    Get brokerage consensus for a specific stock and period with enhanced filtering
 
     Args:
         engine: SQLAlchemy engine
         ts_code: Stock code
         eval_date: Evaluation date
         min_quarter: Minimum quarter filter (e.g., '2024Q4')
-        prediction_type: 'current_period' or 'next_year'
 
     Returns:
-        Dictionary with consensus data or None if no data
+        Dictionary with consensus data including current and next year forecasts or None if no data
     """
     try:
         with engine.begin() as conn:
             # Get brokerage reports within date window
             start_date, end_date = get_date_window(eval_date)
 
+            # Enhanced query with age filtering (reports not older than 1 year)
+            max_age_date = (datetime.datetime.strptime(eval_date, "%Y%m%d") -
+                           datetime.timedelta(days=365)).strftime("%Y%m%d")
+
             # Get all brokerage reports first
             query = text("""
                 SELECT * FROM ts_a_stock_brokerage_report
                 WHERE ts_code = :ts_code
                 AND report_date BETWEEN :start_date AND :end_date
+                AND report_date >= :max_age_date
                 AND quarter IS NOT NULL
+                AND rating IS NOT NULL
+                AND report_type IS NOT NULL
             """)
 
             df = pd.read_sql(query, conn, params={
                 'ts_code': ts_code,
                 'start_date': start_date,
-                'end_date': end_date
+                'end_date': end_date,
+                'max_age_date': max_age_date
             })
 
             if df.empty:
+                logger.debug(f"No brokerage reports found for {ts_code} in date range")
                 return None
 
             # Filter by quarter if specified
@@ -341,10 +579,14 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 df = df[df['quarter_comparison']]
 
             if df.empty:
+                logger.debug(f"No reports after quarter filtering for {ts_code}")
                 return None
 
-            # Classify ratings
+            logger.debug(f"Found {len(df)} reports for {ts_code} after filtering")
+
+            # Classify ratings and report types
             df['rating_category'] = df['rating'].apply(classify_rating)
+            df['report_weight'] = df['report_type'].apply(get_report_weight)
 
             # Count ratings
             rating_counts = df['rating_category'].value_counts()
@@ -353,19 +595,41 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
             neutral_count = rating_counts.get('NEUTRAL', 0)
             sell_count = rating_counts.get('SELL', 0)
 
+            # Count report types
+            df['report_type_category'] = df['report_type'].apply(categorize_report_type)
+            report_type_counts = df['report_type_category'].value_counts()
+            depth_reports = report_type_counts.get('depth', 0)
+            research_reports = report_type_counts.get('research', 0)
+            commentary_reports = report_type_counts.get('commentary', 0)
+            general_reports = report_type_counts.get('general', 0)
+            other_reports = report_type_counts.get('other', 0)
+
             total_reports = len(df)
             sentiment_pos = buy_count + hold_count
             sentiment_neg = neutral_count + sell_count
+            avg_report_weight = df['report_weight'].mean() if not df.empty else 0.0
+
+            logger.debug(f"{ts_code}: BUY={buy_count}, HOLD={hold_count}, NEUTRAL={neutral_count}, SELL={sell_count}")
+            logger.debug(f"{ts_code}: Sentiment POS={sentiment_pos}, NEG={sentiment_neg}")
+            logger.debug(f"{ts_code}: Report types - Depth:{depth_reports}, Research:{research_reports}, "
+                        f"Commentary:{commentary_reports}, General:{general_reports}, Other:{other_reports}")
+            logger.debug(f"{ts_code}: Avg weight: {avg_report_weight:.2f}")
 
             # Determine data source based on sentiment
             if sentiment_pos > sentiment_neg:
                 # Use bullish data (BUY + HOLD)
                 sentiment_df = df[df['rating_category'].isin(['BUY', 'HOLD'])]
                 sentiment_source = 'bullish'
-            else:
+            elif sentiment_neg > sentiment_pos:
                 # Use bearish data (NEUTRAL + SELL)
                 sentiment_df = df[df['rating_category'].isin(['NEUTRAL', 'SELL'])]
                 sentiment_source = 'bearish'
+            else:
+                # Tie - use all data
+                sentiment_df = df
+                sentiment_source = 'neutral'
+
+            logger.debug(f"{ts_code}: Using {sentiment_source} data with {len(sentiment_df)} reports")
 
             # Aggregate forecasts
             forecasts = aggregate_forecasts(sentiment_df, sentiment_source)
@@ -374,7 +638,6 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 'ts_code': ts_code,
                 'eval_date': eval_date,
                 'report_period': min_quarter if min_quarter != 'ALL' else eval_date[:4],
-                'prediction_type': prediction_type,
                 'total_reports': total_reports,
                 'sentiment_pos': sentiment_pos,
                 'sentiment_neg': sentiment_neg,
@@ -382,13 +645,105 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 'hold_count': hold_count,
                 'neutral_count': neutral_count,
                 'sell_count': sell_count,
+                'depth_reports': depth_reports,
+                'research_reports': research_reports,
+                'commentary_reports': commentary_reports,
+                'general_reports': general_reports,
+                'other_reports': other_reports,
+                'avg_report_weight': avg_report_weight,
+                # 当前周期预测数据
+                'eps': forecasts.get('eps'),
+                'pe': forecasts.get('pe'),
+                'rd': forecasts.get('rd'),
+                'roe': forecasts.get('roe'),
+                'ev_ebitda': forecasts.get('ev_ebitda'),
+                'max_price': forecasts.get('max_price'),
+                'min_price': forecasts.get('min_price'),
+                # 下一年预测数据（暂时为空，后续函数会填充）
+                'next_year_eps': None,
+                'next_year_pe': None,
+                'next_year_roe': None,
+                'next_year_ev_ebitda': None,
+                'next_year_reports': 0,
+                'next_year_avg_weight': 0.0,
                 'data_source': 'brokerage_consensus',
-                'last_updated': datetime.datetime.now(),
-                **forecasts
+                'last_updated': datetime.datetime.now()
             }
 
     except Exception as e:
-        print(f"Error getting brokerage consensus for {ts_code}: {e}")
+        logger.error(f"Error getting brokerage consensus for {ts_code}: {e}")
+        return None
+
+
+def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str) -> Optional[Dict[str, Any]]:
+    """
+    Get next year brokerage consensus for a specific stock
+
+    Args:
+        engine: SQLAlchemy engine
+        ts_code: Stock code
+        eval_date: Evaluation date
+        next_year: Next year (e.g., '2025')
+
+    Returns:
+        Dictionary with next year consensus data or None if no data
+    """
+    try:
+        with engine.begin() as conn:
+            # Get brokerage reports within date window
+            start_date, end_date = get_date_window(eval_date)
+
+            # Get reports that predict the next year
+            query = text("""
+                SELECT * FROM ts_a_stock_brokerage_report
+                WHERE ts_code = :ts_code
+                AND report_date BETWEEN :start_date AND :end_date
+                AND report_date >= :max_age_date
+                AND quarter IS NOT NULL
+                AND rating IS NOT NULL
+                AND report_type IS NOT NULL
+                AND quarter LIKE :next_year_pattern
+            """)
+
+            df = pd.read_sql(query, conn, params={
+                'ts_code': ts_code,
+                'start_date': start_date,
+                'end_date': end_date,
+                'max_age_date': (datetime.datetime.strptime(eval_date, "%Y%m%d") -
+                               datetime.timedelta(days=365)).strftime("%Y%m%d"),
+                'next_year_pattern': f"{next_year}Q%"
+            })
+
+            if df.empty:
+                logger.debug(f"No next year reports found for {ts_code} in {next_year}")
+                return None
+
+            logger.debug(f"Found {len(df)} next year reports for {ts_code}")
+
+            # Add weights for next year reports (情感指标对下一年预测不适用)
+            df['report_weight'] = df['report_type'].apply(get_report_weight)
+
+            total_reports = len(df)
+            avg_report_weight = df['report_weight'].mean() if not df.empty else 0.0
+
+            # 对于下一年预测，使用所有数据（不区分情感）
+            sentiment_df = df
+            sentiment_source = 'next_year'
+
+            # Aggregate forecasts for next year (focus on key metrics)
+            next_year_forecasts = aggregate_forecasts(sentiment_df, sentiment_source)
+
+            return {
+                'total_reports': total_reports,
+                'avg_report_weight': avg_report_weight,
+                'eps': next_year_forecasts.get('eps'),
+                'pe': next_year_forecasts.get('pe'),
+                'roe': next_year_forecasts.get('roe'),
+                'ev_ebitda': next_year_forecasts.get('ev_ebitda')
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting next year consensus for {ts_code}: {e}")
         return None
 
 
@@ -431,7 +786,6 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 'ts_code': ts_code,
                 'eval_date': eval_date,
                 'report_period': report_period,
-                'prediction_type': 'current_period',
                 'total_reports': 0,
                 'sentiment_pos': 0,
                 'sentiment_neg': 0,
@@ -439,6 +793,13 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 'hold_count': 0,
                 'neutral_count': 0,
                 'sell_count': 0,
+                'depth_reports': 0,
+                'research_reports': 0,
+                'commentary_reports': 0,
+                'general_reports': 0,
+                'other_reports': 0,
+                'avg_report_weight': 0.0,
+                # 当前周期预测数据
                 'eps': row.get('eps'),
                 'pe': None,  # Annual report doesn't have PE
                 'rd': row.get('rd_exp'),
@@ -446,18 +807,25 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 'ev_ebitda': None,
                 'max_price': None,
                 'min_price': None,
+                # 下一年预测数据
+                'next_year_eps': None,
+                'next_year_pe': None,
+                'next_year_roe': None,
+                'next_year_ev_ebitda': None,
+                'next_year_reports': 0,
+                'next_year_avg_weight': 0.0,
                 'data_source': 'annual_report',
                 'last_updated': datetime.datetime.now()
             }
 
     except Exception as e:
-        print(f"Error getting annual report data for {ts_code}: {e}")
+        logger.error(f"Error getting annual report data for {ts_code}: {e}")
         return None
 
 
-def process_stock_consensus(engine, ts_code: str, eval_date: str) -> List[Dict[str, Any]]:
+def process_stock_consensus(engine, ts_code: str, eval_date: str) -> Optional[Dict[str, Any]]:
     """
-    Process consensus data for a single stock
+    Process consensus data for a single stock with enhanced fiscal period handling
 
     Args:
         engine: SQLAlchemy engine
@@ -465,42 +833,59 @@ def process_stock_consensus(engine, ts_code: str, eval_date: str) -> List[Dict[s
         eval_date: Evaluation date
 
     Returns:
-        List of consensus records
+        Dictionary with combined current and next year consensus data or None
     """
-    results = []
-    current_quarter, current_year, next_year = get_quarter_info(eval_date)
+    fiscal_info = get_fiscal_period_info(eval_date)
 
-    print(f"Processing {ts_code} for {eval_date}")
+    logger.info(f"Processing {ts_code} for {eval_date} (fiscal year: {fiscal_info['current_fiscal_year']})")
 
-    # 1. Current period consensus (from brokerage reports)
-    current_quarter_min = f"{current_year}Q4"
+    # 1. Get current period consensus (from brokerage reports)
     current_consensus = get_brokerage_consensus(
-        engine, ts_code, eval_date, current_quarter_min, 'current_period'
+        engine, ts_code, eval_date, fiscal_info['current_fiscal_year']
     )
 
-    if current_consensus:
-        results.append(current_consensus)
-    else:
-        # Try to get from annual report
-        annual_data = get_annual_report_data(engine, ts_code, eval_date, current_year)
+    if not current_consensus:
+        # Try to get from annual report if we have fiscal year data
+        annual_data = get_annual_report_data(engine, ts_code, eval_date, fiscal_info['current_fiscal_period'])
         if annual_data:
-            results.append(annual_data)
+            current_consensus = annual_data
+            logger.info(f"{ts_code}: Using annual report data for current period")
+        else:
+            logger.warning(f"{ts_code}: No data found for current period")
+            return None
 
-    # 2. Next year consensus
-    next_year_quarter_min = f"{next_year}Q1"
-    next_year_consensus = get_brokerage_consensus(
-        engine, ts_code, eval_date, next_year_quarter_min, 'next_year'
+    # 2. Get next year consensus
+    next_year_data = get_next_year_consensus(
+        engine, ts_code, eval_date, fiscal_info['next_fiscal_year']
     )
 
-    if next_year_consensus:
-        results.append(next_year_consensus)
+    if next_year_data:
+        logger.info(f"{ts_code}: Found {next_year_data['total_reports']} reports for next year")
+    else:
+        logger.debug(f"{ts_code}: No next year data found")
 
-    return results
+    # 3. Combine current and next year data into single record
+    combined_result = current_consensus.copy()
+
+    if next_year_data:
+        combined_result.update({
+            'next_year_eps': next_year_data['eps'],
+            'next_year_pe': next_year_data['pe'],
+            'next_year_roe': next_year_data['roe'],
+            'next_year_ev_ebitda': next_year_data['ev_ebitda'],
+            'next_year_reports': next_year_data['total_reports'],
+            'next_year_avg_weight': next_year_data['avg_report_weight']
+        })
+
+    logger.info(f"{ts_code}: Processed consensus with {combined_result['total_reports']} current + "
+               f"{combined_result.get('next_year_reports', 0)} next year reports")
+
+    return combined_result
 
 
 def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     """
-    Upsert consensus data in batches
+    Upsert consensus data in batches with optimized performance
 
     Args:
         engine: SQLAlchemy engine
@@ -514,132 +899,292 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
         return 0
 
     total = 0
-    from sqlalchemy import Table, MetaData
     meta = MetaData()
     table = Table(TABLE_NAME, meta, autoload_with=engine)
 
+    # Prepare data for bulk operations
     rows = df.to_dict(orient="records")
+
     with engine.begin() as conn:
         for i in range(0, len(rows), chunksize):
             batch = rows[i:i+chunksize]
+
+            # Use bulk insert with on duplicate key update
             stmt = mysql_insert(table).values(batch)
             update_map = {
                 c: getattr(stmt.inserted, c)
                 for c in ALL_COLUMNS
-                if c not in ("ts_code", "eval_date", "report_period", "prediction_type")
+                if c not in ("ts_code", "eval_date", "report_period")
             }
             ondup = stmt.on_duplicate_key_update(**update_map)
-            result = conn.execute(ondup)
-            total += result.rowcount or 0
+
+            try:
+                result = conn.execute(ondup)
+                batch_count = result.rowcount or 0
+                total += batch_count
+                logger.debug(f"Upserted batch {i//chunksize + 1}: {batch_count} rows")
+            except Exception as e:
+                logger.error(f"Error upserting batch {i//chunksize + 1}: {e}")
+                # Continue with next batch rather than failing completely
+                continue
 
     return total
 
 
 def get_stocks_list(engine, stocks: Optional[List[str]] = None) -> List[str]:
     """
-    Get list of stocks to process
+    Get list of active stocks to process from ts_a_stock_basic table
 
     Args:
         engine: SQLAlchemy engine
         stocks: Optional list of specific stocks
 
     Returns:
-        List of stock codes
+        List of active stock codes
     """
     if stocks:
         return stocks
 
     try:
         with engine.begin() as conn:
-            query = text("SELECT DISTINCT ts_code FROM ts_a_stock_brokerage_report ORDER BY ts_code")
-            result = conn.execute(query)
-            return [row[0] for row in result.fetchall()]
+            # Query active stocks from ts_a_stock_basic table
+            # list_status = 'L' means listed, and delist_date is null or in the future
+            query = text("""
+                SELECT ts_code FROM ts_a_stock_basic
+                WHERE list_status = 'L'
+                AND (delist_date IS NULL OR delist_date = '' OR delist_date > :current_date)
+                ORDER BY ts_code
+            """)
+
+            current_date = datetime.datetime.now().strftime("%Y%m%d")
+            result = conn.execute(query, {'current_date': current_date})
+            stock_codes = [row[0] for row in result.fetchall()]
+
+            logger.info(f"Found {len(stock_codes)} active stocks in ts_a_stock_basic")
+            return stock_codes
+
     except Exception as e:
-        print(f"Error getting stocks list: {e}")
-        return []
+        logger.error(f"Error getting stocks list from ts_a_stock_basic: {e}")
+        # Fallback to brokerage report table if basic table query fails
+        try:
+            logger.info("Falling back to ts_a_stock_brokerage_report for stock list")
+            with engine.begin() as conn:
+                query = text("SELECT DISTINCT ts_code FROM ts_a_stock_brokerage_report ORDER BY ts_code")
+                result = conn.execute(query)
+                return [row[0] for row in result.fetchall()]
+        except Exception as e2:
+            logger.error(f"Fallback query also failed: {e2}")
+            return []
 
 
 def evaluate_brokerage_report(
-    mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
-    eval_date: str = None,
+    mysql_url: str = None,
+    start_date: str = None,
+    end_date: str = None,
     stocks: Optional[List[str]] = None,
     force_update: bool = False,
-    batch_size: int = 50
+    batch_size: int = 50,
+    max_workers: int = 4,
+    dry_run: bool = False
 ) -> None:
     """
-    Main function to evaluate brokerage reports and generate consensus
+    Main function to evaluate brokerage reports and generate consensus for date range
 
     Args:
-        mysql_url: MySQL connection URL
-        eval_date: Evaluation date in YYYYMMDD format (default: today)
+        mysql_url: MySQL connection URL (default: from env)
+        start_date: Start date in YYYYMMDD format (default: today)
+        end_date: End date in YYYYMMDD format (default: today)
         stocks: Optional list of specific stocks to process
         force_update: Force update existing records
         batch_size: Number of stocks to process in each batch
+        max_workers: Maximum number of parallel workers
+        dry_run: If True, only show what would be processed without writing to DB
     """
-    if not eval_date:
-        eval_date = datetime.datetime.now().strftime("%Y%m%d")
+    # Parameter validation and setup
+    if mysql_url is None:
+        mysql_url = os.environ.get("MYSQL_URL", "mysql+pymysql://root:@127.0.0.1:3306/investment_data")
 
-    print("=== Tushare Brokerage Report Consensus Evaluation ===")
-    print(f"Evaluation Date: {eval_date}")
-    print(f"MySQL URL: {mysql_url}")
-    print(f"Force Update: {force_update}")
+    # Set default dates
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    if not start_date:
+        start_date = today
+    if not end_date:
+        end_date = today
 
-    engine = create_engine(mysql_url, pool_recycle=3600)
-
-    # Create table if not exists
-    with engine.begin() as conn:
-        conn.execute(text(CREATE_TABLE_DDL))
-
-    # Get stocks to process
-    stocks_list = get_stocks_list(engine, stocks)
-    if not stocks_list:
-        print("No stocks found to process")
+    # Validate date formats
+    try:
+        start_dt = datetime.datetime.strptime(start_date, "%Y%m%d")
+        end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
+    except ValueError as e:
+        logger.error(f"Invalid date format. Expected YYYYMMDD format: {e}")
         return
 
-    print(f"Processing {len(stocks_list)} stocks...")
+    # Ensure start_date <= end_date
+    if start_dt > end_dt:
+        logger.error(f"start_date ({start_date}) cannot be after end_date ({end_date})")
+        return
+
+    # Get trading calendar for the date range
+    logger.info("Fetching trading calendar...")
+    trade_date_df = get_trade_cal(start_date, end_date)
+
+    if trade_date_df.empty:
+        logger.error("Failed to get trading calendar, falling back to all dates")
+        # Fallback: Generate list of all dates
+        date_list = []
+        current_date = start_dt
+        while current_date <= end_dt:
+            date_list.append(current_date.strftime("%Y%m%d"))
+            current_date += datetime.timedelta(days=1)
+    else:
+        # Sort trading dates from earliest to latest
+        trade_date_df = trade_date_df.sort_values("cal_date")
+        date_list = trade_date_df["cal_date"].tolist()
+
+        # Filter dates within our range (in case API returned extra dates)
+        date_list = [date for date in date_list if start_date <= date <= end_date]
+
+        logger.info(f"Found {len(date_list)} trading days in the date range")
+
+    logger.info("=== Tushare Brokerage Report Consensus Evaluation ===")
+    logger.info(f"Date Range: {start_date} to {end_date}")
+    if trade_date_df.empty:
+        logger.info(f"Processing: {len(date_list)} calendar days (trading calendar unavailable)")
+    else:
+        logger.info(f"Processing: {len(date_list)} trading days")
+    logger.info(f"MySQL URL: {mysql_url.replace('mysql+pymysql://', 'mysql+pymysql://[HIDDEN]@')}")
+    logger.info(f"Force Update: {force_update}")
+    logger.info(f"Batch Size: {batch_size}")
+    logger.info(f"Max Workers: {max_workers}")
+    logger.info(f"Dry Run: {dry_run}")
+
+    try:
+        engine = create_engine(mysql_url, pool_recycle=3600, pool_pre_ping=True)
+    except Exception as e:
+        logger.error(f"Failed to create database engine: {e}")
+        return
+
+    # Create table if not exists
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(CREATE_TABLE_DDL))
+        logger.info("Database table verified/created successfully")
+    except Exception as e:
+        logger.error(f"Failed to create/verify database table: {e}")
+        return
+
+    # Get stocks to process
+    try:
+        stocks_list = get_stocks_list(engine, stocks)
+        if not stocks_list:
+            logger.warning("No stocks found to process")
+            return
+    except Exception as e:
+        logger.error(f"Failed to get stocks list: {e}")
+        return
+
+    logger.info(f"Processing {len(stocks_list)} stocks...")
+
+    if dry_run:
+        logger.info("DRY RUN MODE - No data will be written to database")
+        if date_list:
+            sample_date = date_list[0]
+            fiscal_info = get_fiscal_period_info(sample_date)
+            logger.info(f"Sample Date: {sample_date}")
+            logger.info(f"Sample Fiscal Info: Year {fiscal_info['current_fiscal_year']}, Period {fiscal_info['current_fiscal_period']}")
+            logger.info(f"Total dates to process: {len(date_list)}")
+            if len(date_list) <= 10:
+                logger.info(f"Dates: {', '.join(date_list)}")
+            else:
+                logger.info(f"First 5 dates: {', '.join(date_list[:5])}")
+                logger.info(f"Last 5 dates: {', '.join(date_list[-5:])}")
+        else:
+            logger.info("No dates to process")
+        return
 
     all_results = []
-    processed_count = 0
+    total_processed_count = 0
+    total_error_count = 0
 
-    # Process stocks in batches
-    for i in range(0, len(stocks_list), batch_size):
-        batch_stocks = stocks_list[i:i+batch_size]
-        batch_results = []
+    # Process each date in the range
+    for current_date in date_list:
+        logger.info(f"--- Processing date: {current_date} ---")
 
-        for ts_code in batch_stocks:
-            try:
-                stock_results = process_stock_consensus(engine, ts_code, eval_date)
-                batch_results.extend(stock_results)
-                processed_count += 1
+        date_results = []
+        processed_count = 0
+        error_count = 0
 
-                if processed_count % 10 == 0:
-                    print(f"Processed {processed_count}/{len(stocks_list)} stocks")
+        # Process stocks with parallel execution for this date
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks for this date
+            future_to_stock = {
+                executor.submit(process_stock_consensus, engine, ts_code, current_date): ts_code
+                for ts_code in stocks_list
+            }
 
-            except Exception as e:
-                print(f"Error processing {ts_code}: {e}")
-                continue
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_stock):
+                ts_code = future_to_stock[future]
+                try:
+                    stock_result = future.result()
+                    if stock_result:
+                        # Add current date to the result
+                        stock_result['eval_date'] = current_date
+                        date_results.append(stock_result)
+                    processed_count += 1
 
-        # Save batch results
-        if batch_results:
-            df = pd.DataFrame(batch_results)
-            if not df.empty:
-                # Ensure data types
-                df['last_updated'] = pd.to_datetime(df['last_updated'])
-                df = df.replace({np.nan: None})
+                    if processed_count % 50 == 0:
+                        logger.info(f"Processed {processed_count}/{len(stocks_list)} stocks for {current_date}")
 
-                written = _upsert_batch(engine, df)
-                all_results.extend(batch_results)
-                print(f"Batch {i//batch_size + 1}: upserted {written} records")
+                except Exception as e:
+                    logger.error(f"Error processing {ts_code} for {current_date}: {e}")
+                    error_count += 1
+                    continue
 
-    print("
-=== Evaluation Complete ===")
-    print(f"Total records processed: {len(all_results)}")
-    print(f"Successfully processed {processed_count} stocks")
+        # Save results for this date in batches
+        if date_results:
+            logger.info(f"Collected {len(date_results)} consensus records for {current_date}, saving to database...")
+
+            df = pd.DataFrame(date_results)
+
+            # Data validation and cleaning
+            df['last_updated'] = pd.to_datetime(df['last_updated'])
+            df = df.replace({np.nan: None})
+
+            # Ensure all required columns exist
+            for col in ALL_COLUMNS:
+                if col not in df.columns:
+                    df[col] = None
+
+            df = df[ALL_COLUMNS]
+
+            written = _upsert_batch(engine, df, chunksize=batch_size)
+            logger.info(f"Successfully upserted {written} records for {current_date}")
+            all_results.extend(date_results)
+        else:
+            logger.warning(f"No consensus data generated for {current_date}")
+
+        total_processed_count += processed_count
+        total_error_count += error_count
+
+        logger.info(f"Completed {current_date}: {processed_count} stocks processed, {error_count} errors")
+
+    logger.info("=== Evaluation Complete ===")
+    logger.info(f"Total records processed: {len(all_results)}")
+    logger.info(f"Date range: {start_date} to {end_date}")
+    if trade_date_df.empty:
+        logger.info(f"Calendar days processed: {len(date_list)}")
+    else:
+        logger.info(f"Trading days processed: {len(date_list)}")
+    logger.info(f"Average stocks per day: {total_processed_count / len(date_list) if date_list else 0:.1f}")
+    logger.info(f"Total errors encountered: {total_error_count} stocks")
 
 
 if __name__ == "__main__":
     # Example usage:
-    # python evaluate_brokerage_report.py --eval-date 20250101
-    # python evaluate_brokerage_report.py --eval-date 20250101 --stocks "000001.SZ,000002.SZ"
-    # python evaluate_brokerage_report.py --eval-date 20250101 --force-update
+    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105
+    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --stocks "000001.SZ,000002.SZ"
+    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105 --max-workers 8
+    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --dry-run
+    # python evaluate_brokerage_report.py --mysql-url "mysql+pymysql://user:pass@host:port/db"
     fire.Fire(evaluate_brokerage_report)
