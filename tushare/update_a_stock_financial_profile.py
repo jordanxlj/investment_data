@@ -556,6 +556,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
 
         print(f"Available data sources for period {report_period}: {', '.join(available_sources.keys())}")
 
+        # Debug: Print record counts for each data source
+        for name, df in available_sources.items():
+            print(f"  {name}: {len(df)} records")
+            if len(df) > 0:
+                print(f"    Sample ts_code: {df['ts_code'].iloc[0] if 'ts_code' in df.columns else 'N/A'}")
+                print(f"    Sample ann_date: {df['ann_date'].iloc[0] if 'ann_date' in df.columns else 'N/A'}")
+                print(f"    Sample end_date: {df['end_date'].iloc[0] if 'end_date' in df.columns else 'N/A'}")
+
         # Merge strategy: connect by data source grouping
         merged_df = None
 
@@ -573,12 +581,18 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
             try:
                 # Start from the first data source and gradually merge other data sources
                 merged_df = financial_statements[0]
+                print(f"Initial merge base: {len(merged_df)} records from {list(available_sources.keys())[0]}")
+
                 for i, df in enumerate(financial_statements[1:], 1):
+                    before_count = len(merged_df)
                     merged_df = merged_df.merge(
                         df,
                         on=API_COMMON_FIELDS,
                         how='outer'
                     )
+                    after_count = len(merged_df)
+                    print(f"  Merge step {i}: {before_count} -> {after_count} records (added {list(available_sources.keys())[i]})")
+
                 print(f"Successfully merged {len(financial_statements)} financial statements: {len(merged_df)} records")
             except Exception as e:
                 print(f"Error merging financial statements: {e}")
@@ -588,11 +602,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         # Financial indicators data doesn't have 'report_type' field, use simplified join keys
         if merged_df is not None and 'financial_indicators' in available_sources:
             try:
+                before_count = len(merged_df)
                 merged_df = merged_df.merge(
                     available_sources['financial_indicators'],
                     on=['ts_code', 'ann_date', 'end_date'],
                     how='left'  # Left join to ensure financial data completeness
                 )
+                after_count = len(merged_df)
+                print(f"Financial indicators merge: {before_count} -> {after_count} records")
                 print(f"Successfully merged financial indicators: {len(merged_df)} records total")
             except Exception as e:
                 print(f"Error merging financial indicators: {e}")
@@ -622,11 +639,22 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
 
             # Remove duplicates based on primary key (ts_code, report_period)
             initial_count = len(merged_df)
+
+            # Debug: Check for duplicates before removal
+            duplicate_check = merged_df.groupby(['ts_code', 'report_period']).size()
+            duplicates_found = duplicate_check[duplicate_check > 1]
+            if len(duplicates_found) > 0:
+                print(f"Found {len(duplicates_found)} duplicate groups before removal:")
+                for (ts_code, report_period), count in duplicates_found.items():
+                    print(f"  {ts_code} {report_period}: {count} duplicates")
+
             merged_df = merged_df.drop_duplicates(subset=['ts_code', 'report_period'], keep='first')
             final_count = len(merged_df)
 
             if initial_count != final_count:
                 print(f"Removed {initial_count - final_count} duplicate records, kept {final_count} unique records")
+            else:
+                print(f"No duplicates found, kept {final_count} records")
 
             print(f"Successfully processed {len(merged_df)} financial records for period {report_period}")
             return merged_df
