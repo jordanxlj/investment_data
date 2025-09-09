@@ -515,9 +515,18 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
 
     # Add weights to the dataframe
     df = df.copy()
-    df['report_weight'] = df['report_type'].apply(get_report_weight)
-    logger.debug(f"Added report weights: min={df['report_weight'].min():.1f}, max={df['report_weight'].max():.1f}, "
-                f"avg={df['report_weight'].mean():.1f}")
+
+    # Check if report_weight column already exists (avoid duplicate processing)
+    if 'report_weight' not in df.columns:
+        df['report_weight'] = df['report_type'].apply(get_report_weight)
+        logger.debug(f"Added report weights: min={df['report_weight'].min():.1f}, max={df['report_weight'].max():.1f}, "
+                    f"avg={df['report_weight'].mean():.1f}")
+    else:
+        logger.debug(f"Using existing report weights: min={df['report_weight'].min():.1f}, max={df['report_weight'].max():.1f}, "
+                    f"avg={df['report_weight'].mean():.1f}")
+        logger.debug(f"DataFrame columns: {list(df.columns)}")
+        logger.debug(f"Sample report types: {df['report_type'].head(3).tolist()}")
+        logger.debug(f"Sample weights: {df['report_weight'].head(3).tolist()}")
 
     forecast_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price']
 
