@@ -434,12 +434,6 @@ INDICATOR_COLUMNS = [
 # Note: API returns 'end_date' but database stores as 'ann_date'
 API_COMMON_FIELDS = ['ts_code', 'ann_date', 'end_date', 'report_type']
 
-# Database column mapping (API field -> DB column)
-API_TO_DB_MAPPING = {
-    'end_date': 'ann_date',  # API end_date maps to DB ann_date
-    'ann_date': 'ann_date'   # API ann_date stays as ann_date
-}
-
 # Financial indicators base fields (does not include report_type)
 INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']  # Keep end_date for API call, will be mapped later
 
@@ -513,6 +507,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         income_fields = API_COMMON_FIELDS + INCOME_COLUMNS
         income_df = call_tushare_api_with_retry(
             pro.income_vip,
+            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(income_fields)
         )
@@ -521,6 +516,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         balance_fields = API_COMMON_FIELDS + BALANCE_COLUMNS
         balance_df = call_tushare_api_with_retry(
             pro.balancesheet_vip,
+            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(balance_fields)
         )
@@ -529,6 +525,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         cashflow_fields = API_COMMON_FIELDS + CASHFLOW_COLUMNS
         cashflow_df = call_tushare_api_with_retry(
             pro.cashflow_vip,
+            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(cashflow_fields)
         )
@@ -537,6 +534,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
         indicator_df = call_tushare_api_with_retry(
             pro.fina_indicator_vip,
+            ts_code='000001.SZ',
             period=report_period,
             fields=','.join(indicator_fields)
         )
@@ -609,6 +607,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
             print(f"No usable data after merging for period {report_period}")
             return pd.DataFrame()
 
+        print(f"merged_df: {merged_df}")
         # Add unified fields
         try:
             merged_df['ts_code'] = merged_df['ts_code']
@@ -620,6 +619,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
             # Remove API-specific fields that don't exist in database
             if 'end_date' in merged_df.columns:
                 merged_df = merged_df.drop('end_date', axis=1)
+
+            # Remove duplicates based on primary key (ts_code, report_period)
+            initial_count = len(merged_df)
+            merged_df = merged_df.drop_duplicates(subset=['ts_code', 'report_period'], keep='first')
+            final_count = len(merged_df)
+
+            if initial_count != final_count:
+                print(f"Removed {initial_count - final_count} duplicate records, kept {final_count} unique records")
 
             print(f"Successfully processed {len(merged_df)} financial records for period {report_period}")
             return merged_df
@@ -700,15 +707,25 @@ def _fetch_financial_data(end_date: str, period: str = "annual", limit: int = 1)
 
 
 def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
-    """Batch upsert data to MySQL"""
+    """Batch upsert data to MySQL
+
+    Returns:
+        int: Number of records processed (not necessarily inserted/updated)
+    """
     if df is None or df.empty:
         return 0
-    total = 0
+
+    # Return the actual number of records in the DataFrame, not the SQL result rowcount
+    # This gives a more accurate representation of processed records
+    total_processed = len(df)
+
     from sqlalchemy import Table, MetaData
     meta = MetaData()
     table = Table(TABLE_NAME, meta, autoload_with=engine)
 
     rows = df.to_dict(orient="records")
+    total_affected = 0
+
     with engine.begin() as conn:
         for i in range(0, len(rows), chunksize):
             batch = rows[i:i+chunksize]
@@ -720,8 +737,11 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
             }
             ondup = stmt.on_duplicate_key_update(**update_map)
             result = conn.execute(ondup)
-            total += result.rowcount or 0
-    return total
+            total_affected += result.rowcount or 0
+
+    # Log both metrics for transparency
+    print(f"Processed {total_processed} records, database reported {total_affected} affected rows")
+    return total_processed
 
 
 def update_a_stock_financial_profile(
