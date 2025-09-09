@@ -99,19 +99,25 @@ def get_report_weight(report_type: str) -> float:
         Weight value (1.0 to 5.0)
     """
     if not report_type:
+        logger.debug(f"Report type is empty, using default weight: {DEFAULT_REPORT_WEIGHT}")
         return DEFAULT_REPORT_WEIGHT
 
     report_type_lower = str(report_type).strip().lower()
+    logger.debug(f"Processing report type: '{report_type}' -> '{report_type_lower}'")
 
     # Direct match first
     if report_type in REPORT_TYPE_WEIGHTS:
-        return REPORT_TYPE_WEIGHTS[report_type]
+        weight = REPORT_TYPE_WEIGHTS[report_type]
+        logger.debug(f"Direct match found for '{report_type}': weight = {weight}")
+        return weight
 
     # Partial match
     for key, weight in REPORT_TYPE_WEIGHTS.items():
         if key.lower() in report_type_lower:
+            logger.debug(f"Partial match found for '{report_type}' with key '{key}': weight = {weight}")
             return weight
 
+    logger.debug(f"No match found for '{report_type}', using default weight: {DEFAULT_REPORT_WEIGHT}")
     return DEFAULT_REPORT_WEIGHT
 
 
@@ -126,30 +132,38 @@ def categorize_report_type(report_type: str) -> str:
         Category string ('depth', 'research', 'commentary', 'general', 'other')
     """
     if not report_type:
+        logger.debug("Report type is empty, categorizing as 'other'")
         return 'other'
 
     report_type_lower = str(report_type).strip().lower()
+    logger.debug(f"Categorizing report type: '{report_type}' -> '{report_type_lower}'")
 
     # Check for depth reports
     if any(keyword in report_type_lower for keyword in ['深度', 'depth', 'comprehensive', 'detailed']):
+        logger.debug(f"Categorized '{report_type}' as 'depth'")
         return 'depth'
 
     # Check for research reports
     if any(keyword in report_type_lower for keyword in ['调研', 'research', 'field', 'visit', 'survey']):
+        logger.debug(f"Categorized '{report_type}' as 'research'")
         return 'research'
 
     # Check for commentary reports
     if any(keyword in report_type_lower for keyword in ['点评', 'commentary', 'comment', 'analysis', 'review']):
+        logger.debug(f"Categorized '{report_type}' as 'commentary'")
         return 'commentary'
 
     # Check for general reports
     if any(keyword in report_type_lower for keyword in ['一般', 'general', 'regular', 'standard']):
+        logger.debug(f"Categorized '{report_type}' as 'general'")
         return 'general'
 
     # Check for non-stock specific reports
     if any(keyword in report_type_lower for keyword in ['非各股', 'non-stock', 'industry', 'strategy', 'sector']):
+        logger.debug(f"Categorized '{report_type}' as 'other'")
         return 'other'
 
+    logger.debug(f"No category match for '{report_type}', defaulting to 'other'")
     return 'other'
 
 
@@ -234,15 +248,19 @@ def classify_rating(rating: str) -> str:
         Classified rating category
     """
     if not rating:
+        logger.debug("Rating is empty, defaulting to 'NEUTRAL'")
         return 'NEUTRAL'
 
     rating = str(rating).strip()
+    logger.debug(f"Classifying rating: '{rating}'")
 
     for category, keywords in RATING_MAPPING.items():
         if rating in keywords:
+            logger.debug(f"Rating '{rating}' classified as '{category}'")
             return category
 
     # Default to NEUTRAL for unrecognized ratings
+    logger.debug(f"Rating '{rating}' not found in mapping, defaulting to 'NEUTRAL'")
     return 'NEUTRAL'
 
 
@@ -257,14 +275,19 @@ def get_trade_cal(start_date: str, end_date: str) -> pd.DataFrame:
     Returns:
         DataFrame with trading dates
     """
+    logger.debug(f"Fetching trading calendar from {start_date} to {end_date}")
     try:
         df = pro.trade_cal(exchange='SSE', is_open='1',
                           start_date=start_date,
                           end_date=end_date,
                           fields='cal_date')
+        logger.debug(f"Trading calendar fetched successfully: {len(df)} trading days found")
+        if len(df) > 0:
+            logger.debug(f"First trading date: {df['cal_date'].min()}, Last trading date: {df['cal_date'].max()}")
         return df
     except Exception as e:
         logger.error(f"Error getting trade calendar: {e}")
+        logger.debug("Returning empty DataFrame as fallback")
         return pd.DataFrame()
 
 
@@ -279,6 +302,7 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     Returns:
         Tuple of (start_date, end_date) in YYYYMMDD format
     """
+    logger.debug(f"Calculating date window for eval_date: {eval_date}, window_months: {window_months}")
     eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
     end_dt = eval_dt
     start_dt = eval_dt - datetime.timedelta(days=window_months * 30)  # Approximate months
@@ -286,6 +310,7 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     start_date = start_dt.strftime("%Y%m%d")
     end_date = end_dt.strftime("%Y%m%d")
 
+    logger.debug(f"Date window calculated: {start_date} to {end_date}")
     return start_date, end_date
 
 
@@ -299,9 +324,12 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     Returns:
         Dictionary with fiscal period information
     """
+    logger.debug(f"Getting fiscal period info for eval_date: {eval_date}")
     eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
     year = eval_dt.year
     month = eval_dt.month
+
+    logger.debug(f"Parsed date: year={year}, month={month}")
 
     # Determine current fiscal periods
     if month <= 3:
@@ -311,26 +339,30 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         # For Q1 evaluation, we look at previous year Q4 data
         current_fiscal_year = f"{year - 1}"
         current_fiscal_period = f"{year - 1}1231"  # Previous year end
+        logger.debug("Fiscal period: Q1 - looking at previous year Q4 data")
     elif month <= 6:
         current_quarter = f"{year}Q2"
         current_year = f"{year}"
         next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0331"  # Q1 end
+        logger.debug("Fiscal period: Q2 - looking at Q1 data")
     elif month <= 9:
         current_quarter = f"{year}Q3"
         current_year = f"{year}"
         next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0630"  # H1 end
+        logger.debug("Fiscal period: Q3 - looking at H1 data")
     else:
         current_quarter = f"{year}Q4"
         current_year = f"{year}"
         next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0930"  # Q3 end
+        logger.debug("Fiscal period: Q4 - looking at Q3 data")
 
-    return {
+    fiscal_info = {
         'eval_date': eval_date,
         'eval_datetime': eval_dt,
         'current_quarter': current_quarter,
@@ -341,6 +373,10 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         'next_fiscal_year': f"{year + 1}",
         'next_fiscal_period': f"{year + 1}0331" if month <= 3 else f"{year + 1}1231"
     }
+
+    logger.debug(f"Fiscal info: current_quarter={current_quarter}, current_fiscal_year={current_fiscal_year}, "
+                f"next_year={next_year}")
+    return fiscal_info
 
 
 def get_quarter_info(eval_date: str) -> Tuple[str, str, str]:
@@ -417,6 +453,8 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
     Returns:
         Dictionary with aggregated forecast values
     """
+    logger.debug(f"Aggregating forecasts for {len(df)} reports with sentiment: {sentiment_source}")
+
     if df.empty:
         logger.debug("Empty DataFrame provided for aggregation")
         return {
@@ -427,11 +465,14 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
     # Add weights to the dataframe
     df = df.copy()
     df['report_weight'] = df['report_type'].apply(get_report_weight)
+    logger.debug(f"Added report weights: min={df['report_weight'].min():.1f}, max={df['report_weight'].max():.1f}, "
+                f"avg={df['report_weight'].mean():.1f}")
 
     forecast_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price']
 
     result = {}
     for field in forecast_fields:
+        logger.debug(f"Processing field: {field}")
         if field in df.columns:
             # Get values and weights for valid data points
             field_data = df[[field, 'report_weight']].dropna()
@@ -443,41 +484,49 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
 
             values = field_data[field]
             weights = field_data['report_weight']
+            logger.debug(f"{field}: {len(values)} values before outlier filtering")
 
             # Remove extreme outliers (beyond 3 standard deviations)
             if len(values) > 2:
                 mean_val = values.mean()
                 std_val = values.std()
+                logger.debug(f"{field}: raw mean={mean_val:.2f}, std={std_val:.2f}")
                 if std_val > 0:
                     valid_mask = (values >= mean_val - 3 * std_val) & (values <= mean_val + 3 * std_val)
                     values = values[valid_mask]
                     weights = weights[valid_mask]
+                    logger.debug(f"{field}: {len(values)} values after outlier filtering")
 
             # Remove unrealistic values based on field type
             if field == 'eps':
                 valid_mask = (values >= -50) & (values <= 50)  # EPS between -50 and 50
+                logger.debug(f"{field}: EPS range filter applied")
             elif field in ['pe', 'ev_ebitda']:
                 valid_mask = (values > 0) & (values <= 500)  # Positive, reasonable multiples
+                logger.debug(f"{field}: positive multiples filter applied")
             elif field == 'roe':
                 valid_mask = (values >= -200) & (values <= 200)  # ROE between -200% and 200%
+                logger.debug(f"{field}: ROE range filter applied")
             elif field in ['max_price', 'min_price']:
                 valid_mask = (values > 0) & (values <= 10000)  # Positive, reasonable prices
+                logger.debug(f"{field}: price range filter applied")
             else:
                 valid_mask = pd.Series(True, index=values.index)
 
             values = values[valid_mask]
             weights = weights[valid_mask]
+            logger.debug(f"{field}: {len(values)} values after all filters")
 
             if not values.empty:
                 # Use weighted median for robustness
                 if len(values) == 1:
                     result[field] = float(values.iloc[0])
+                    logger.debug(f"{field}: single value used = {result[field]:.2f}")
                 else:
                     # Calculate weighted median
                     result[field] = float(weighted_median(values.values, weights.values))
-
-                logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}, "
-                           f"{sentiment_source} weighted median = {result[field]:.2f}")
+                    logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}, "
+                               f"{sentiment_source} weighted median = {result[field]:.2f}")
             else:
                 result[field] = None
                 logger.debug(f"{field}: no valid values after filtering")
@@ -485,6 +534,7 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
             result[field] = None
             logger.debug(f"{field}: column not found in DataFrame")
 
+    logger.debug(f"Aggregation completed for {sentiment_source}: {len([v for v in result.values() if v is not None])} fields with values")
     return result
 
 
@@ -540,6 +590,7 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
     Returns:
         Dictionary with consensus data including current and next year forecasts or None if no data
     """
+    logger.debug(f"Getting brokerage consensus for {ts_code}, eval_date: {eval_date}, min_quarter: {min_quarter}")
     try:
         with engine.begin() as conn:
             # Get brokerage reports within date window
@@ -548,6 +599,8 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
             # Enhanced query with age filtering (reports not older than 1 year)
             max_age_date = (datetime.datetime.strptime(eval_date, "%Y%m%d") -
                            datetime.timedelta(days=365)).strftime("%Y%m%d")
+
+            logger.debug(f"Querying reports for {ts_code} from {start_date} to {end_date}, max age: {max_age_date}")
 
             # Get all brokerage reports first
             query = text("""
@@ -577,16 +630,21 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                     lambda q: compare_quarters(q, min_quarter) >= 0
                 )
                 df = df[df['quarter_comparison']]
+                logger.debug(f"After quarter filtering (>= {min_quarter}): {len(df)} reports remain")
 
             if df.empty:
                 logger.debug(f"No reports after quarter filtering for {ts_code}")
                 return None
 
             logger.debug(f"Found {len(df)} reports for {ts_code} after filtering")
+            logger.debug(f"Report date range: {df['report_date'].min()} to {df['report_date'].max()}")
 
             # Classify ratings and report types
             df['rating_category'] = df['rating'].apply(classify_rating)
             df['report_weight'] = df['report_type'].apply(get_report_weight)
+            df['report_type_category'] = df['report_type'].apply(categorize_report_type)
+
+            logger.debug(f"Classification completed for {len(df)} reports")
 
             # Count ratings
             rating_counts = df['rating_category'].value_counts()
@@ -596,7 +654,6 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
             sell_count = rating_counts.get('SELL', 0)
 
             # Count report types
-            df['report_type_category'] = df['report_type'].apply(categorize_report_type)
             report_type_counts = df['report_type_category'].value_counts()
             depth_reports = report_type_counts.get('depth', 0)
             research_reports = report_type_counts.get('research', 0)
@@ -630,6 +687,7 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 sentiment_source = 'neutral'
 
             logger.debug(f"{ts_code}: Using {sentiment_source} data with {len(sentiment_df)} reports")
+            logger.debug(f"{ts_code}: Sentiment breakdown - POS: {sentiment_pos}, NEG: {sentiment_neg}, TIE: {sentiment_pos == sentiment_neg}")
 
             # Aggregate forecasts
             forecasts = aggregate_forecasts(sentiment_df, sentiment_source)
@@ -760,6 +818,7 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
     Returns:
         Dictionary with annual report data or None
     """
+    logger.debug(f"Getting annual report data for {ts_code}, period: {report_period}, eval_date: {eval_date}")
     try:
         with engine.begin() as conn:
             # Get annual report data from financial profile
@@ -779,9 +838,11 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
             })
 
             if df.empty:
+                logger.debug(f"No annual report found for {ts_code} in period {report_period}")
                 return None
 
             row = df.iloc[0]
+            logger.debug(f"Found annual report for {ts_code}: ann_date={row.get('ann_date')}, period={row.get('period')}")
 
             # Get PE and dividend ratio from fundamental data
             fundamental_query = text("""
@@ -804,6 +865,9 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 if not fundamental_df.empty:
                     pe_value = fundamental_df.iloc[0].get('pe')
                     dv_ratio_value = fundamental_df.iloc[0].get('dv_ratio')
+                    logger.debug(f"Fundamental data for {ts_code}: PE={pe_value}, DV_RATIO={dv_ratio_value}")
+                else:
+                    logger.debug(f"No fundamental data found for {ts_code}")
             except Exception as e:
                 logger.debug(f"Could not get fundamental data for {ts_code}: {e}")
 
@@ -860,17 +924,22 @@ def process_stock_consensus(engine, ts_code: str, eval_date: str) -> Optional[Di
     Returns:
         Dictionary with combined current and next year consensus data or None
     """
+    logger.debug(f"Starting process_stock_consensus for {ts_code} on {eval_date}")
     fiscal_info = get_fiscal_period_info(eval_date)
 
     logger.info(f"Processing {ts_code} for {eval_date} (fiscal year: {fiscal_info['current_fiscal_year']})")
+    logger.debug(f"Fiscal details: current_period={fiscal_info['current_fiscal_period']}, "
+                f"next_year={fiscal_info['next_fiscal_year']}")
 
     # 1. Get current period consensus (from brokerage reports)
+    logger.debug(f"Step 1: Getting current period consensus for {ts_code}")
     current_consensus = get_brokerage_consensus(
         engine, ts_code, eval_date, fiscal_info['current_fiscal_year']
     )
 
     if not current_consensus:
         # Try to get from annual report if we have fiscal year data
+        logger.debug(f"No brokerage consensus found for {ts_code}, trying annual report data")
         annual_data = get_annual_report_data(engine, ts_code, eval_date, fiscal_info['current_fiscal_period'])
         if annual_data:
             current_consensus = annual_data
@@ -880,6 +949,7 @@ def process_stock_consensus(engine, ts_code: str, eval_date: str) -> Optional[Di
             return None
 
     # 2. Get next year consensus
+    logger.debug(f"Step 2: Getting next year consensus for {ts_code}")
     next_year_data = get_next_year_consensus(
         engine, ts_code, eval_date, fiscal_info['next_fiscal_year']
     )
@@ -890,6 +960,7 @@ def process_stock_consensus(engine, ts_code: str, eval_date: str) -> Optional[Di
         logger.debug(f"{ts_code}: No next year data found")
 
     # 3. Combine current and next year data into single record
+    logger.debug(f"Step 3: Combining current and next year data for {ts_code}")
     combined_result = current_consensus.copy()
 
     if next_year_data:
@@ -901,6 +972,7 @@ def process_stock_consensus(engine, ts_code: str, eval_date: str) -> Optional[Di
             'next_year_reports': next_year_data['total_reports'],
             'next_year_avg_weight': next_year_data['avg_report_weight']
         })
+        logger.debug(f"{ts_code}: Added next year data to combined result")
 
     logger.info(f"{ts_code}: Processed consensus with {combined_result['total_reports']} current + "
                f"{combined_result.get('next_year_reports', 0)} next year reports")
@@ -968,8 +1040,10 @@ def get_stocks_list(engine, stocks: Optional[List[str]] = None) -> List[str]:
         List of active stock codes
     """
     if stocks:
+        logger.debug(f"Using provided stock list: {len(stocks)} stocks")
         return stocks
 
+    logger.debug("Getting active stocks from database")
     try:
         with engine.begin() as conn:
             # Query active stocks from ts_a_stock_basic table
@@ -982,10 +1056,13 @@ def get_stocks_list(engine, stocks: Optional[List[str]] = None) -> List[str]:
             """)
 
             current_date = datetime.datetime.now().strftime("%Y%m%d")
+            logger.debug(f"Querying active stocks with current_date={current_date}")
             result = conn.execute(query, {'current_date': current_date})
             stock_codes = [row[0] for row in result.fetchall()]
 
             logger.info(f"Found {len(stock_codes)} active stocks in ts_a_stock_basic")
+            if len(stock_codes) > 0:
+                logger.debug(f"Sample stocks: {stock_codes[:5]}...")
             return stock_codes
 
     except Exception as e:
@@ -996,7 +1073,9 @@ def get_stocks_list(engine, stocks: Optional[List[str]] = None) -> List[str]:
             with engine.begin() as conn:
                 query = text("SELECT DISTINCT ts_code FROM ts_a_stock_brokerage_report ORDER BY ts_code")
                 result = conn.execute(query)
-                return [row[0] for row in result.fetchall()]
+                fallback_stocks = [row[0] for row in result.fetchall()]
+                logger.info(f"Fallback query found {len(fallback_stocks)} stocks")
+                return fallback_stocks
         except Exception as e2:
             logger.error(f"Fallback query also failed: {e2}")
             return []
@@ -1055,21 +1134,27 @@ def evaluate_brokerage_report(
 
     if trade_date_df.empty:
         logger.error("Failed to get trading calendar, falling back to all dates")
+        logger.debug("Generating calendar dates from start_date to end_date")
         # Fallback: Generate list of all dates
         date_list = []
         current_date = start_dt
         while current_date <= end_dt:
             date_list.append(current_date.strftime("%Y%m%d"))
             current_date += datetime.timedelta(days=1)
+        logger.debug(f"Generated {len(date_list)} calendar days")
     else:
         # Sort trading dates from earliest to latest
         trade_date_df = trade_date_df.sort_values("cal_date")
         date_list = trade_date_df["cal_date"].tolist()
 
         # Filter dates within our range (in case API returned extra dates)
+        original_count = len(date_list)
         date_list = [date for date in date_list if start_date <= date <= end_date]
+        filtered_count = len(date_list)
 
         logger.info(f"Found {len(date_list)} trading days in the date range")
+        if original_count != filtered_count:
+            logger.debug(f"Filtered trading dates: {original_count} -> {filtered_count}")
 
     logger.info("=== Tushare Brokerage Report Consensus Evaluation ===")
     logger.info(f"Date Range: {start_date} to {end_date}")
@@ -1140,12 +1225,15 @@ def evaluate_brokerage_report(
         error_count = 0
 
         # Process stocks with parallel execution for this date
+        logger.debug(f"Starting parallel processing for {current_date} with {max_workers} workers")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks for this date
             future_to_stock = {
                 executor.submit(process_stock_consensus, engine, ts_code, current_date): ts_code
                 for ts_code in stocks_list
             }
+
+            logger.debug(f"Submitted {len(future_to_stock)} tasks for {current_date}")
 
             # Collect results as they complete
             for future in concurrent.futures.as_completed(future_to_stock):
@@ -1156,6 +1244,9 @@ def evaluate_brokerage_report(
                         # Add current date to the result
                         stock_result['eval_date'] = current_date
                         date_results.append(stock_result)
+                        logger.debug(f"Successfully processed {ts_code} for {current_date}")
+                    else:
+                        logger.debug(f"No data generated for {ts_code} on {current_date}")
                     processed_count += 1
 
                     if processed_count % 50 == 0:
@@ -1163,6 +1254,7 @@ def evaluate_brokerage_report(
 
                 except Exception as e:
                     logger.error(f"Error processing {ts_code} for {current_date}: {e}")
+                    logger.debug(f"Exception details for {ts_code}: {type(e).__name__}")
                     error_count += 1
                     continue
 
