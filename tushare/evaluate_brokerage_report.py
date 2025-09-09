@@ -623,6 +623,7 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 'end_date': end_date,
                 'max_age_date': max_age_date
             })
+            logger.debug(f"Query: {query}")
 
             if df.empty:
                 logger.debug(f"No brokerage reports found for {ts_code} in date range")
@@ -1051,8 +1052,40 @@ def get_stocks_list(engine, stocks: Optional[List[str]] = None) -> List[str]:
     Returns:
         List of active stock codes
     """
+    logger.debug(f"get_stocks_list called with stocks: {stocks} (type: {type(stocks)})")
+
     if stocks:
-        logger.debug(f"Using provided stock list: {len(stocks)} stocks")
+        logger.debug(f"Raw stocks parameter: {stocks}")
+
+        # Handle various parsing scenarios from fire library
+        if isinstance(stocks, str):
+            logger.warning(f"stocks parameter is a string instead of list: '{stocks}'")
+            # If it's a comma-separated string, split it
+            if ',' in stocks:
+                stocks = [s.strip() for s in stocks.split(',')]
+                logger.debug(f"Split string into list: {stocks}")
+            else:
+                stocks = [stocks]
+                logger.debug(f"Converted string to single-item list: {stocks}")
+        elif isinstance(stocks, list):
+            # Check if it's a list of single characters that should be joined
+            if len(stocks) > 1 and all(len(s) == 1 for s in stocks):
+                # Check if it looks like a stock code (contains digits and ends with .SZ or .SH)
+                joined = ''.join(stocks)
+                if any(joined.endswith(suffix) for suffix in ['.SZ', '.SH', '.BJ']):
+                    logger.warning(f"Detected stock code parsed as character list: {stocks}")
+                    stocks = [joined]
+                    logger.debug(f"Joined characters back into stock code: {stocks}")
+                else:
+                    logger.debug(f"Character list doesn't look like stock code: {stocks}")
+            elif len(stocks) == 1 and ',' in stocks[0]:
+                # Handle case where single item contains comma-separated values
+                stocks = [s.strip() for s in stocks[0].split(',')]
+                logger.debug(f"Split comma-separated values: {stocks}")
+            else:
+                logger.debug(f"Using stocks list as-is: {stocks}")
+
+        logger.debug(f"Using provided stock list: {len(stocks)} stocks - {stocks}")
         return stocks
 
     logger.debug("Getting active stocks from database")
