@@ -564,6 +564,30 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 print(f"    Sample ann_date: {df['ann_date'].iloc[0] if 'ann_date' in df.columns else 'N/A'}")
                 print(f"    Sample end_date: {df['end_date'].iloc[0] if 'end_date' in df.columns else 'N/A'}")
 
+                # Check for duplicates within each data source
+                if len(df) > 1:
+                    duplicate_keys = df.groupby(['ts_code', 'ann_date', 'end_date']).size()
+                    duplicates = duplicate_keys[duplicate_keys > 1]
+                    if len(duplicates) > 0:
+                        print(f"    ⚠️  Found duplicates in {name}:")
+                        for (ts_code, ann_date, end_date), count in duplicates.items():
+                            print(f"      {ts_code} {ann_date} {end_date}: {count} duplicates")
+
+                    # Show all records if there are duplicates
+                    if len(df) <= 3:  # Only show if not too many records
+                        print(f"    All records in {name}:")
+                        for i, row in df.iterrows():
+                            report_type = row.get('report_type', 'N/A')
+                            print(f"      Record {i}: ts_code={row['ts_code']}, ann_date={row['ann_date']}, end_date={row['end_date']}, report_type={report_type}")
+
+                # Remove duplicates within each data source before merging
+                initial_len = len(df)
+                df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='first')
+                if len(df) < initial_len:
+                    print(f"    🧹 Removed {initial_len - len(df)} duplicates from {name}")
+
+                available_sources[name] = df
+
         # Merge strategy: connect by data source grouping
         merged_df = None
 
@@ -585,13 +609,25 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
 
                 for i, df in enumerate(financial_statements[1:], 1):
                     before_count = len(merged_df)
+                    source_name = list(available_sources.keys())[i]
+
+                    # Check merge keys before merging
+                    merge_keys_check = merged_df.groupby(API_COMMON_FIELDS).size()
+                    incoming_keys_check = df.groupby(API_COMMON_FIELDS).size()
+
+                    print(f"  Merge step {i} ({source_name}):")
+                    print(f"    Before: {before_count} records")
+                    print(f"    Adding: {len(df)} records")
+                    print(f"    Merge keys in base: {len(merge_keys_check)} unique combinations")
+                    print(f"    Merge keys incoming: {len(incoming_keys_check)} unique combinations")
+
                     merged_df = merged_df.merge(
                         df,
                         on=API_COMMON_FIELDS,
                         how='outer'
                     )
                     after_count = len(merged_df)
-                    print(f"  Merge step {i}: {before_count} -> {after_count} records (added {list(available_sources.keys())[i]})")
+                    print(f"    After: {after_count} records (+{after_count - before_count})")
 
                 print(f"Successfully merged {len(financial_statements)} financial statements: {len(merged_df)} records")
             except Exception as e:
@@ -603,13 +639,23 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         if merged_df is not None and 'financial_indicators' in available_sources:
             try:
                 before_count = len(merged_df)
+                indicator_df = available_sources['financial_indicators']
+
+                # Check merge keys
+                base_keys = merged_df.groupby(['ts_code', 'ann_date', 'end_date']).size()
+                indicator_keys = indicator_df.groupby(['ts_code', 'ann_date', 'end_date']).size()
+
+                print(f"Financial indicators merge:")
+                print(f"  Base data: {len(base_keys)} unique combinations, {before_count} total records")
+                print(f"  Indicators: {len(indicator_keys)} unique combinations, {len(indicator_df)} total records")
+
                 merged_df = merged_df.merge(
-                    available_sources['financial_indicators'],
+                    indicator_df,
                     on=['ts_code', 'ann_date', 'end_date'],
                     how='left'  # Left join to ensure financial data completeness
                 )
                 after_count = len(merged_df)
-                print(f"Financial indicators merge: {before_count} -> {after_count} records")
+                print(f"  Result: {after_count} records ({'+' if after_count > before_count else ''}{after_count - before_count})")
                 print(f"Successfully merged financial indicators: {len(merged_df)} records total")
             except Exception as e:
                 print(f"Error merging financial indicators: {e}")
