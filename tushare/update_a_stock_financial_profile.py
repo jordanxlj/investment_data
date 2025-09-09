@@ -580,6 +580,38 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                             report_type = row.get('report_type', 'N/A')
                             print(f"      Record {i}: ts_code={row['ts_code']}, ann_date={row['ann_date']}, end_date={row['end_date']}, report_type={report_type}")
 
+                            # Show first 5 financial data columns to check for differences
+                            financial_cols = [col for col in df.columns if col not in ['ts_code', 'ann_date', 'end_date', 'report_type']]
+                            if financial_cols:
+                                sample_data = []
+                                for col in financial_cols[:5]:  # Show first 5 financial columns
+                                    if col in row.index and pd.notna(row[col]):
+                                        sample_data.append(f"{col}={row[col]}")
+                                if sample_data:
+                                    print(f"        Financial data: {', '.join(sample_data[:3])}...")
+                                    if len(sample_data) > 3:
+                                        print(f"        ... and {len(sample_data) - 3} more fields")
+
+                        # Check if records are exactly identical
+                        if len(df) == 2:
+                            record1 = df.iloc[0]
+                            record2 = df.iloc[1]
+                            are_identical = record1.equals(record2)
+                            print(f"    Records are exactly identical: {are_identical}")
+
+                            if not are_identical:
+                                # Find differing columns
+                                differing_cols = []
+                                for col in df.columns:
+                                    if not pd.isna(record1[col]) or not pd.isna(record2[col]):
+                                        if str(record1[col]) != str(record2[col]):
+                                            differing_cols.append(col)
+
+                                if differing_cols:
+                                    print(f"    Differing columns: {differing_cols}")
+                                    for col in differing_cols[:5]:  # Show first 5 differences
+                                        print(f"      {col}: '{record1[col]}' vs '{record2[col]}'")
+
                 # Remove duplicates within each data source before merging
                 initial_len = len(df)
                 df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='first')
