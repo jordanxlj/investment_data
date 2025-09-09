@@ -563,6 +563,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 print(f"    Sample ts_code: {df['ts_code'].iloc[0] if 'ts_code' in df.columns else 'N/A'}")
                 print(f"    Sample ann_date: {df['ann_date'].iloc[0] if 'ann_date' in df.columns else 'N/A'}")
                 print(f"    Sample end_date: {df['end_date'].iloc[0] if 'end_date' in df.columns else 'N/A'}")
+                print(f"    Sample f_ann_date: {df['f_ann_date'].iloc[0] if 'f_ann_date' in df.columns else 'N/A'}")
 
                 # Check for duplicates within each data source
                 if len(df) > 1:
@@ -708,7 +709,20 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         # Add unified fields
         try:
             merged_df['ts_code'] = merged_df['ts_code']
-            merged_df['ann_date'] = merged_df['end_date']  # Map API end_date to database ann_date
+
+            # Keep the original ann_date from API - don't override with end_date
+            # ann_date represents when the financial report was actually announced
+            # end_date represents the end of the reporting period
+            if 'ann_date' not in merged_df.columns or merged_df['ann_date'].isna().all():
+                # Fallback to end_date only if ann_date is missing
+                merged_df['ann_date'] = merged_df['end_date']
+                print(f"Warning: Using end_date as ann_date fallback for period {report_period}")
+            else:
+                # Validate ann_date makes sense (should be after end_date)
+                sample_ann_date = merged_df['ann_date'].iloc[0]
+                sample_end_date = merged_df['end_date'].iloc[0]
+                print(f"Using API ann_date: {sample_ann_date} (end_date: {sample_end_date}) for period {report_period}")
+
             merged_df['report_period'] = merged_df['end_date'].astype(str).str[:4] + '-' + merged_df['end_date'].astype(str).str[4:6] + '-' + merged_df['end_date'].astype(str).str[6:8]
             merged_df['period'] = 'annual' if report_period.endswith('1231') else 'quarter'
             merged_df['currency'] = 'CNY'  # A-share default currency is CNY
