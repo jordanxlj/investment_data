@@ -749,7 +749,7 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
 
 def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: str) -> Optional[Dict[str, Any]]:
     """
-    Get data from annual report if available
+    Get data from annual report and fundamental data if available
 
     Args:
         engine: SQLAlchemy engine
@@ -762,6 +762,7 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
     """
     try:
         with engine.begin() as conn:
+            # Get annual report data from financial profile
             query = text("""
                 SELECT * FROM ts_a_stock_financial_profile
                 WHERE ts_code = :ts_code
@@ -782,28 +783,52 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
 
             row = df.iloc[0]
 
+            # Get PE and dividend ratio from fundamental data
+            fundamental_query = text("""
+                SELECT pe, dv_ratio FROM ts_a_stock_fundamental
+                WHERE ts_code = :ts_code
+                AND trade_date <= :eval_date
+                ORDER BY trade_date DESC
+                LIMIT 1
+            """)
+
+            pe_value = None
+            dv_ratio_value = None
+
+            try:
+                fundamental_df = pd.read_sql(fundamental_query, conn, params={
+                    'ts_code': ts_code,
+                    'eval_date': eval_date
+                })
+
+                if not fundamental_df.empty:
+                    pe_value = fundamental_df.iloc[0].get('pe')
+                    dv_ratio_value = fundamental_df.iloc[0].get('dv_ratio')
+            except Exception as e:
+                logger.debug(f"Could not get fundamental data for {ts_code}: {e}")
+
             return {
                 'ts_code': ts_code,
                 'eval_date': eval_date,
                 'report_period': report_period,
-                'total_reports': 0,
-                'sentiment_pos': 0,
-                'sentiment_neg': 0,
-                'buy_count': 0,
-                'hold_count': 0,
-                'neutral_count': 0,
-                'sell_count': 0,
-                'depth_reports': 0,
-                'research_reports': 0,
-                'commentary_reports': 0,
-                'general_reports': 0,
-                'other_reports': 0,
-                'avg_report_weight': 0.0,
+                'total_reports': None,
+                'sentiment_pos': None,
+                'sentiment_neg': None,
+                'buy_count': None,
+                'hold_count': None,
+                'neutral_count': None,
+                'sell_count': None,
+                'depth_reports': None,
+                'research_reports': None,
+                'commentary_reports': None,
+                'general_reports': None,
+                'other_reports': None,
+                'avg_report_weight': None,
                 # 当前周期预测数据
                 'eps': row.get('eps'),
-                'pe': None,  # Annual report doesn't have PE
-                'rd': row.get('rd_exp'),
-                'roe': row.get('roe_yearly'),
+                'pe': pe_value,  # From fundamental data
+                'rd': dv_ratio_value,  # Dividend ratio from fundamental data (not rd_exp)
+                'roe': row.get('roe_waa'),  # Use weighted average ROE
                 'ev_ebitda': None,
                 'max_price': None,
                 'min_price': None,
@@ -812,8 +837,8 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 'next_year_pe': None,
                 'next_year_roe': None,
                 'next_year_ev_ebitda': None,
-                'next_year_reports': 0,
-                'next_year_avg_weight': 0.0,
+                'next_year_reports': None,
+                'next_year_avg_weight': None,
                 'data_source': 'annual_report',
                 'last_updated': datetime.datetime.now()
             }
