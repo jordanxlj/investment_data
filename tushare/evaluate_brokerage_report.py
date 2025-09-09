@@ -109,6 +109,33 @@ REPORT_TYPE_WEIGHTS = {
 
 DEFAULT_REPORT_WEIGHT = 2.0  # Default weight for unrecognized types
 
+
+def format_sql_with_params(query, params):
+    """
+    Format SQL query with parameter values for debugging
+
+    Args:
+        query: SQLAlchemy text query object
+        params: Dictionary of query parameters
+
+    Returns:
+        Formatted SQL string with parameter values substituted
+    """
+    try:
+        # Get the SQL string
+        sql_str = str(query)
+
+        # Replace parameters in the SQL string
+        for key, value in params.items():
+            # Handle different parameter formats
+            sql_str = sql_str.replace(f":{key}", repr(value))
+
+        return sql_str
+    except Exception as e:
+        logger.debug(f"Could not format SQL: {e}")
+        return f"Query: {query}, Params: {params}"
+
+
 TABLE_NAME = "ts_a_stock_consensus_report"
 
 CREATE_TABLE_DDL = f"""
@@ -639,13 +666,15 @@ def get_brokerage_consensus(engine, ts_code: str, eval_date: str, min_quarter: s
                 AND report_type IS NOT NULL
             """)
 
-            df = pd.read_sql(query, conn, params={
+            query_params = {
                 'ts_code': ts_code,
                 'start_date': start_date,
                 'end_date': end_date,
                 'max_age_date': max_age_date
-            })
-            logger.debug(f"Query: {query}")
+            }
+            df = pd.read_sql(query, conn, params=query_params)
+            logger.debug(f"Formatted SQL: {format_sql_with_params(query, query_params)}")
+            logger.debug(f"Query Params: {query_params}")
 
             if df.empty:
                 logger.debug(f"No brokerage reports found for {ts_code} in date range")
@@ -792,16 +821,18 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
                 AND report_type IS NOT NULL
                 AND quarter LIKE :next_year_pattern
             """)
-            logger.debug(f"Query: {query}")
-
-            df = pd.read_sql(query, conn, params={
+            query_params = {
                 'ts_code': ts_code,
                 'start_date': start_date,
                 'end_date': end_date,
                 'max_age_date': (datetime.datetime.strptime(eval_date, "%Y%m%d") -
                                datetime.timedelta(days=365)).strftime("%Y%m%d"),
                 'next_year_pattern': f"{next_year}Q%"
-            })
+            }
+            logger.debug(f"Formatted SQL: {format_sql_with_params(query, query_params)}")
+            logger.debug(f"Query Params: {query_params}")
+
+            df = pd.read_sql(query, conn, params=query_params)
 
             if df.empty:
                 logger.debug(f"No next year reports found for {ts_code} in {next_year}")
@@ -863,13 +894,15 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 ORDER BY ann_date DESC
                 LIMIT 1
             """)
-            logger.debug(f"Query: {query}")
-
-            df = pd.read_sql(query, conn, params={
+            query_params = {
                 'ts_code': ts_code,
                 'report_period': report_period,
                 'eval_date': eval_date
-            })
+            }
+            logger.debug(f"Formatted SQL: {format_sql_with_params(query, query_params)}")
+            logger.debug(f"Query Params: {query_params}")
+
+            df = pd.read_sql(query, conn, params=query_params)
 
             if df.empty:
                 logger.debug(f"No annual report found for {ts_code} in period {report_period}")
@@ -886,16 +919,18 @@ def get_annual_report_data(engine, ts_code: str, eval_date: str, report_period: 
                 ORDER BY trade_date DESC
                 LIMIT 1
             """)
-            logger.debug(f"Query: {fundamental_query}")
+            fundamental_params = {
+                'ts_code': ts_code,
+                'eval_date': eval_date
+            }
+            logger.debug(f"Formatted SQL: {format_sql_with_params(fundamental_query, fundamental_params)}")
+            logger.debug(f"Query Params: {fundamental_params}")
 
             pe_value = None
             dv_ratio_value = None
 
             try:
-                fundamental_df = pd.read_sql(fundamental_query, conn, params={
-                    'ts_code': ts_code,
-                    'eval_date': eval_date
-                })
+                fundamental_df = pd.read_sql(fundamental_query, conn, params=fundamental_params)
 
                 if not fundamental_df.empty:
                     pe_value = fundamental_df.iloc[0].get('pe')
