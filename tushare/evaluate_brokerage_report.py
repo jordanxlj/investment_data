@@ -87,6 +87,7 @@ REPORT_TYPE_WEIGHTS = {
 
 DEFAULT_REPORT_WEIGHT = 2.0  # Default weight for unrecognized types
 
+TABLE_NAME = "ts_a_stock_consensus_report"
 
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
