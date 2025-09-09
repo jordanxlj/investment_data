@@ -584,9 +584,19 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
                     logger.debug(f"{field}: single value used = {result[field]:.2f}")
                 else:
                     # Calculate weighted median
-                    result[field] = float(weighted_median(values.values, weights.values))
-                    logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}, "
-                               f"{sentiment_source} weighted median = {result[field]:.2f}")
+                    weighted_median_value = float(weighted_median(values.values, weights.values))
+
+                    # Additional validation: compare with simple median and mean
+                    simple_median = float(values.median())
+                    weighted_mean = float((values * weights).sum() / weights.sum())
+
+                    logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}")
+                    logger.debug(f"{field}: simple median={simple_median:.2f}, weighted mean={weighted_mean:.2f}, "
+                               f"weighted median={weighted_median_value:.2f}")
+                    logger.debug(f"{field}: value range [{values.min():.2f}, {values.max():.2f}], "
+                               f"weight range [{weights.min():.1f}, {weights.max():.1f}]")
+
+                    result[field] = weighted_median_value
             else:
                 result[field] = None
                 logger.debug(f"{field}: no valid values after filtering")
@@ -626,14 +636,27 @@ def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
 
     # Find the weighted median
     median_weight = total_weight / 2
-    median_index = np.searchsorted(cum_weights, median_weight, side='right')
+    median_index = np.searchsorted(cum_weights, median_weight, side='left')
+
+    # Debug logging for weighted median calculation
+    logger.debug(f"Weighted median calculation: total_weight={total_weight:.2f}, median_weight={median_weight:.2f}")
+    logger.debug(f"cum_weights: {cum_weights[:5]}...{cum_weights[-5:] if len(cum_weights) > 5 else cum_weights}")
+    logger.debug(f"sorted_values: {sorted_values[:5]}...{sorted_values[-5:] if len(sorted_values) > 5 else sorted_values}")
+    logger.debug(f"median_index: {median_index}")
 
     if median_index == 0:
-        return sorted_values[0]
+        result = sorted_values[0]
     elif median_index >= len(sorted_values):
-        return sorted_values[-1]
+        result = sorted_values[-1]
     else:
-        return sorted_values[median_index - 1]
+        # Check if we're exactly at a boundary
+        if cum_weights[median_index - 1] < median_weight <= cum_weights[median_index]:
+            result = sorted_values[median_index]
+        else:
+            result = sorted_values[median_index - 1]
+
+    logger.debug(f"Weighted median result: {result}")
+    return result
 
 
 @lru_cache(maxsize=1000)
@@ -1412,11 +1435,40 @@ def evaluate_brokerage_report(
     logger.info(f"Total errors encountered: {total_error_count} stocks")
 
 
+def test_weighted_median():
+    """Test function for weighted median calculation"""
+    import numpy as np
+
+    # Test case 1: Simple case with equal weights
+    values1 = np.array([1, 2, 3, 4, 5])
+    weights1 = np.array([1, 1, 1, 1, 1])
+    result1 = weighted_median(values1, weights1)
+    print(f"Test 1 - Equal weights: values={values1}, weights={weights1}, result={result1}")
+    # Expected: 3.0 (middle value)
+
+    # Test case 2: Different weights
+    values2 = np.array([1, 2, 3])
+    weights2 = np.array([1, 1, 3])  # Total weight = 5, median weight = 2.5
+    result2 = weighted_median(values2, weights2)
+    print(f"Test 2 - Different weights: values={values2}, weights={weights2}, result={result2}")
+    # Expected: 2.0 (cumulative weight reaches 2.5 at index 2, so value at index 1)
+
+    # Test case 3: Edge case with single value
+    values3 = np.array([5])
+    weights3 = np.array([2])
+    result3 = weighted_median(values3, weights3)
+    print(f"Test 3 - Single value: values={values3}, weights={weights3}, result={result3}")
+    # Expected: 5.0
+
 if __name__ == "__main__":
-    # Example usage:
-    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105
-    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --stocks "000001.SZ,000002.SZ"
-    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105 --max-workers 8
-    # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --dry-run
-    # python evaluate_brokerage_report.py --mysql-url "mysql+pymysql://user:pass@host:port/db"
-    fire.Fire(evaluate_brokerage_report)
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--test-weighted-median":
+        test_weighted_median()
+    else:
+        # Example usage:
+        # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105
+        # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --stocks "000001.SZ,000002.SZ"
+        # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250105 --max-workers 8
+        # python evaluate_brokerage_report.py --start-date 20250101 --end-date 20250101 --dry-run
+        # python evaluate_brokerage_report.py --mysql-url "mysql+pymysql://user:pass@host:port/db"
+        fire.Fire(evaluate_brokerage_report)
