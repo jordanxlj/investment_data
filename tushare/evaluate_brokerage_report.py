@@ -300,6 +300,8 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     Returns:
         Tuple of (start_date, end_date) in YYYYMMDD format
     """
+    # Ensure eval_date is a string
+    eval_date = str(eval_date)
     logger.debug(f"Calculating date window for eval_date: {eval_date}, window_months: {window_months}")
     eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
     end_dt = eval_dt
@@ -322,6 +324,8 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     Returns:
         Dictionary with fiscal period information
     """
+    # Ensure eval_date is a string
+    eval_date = str(eval_date)
     logger.debug(f"Getting fiscal period info for eval_date: {eval_date}")
     eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
     year = eval_dt.year
@@ -1112,6 +1116,10 @@ def evaluate_brokerage_report(
         start_date = today
     if not end_date:
         end_date = today
+
+    # Ensure dates are strings (fire may convert them to int)
+    start_date = str(start_date)
+    end_date = str(end_date)
 
     # Validate date formats
     try:
