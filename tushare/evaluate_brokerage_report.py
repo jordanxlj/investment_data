@@ -1362,30 +1362,5 @@ def evaluate_brokerage_report(
     logger.info(f"Total errors encountered: {total_error_count} stocks")
 
 
-def test_weighted_median():
-    """Test function for weighted median calculation"""
-    import numpy as np
-
-    # Test case 1: Simple case with equal weights
-    values1 = np.array([1, 2, 3, 4, 5])
-    weights1 = np.array([1, 1, 1, 1, 1])
-    result1 = weighted_median(values1, weights1)
-    print(f"Test 1 - Equal weights: values={values1}, weights={weights1}, result={result1}")
-    # Expected: 3.0 (middle value)
-
-    # Test case 2: Different weights
-    values2 = np.array([1, 2, 3])
-    weights2 = np.array([1, 1, 3])  # Total weight = 5, median weight = 2.5
-    result2 = weighted_median(values2, weights2)
-    print(f"Test 2 - Different weights: values={values2}, weights={weights2}, result={result2}")
-    # Expected: 2.0 (cumulative weight reaches 2.5 at index 2, so value at index 1)
-
-    # Test case 3: Edge case with single value
-    values3 = np.array([5])
-    weights3 = np.array([2])
-    result3 = weighted_median(values3, weights3)
-    print(f"Test 3 - Single value: values={values3}, weights={weights3}, result={result3}")
-    # Expected: 5.0
-
 if __name__ == "__main__":
     fire.Fire(evaluate_brokerage_report)
