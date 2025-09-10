@@ -22,17 +22,17 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 try:
-    import tushare.evaluate_brokerage_report as evaluate_brokerage_report
+    import tushare_provider.evaluate_brokerage_report as evaluate_brokerage_report
 except ImportError:
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "evaluate_brokerage_report",
-            os.path.join(project_root, "tushare", "evaluate_brokerage_report.py")
+            os.path.join(project_root, "tushare_provider", "evaluate_brokerage_report.py")
         )
         eval_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(eval_module)
-        sys.modules['tushare.evaluate_brokerage_report'] = eval_module
+        sys.modules['tushare_provider.evaluate_brokerage_report'] = eval_module
         evaluate_brokerage_report = eval_module
         print("Successfully loaded evaluate_brokerage_report module directly")
     except Exception as e:
@@ -153,7 +153,7 @@ def test_aggregate_forecasts(mock_data):
         'quarter_comparison': [True, True, True, True, True]
     })
 
-    with patch('tushare.evaluate_brokerage_report.get_report_weight') as mock_get_weight:
+    with patch('tushare_provider.evaluate_brokerage_report.get_report_weight') as mock_get_weight:
         mock_get_weight.side_effect = lambda rt: {'点评': 3.0, '一般': 2.0, '非个股': 1.0}.get(rt, 2.0)
 
         result_bullish = evaluate_brokerage_report.aggregate_forecasts(test_df, 'bullish')
@@ -236,7 +236,7 @@ def test_get_brokerage_consensus_sentiment_tie(mock_engine):
         'rating': ['买入', '中性'],
         'report_type': ['点评', '点评']
     })
-    with patch('pandas.read_sql') as mock_read_sql, patch('tushare.evaluate_brokerage_report.classify_rating') as mock_classify:
+    with patch('pandas.read_sql') as mock_read_sql, patch('tushare_provider.evaluate_brokerage_report.classify_rating') as mock_classify:
         mock_read_sql.return_value = df
         mock_classify.side_effect = lambda x: 'BUY' if x == '买入' else 'NEUTRAL'
         result = evaluate_brokerage_report.get_brokerage_consensus(mock_engine, '000001.SZ', '20250101', '2024Q4')
@@ -273,7 +273,7 @@ def test_get_next_year_consensus_empty(mock_engine):
 def test_get_next_year_consensus_weight_error(mock_engine, caplog):
     """Test error in applying weights"""
     df = pd.DataFrame({'report_type': ['点评']})
-    with patch('pandas.read_sql') as mock_read_sql, patch('tushare.evaluate_brokerage_report.get_report_weight') as mock_weight:
+    with patch('pandas.read_sql') as mock_read_sql, patch('tushare_provider.evaluate_brokerage_report.get_report_weight') as mock_weight:
         mock_read_sql.return_value = df
         mock_weight.side_effect = Exception("weight error")
         result = evaluate_brokerage_report.get_next_year_consensus(mock_engine, '000001.SZ', '20250101', '2025')
@@ -284,7 +284,7 @@ def test_get_next_year_consensus_weight_error(mock_engine, caplog):
 def test_get_next_year_consensus_agg_error(mock_engine, caplog):
     """Test error in aggregate_forecasts"""
     df = pd.DataFrame({'report_type': ['点评']})
-    with patch('pandas.read_sql') as mock_read_sql, patch('tushare.evaluate_brokerage_report.aggregate_forecasts') as mock_agg:
+    with patch('pandas.read_sql') as mock_read_sql, patch('tushare_provider.evaluate_brokerage_report.aggregate_forecasts') as mock_agg:
         mock_read_sql.return_value = df
         mock_agg.side_effect = Exception("agg error")
         result = evaluate_brokerage_report.get_next_year_consensus(mock_engine, '000001.SZ', '20250101', '2025')
@@ -333,9 +333,9 @@ def test_get_annual_report_data_error(mock_engine, caplog):
 
 def test_process_stock_consensus_no_data(mock_engine):
     """Test process_stock_consensus with no consensus or annual"""
-    with patch('tushare.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
-         patch('tushare.evaluate_brokerage_report.get_annual_report_data') as mock_annual, \
-         patch('tushare.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
+    with patch('tushare_provider.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
+         patch('tushare_provider.evaluate_brokerage_report.get_annual_report_data') as mock_annual, \
+         patch('tushare_provider.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
         mock_cons.return_value = None
         mock_annual.return_value = None
         mock_next.return_value = None
@@ -344,9 +344,9 @@ def test_process_stock_consensus_no_data(mock_engine):
 
 def test_process_stock_consensus_annual_fallback(mock_engine):
     """Test process_stock_consensus using annual data fallback"""
-    with patch('tushare.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
-         patch('tushare.evaluate_brokerage_report.get_annual_report_data') as mock_annual, \
-         patch('tushare.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
+    with patch('tushare_provider.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
+         patch('tushare_provider.evaluate_brokerage_report.get_annual_report_data') as mock_annual, \
+         patch('tushare_provider.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
         mock_cons.return_value = None
         mock_annual.return_value = {'eps': 1.0, 'data_source': 'annual_report'}
         mock_next.return_value = None
@@ -355,8 +355,8 @@ def test_process_stock_consensus_annual_fallback(mock_engine):
 
 def test_process_stock_consensus_with_next_year(mock_engine):
     """Test process_stock_consensus with next year data"""
-    with patch('tushare.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
-         patch('tushare.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
+    with patch('tushare_provider.evaluate_brokerage_report.get_brokerage_consensus') as mock_cons, \
+         patch('tushare_provider.evaluate_brokerage_report.get_next_year_consensus') as mock_next:
         mock_cons.return_value = {'eps': 1.0}
         mock_next.return_value = {'eps': 2.0, 'pe': 4.0, 'roe': 10.0, 'ev_ebitda': 8.0, 'total_reports': 5, 'avg_report_weight': 3.0}
         result = evaluate_brokerage_report.process_stock_consensus(mock_engine, '000001.SZ', '20250101')
@@ -414,49 +414,49 @@ def test_get_stocks_list_error(mock_engine, caplog):
 
 def test_evaluate_brokerage_report_dry_run(caplog):
     """Test evaluate_brokerage_report dry_run"""
-    with patch('tushare.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 evaluate_brokerage_report.evaluate_brokerage_report(dry_run=True)
     assert "DRY RUN - No DB writes" in caplog.text
 
 def test_evaluate_brokerage_report_invalid_date(caplog):
     """Test evaluate_brokerage_report invalid date"""
-    with patch('tushare.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
         evaluate_brokerage_report.evaluate_brokerage_report(start_date='invalid')
     assert "Invalid date" in caplog.text
 
 def test_evaluate_brokerage_report_no_stocks():
     """Test evaluate_brokerage_report no stocks"""
-    with patch('tushare.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = []
                 evaluate_brokerage_report.evaluate_brokerage_report()
 
 def test_evaluate_brokerage_report_trade_cal_empty():
     """Test evaluate_brokerage_report with empty trade_cal"""
-    with patch('tushare.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame()
-            with patch('tushare.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
 '''
 def test_evaluate_brokerage_report_processing_error(caplog):
     """Test evaluate_brokerage_report concurrent error"""
-    with patch('tushare.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
             mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
                     mock_future = MagicMock()
@@ -470,11 +470,11 @@ def test_config_file_not_found(caplog):
     """Test config loading FileNotFoundError"""
     with patch('builtins.open') as mock_open:
         mock_open.side_effect = FileNotFoundError
-        if 'tushare.evaluate_brokerage_report' in sys.modules:
-            del sys.modules['tushare.evaluate_brokerage_report']
+        if 'tushare_provider.evaluate_brokerage_report' in sys.modules:
+            del sys.modules['tushare_provider.evaluate_brokerage_report']
         if 'evaluate_brokerage_report' in sys.modules:
             del sys.modules['evaluate_brokerage_report']
-        import tushare.evaluate_brokerage_report as reloaded
+        import tushare_provider.evaluate_brokerage_report as reloaded
         assert "Configuration file conf/report_configs.json not found" in caplog.text
         assert 'BUY' in reloaded.RATING_MAPPING
 
@@ -482,11 +482,11 @@ def test_config_unicode_error(caplog):
     """Test config loading UnicodeDecodeError"""
     with patch('builtins.open') as mock_open:
         mock_open.side_effect = UnicodeDecodeError('utf-8', b'', 0, 1, 'test')
-        if 'tushare.evaluate_brokerage_report' in sys.modules:
-            del sys.modules['tushare.evaluate_brokerage_report']
+        if 'tushare_provider.evaluate_brokerage_report' in sys.modules:
+            del sys.modules['tushare_provider.evaluate_brokerage_report']
         if 'evaluate_brokerage_report' in sys.modules:
             del sys.modules['evaluate_brokerage_report']
-        import tushare.evaluate_brokerage_report as reloaded
+        import tushare_provider.evaluate_brokerage_report as reloaded
         assert "Encoding error loading config file" in caplog.text
         assert 'BUY' in reloaded.RATING_MAPPING
 
@@ -494,11 +494,11 @@ def test_tushare_token_not_set(caplog, monkeypatch):
     """Test TUSHARE_TOKEN not set"""
     monkeypatch.delenv("TUSHARE", raising=False)
     with pytest.raises(SystemExit):
-        if 'tushare.evaluate_brokerage_report' in sys.modules:
-            del sys.modules['tushare.evaluate_brokerage_report']
+        if 'tushare_provider.evaluate_brokerage_report' in sys.modules:
+            del sys.modules['tushare_provider.evaluate_brokerage_report']
         if 'evaluate_brokerage_report' in sys.modules:
             del sys.modules['evaluate_brokerage_report']
-        import tushare.evaluate_brokerage_report as reloaded
+        import tushare_provider.evaluate_brokerage_report as reloaded
     assert "TUSHARE environment variable not set" in caplog.text
 
 def test_get_report_weight_error_conversion(caplog):
@@ -532,7 +532,7 @@ def test_categorize_report_type(report_type, expected_category):
 
 def test_get_trade_cal_error():
     """Test get_trade_cal error path"""
-    with patch('tushare.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
         mock_cal.side_effect = Exception("API error")
         result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
         assert result.empty
