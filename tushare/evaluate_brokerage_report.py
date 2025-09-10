@@ -413,6 +413,16 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         current_fiscal_period = f"{year}0930"  # Q3 end
         logger.debug("Fiscal period: Q4 - looking at Q3 data")
 
+    # Fix next year calculation
+    if month <= 3:
+        # Q1: next year should be current year (e.g., 202501 -> next is 2025Q4)
+        next_fiscal_year = f"{year}"
+        next_fiscal_period = f"{year}1231"  # Current year end
+    else:
+        # Other quarters: next year is next calendar year
+        next_fiscal_year = f"{year + 1}"
+        next_fiscal_period = f"{year + 1}0331" if month <= 3 else f"{year + 1}1231"
+
     fiscal_info = {
         'eval_date': eval_date,
         'eval_datetime': eval_dt,
@@ -421,8 +431,8 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         'next_year': next_year,
         'current_fiscal_year': current_fiscal_year,
         'current_fiscal_period': current_fiscal_period,
-        'next_fiscal_year': f"{year + 1}",
-        'next_fiscal_period': f"{year + 1}0331" if month <= 3 else f"{year + 1}1231"
+        'next_fiscal_year': next_fiscal_year,
+        'next_fiscal_period': next_fiscal_period
     }
 
     logger.debug(f"Fiscal info: current_quarter={current_quarter}, current_fiscal_year={current_fiscal_year}, "
@@ -528,14 +538,24 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
         logger.debug(f"Sample report types: {df['report_type'].head(3).tolist()}")
         logger.debug(f"Sample weights: {df['report_weight'].head(3).tolist()}")
 
-    forecast_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price']
+    # Separate fields that need quarter-specific filtering vs all-report aggregation
+    quarter_specific_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda']  # Must match specific quarter
+    all_report_fields = ['max_price', 'min_price']  # Can aggregate across all reports
 
     result = {}
-    for field in forecast_fields:
-        logger.debug(f"Processing field: {field}")
+
+    # Process quarter-specific fields (must match the specified quarter)
+    for field in quarter_specific_fields:
+        logger.debug(f"Processing quarter-specific field: {field}")
         if field in df.columns:
+            # Filter by quarter first, then get values and weights
+            if min_quarter != 'ALL':
+                quarter_df = df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df
+            else:
+                quarter_df = df
+
             # Get values and weights for valid data points
-            field_data = df[[field, 'report_weight']].dropna()
+            field_data = quarter_df[[field, 'report_weight']].dropna()
 
             if field_data.empty:
                 result[field] = None
@@ -544,7 +564,7 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
 
             values = field_data[field]
             weights = field_data['report_weight']
-            logger.debug(f"{field}: {len(values)} values before outlier filtering")
+            logger.debug(f"{field}: {len(values)} values before outlier filtering (quarter-specific)")
 
             # Remove extreme outliers (beyond 3 standard deviations)
             if len(values) > 2:
@@ -568,6 +588,71 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str) -> Dict[str, An
                 valid_mask = (values >= -200) & (values <= 200)  # ROE between -200% and 200%
                 logger.debug(f"{field}: ROE range filter applied")
             elif field in ['max_price', 'min_price']:
+                valid_mask = (values > 0) & (values <= 10000)  # Positive, reasonable prices
+                logger.debug(f"{field}: price range filter applied")
+            else:
+                valid_mask = pd.Series(True, index=values.index)
+
+            values = values[valid_mask]
+            weights = weights[valid_mask]
+            logger.debug(f"{field}: {len(values)} values after all filters")
+
+            if not values.empty:
+                # Use weighted median for robustness
+                if len(values) == 1:
+                    result[field] = float(values.iloc[0])
+                    logger.debug(f"{field}: single value used = {result[field]:.2f}")
+                else:
+                    # Calculate weighted median
+                    weighted_median_value = float(weighted_median(values.values, weights.values))
+
+                    # Additional validation: compare with simple median and mean
+                    simple_median = float(values.median())
+                    weighted_mean = float((values * weights).sum() / weights.sum())
+
+                    logger.debug(f"{field}: {len(values)} values, weights {weights.min():.1f}-{weights.max():.1f}")
+                    logger.debug(f"{field}: simple median={simple_median:.2f}, weighted mean={weighted_mean:.2f}, "
+                               f"weighted median={weighted_median_value:.2f}")
+                    logger.debug(f"{field}: value range [{values.min():.2f}, {values.max():.2f}], "
+                               f"weight range [{weights.min():.1f}, {weights.max():.1f}]")
+
+                    result[field] = weighted_median_value
+            else:
+                result[field] = None
+                logger.debug(f"{field}: no valid values after filtering")
+        else:
+            result[field] = None
+            logger.debug(f"{field}: column not found in DataFrame")
+
+    # Process all-report fields (can aggregate across all reports, not limited to specific quarter)
+    for field in all_report_fields:
+        logger.debug(f"Processing all-report field: {field}")
+        if field in df.columns:
+            # Use all reports, not limited to specific quarter
+            field_data = df[[field, 'report_weight']].dropna()
+
+            if field_data.empty:
+                result[field] = None
+                logger.debug(f"{field}: no valid values after filtering (all reports)")
+                continue
+
+            values = field_data[field]
+            weights = field_data['report_weight']
+            logger.debug(f"{field}: {len(values)} values before outlier filtering (all reports)")
+
+            # Remove extreme outliers (beyond 3 standard deviations)
+            if len(values) > 2:
+                mean_val = values.mean()
+                std_val = values.std()
+                logger.debug(f"{field}: raw mean={mean_val:.2f}, std={std_val:.2f}")
+                if std_val > 0:
+                    valid_mask = (values >= mean_val - 3 * std_val) & (values <= mean_val + 3 * std_val)
+                    values = values[valid_mask]
+                    weights = weights[valid_mask]
+                    logger.debug(f"{field}: {len(values)} values after outlier filtering")
+
+            # Remove unrealistic values based on field type
+            if field in ['max_price', 'min_price']:
                 valid_mask = (values > 0) & (values <= 10000)  # Positive, reasonable prices
                 logger.debug(f"{field}: price range filter applied")
             else:
@@ -837,6 +922,20 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
     # Ensure eval_date is a string
     eval_date = str(eval_date)
     logger.debug(f"Getting next year consensus for {ts_code}, eval_date: {eval_date}, next_year: {next_year}")
+
+    # Determine the correct quarter pattern for next year
+    eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
+    month = eval_dt.month
+
+    if month <= 3:
+        # Q1: next year should be current year's Q4
+        next_year_pattern = f"{next_year}Q4"
+        logger.debug(f"Q1 evaluation: looking for next year pattern: {next_year_pattern}")
+    else:
+        # Other quarters: next year is next calendar year's Q1-Q4
+        next_year_pattern = f"{next_year}Q%"
+        logger.debug(f"Other quarter evaluation: looking for next year pattern: {next_year_pattern}")
+
     try:
         with engine.begin() as conn:
             # Get brokerage reports within date window
@@ -859,7 +958,7 @@ def get_next_year_consensus(engine, ts_code: str, eval_date: str, next_year: str
                 'end_date': end_date,
                 'max_age_date': (datetime.datetime.strptime(eval_date, "%Y%m%d") -
                                datetime.timedelta(days=365)).strftime("%Y%m%d"),
-                'next_year_pattern': f"{next_year}Q%"
+                'next_year_pattern': next_year_pattern
             }
             logger.debug(f"Formatted SQL: {format_sql_with_params(query, query_params)}")
             logger.debug(f"Query Params: {query_params}")
