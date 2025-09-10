@@ -49,14 +49,16 @@ logger = logging.getLogger(__name__)
 
 
 # Load configurations from JSON
-CONFIG_FILE = 'report_configs.json'
+CONFIG_FILE = 'conf/report_configs.json'
 try:
-    with open(CONFIG_FILE, 'r') as f:
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         configs = json.load(f)
     RATING_MAPPING = configs.get('rating_mapping', {})
     REPORT_TYPE_WEIGHTS = configs.get('report_type_weights', {})
 except FileNotFoundError:
     logger.error(f"Configuration file {CONFIG_FILE} not found. Using defaults.")
+except UnicodeDecodeError as e:
+    logger.error(f"Encoding error loading config file: {e}. Using defaults.")
     # Default mappings (same as original)
     RATING_MAPPING = {
         'BUY': ['BUY', 'Buy', '买入', '买进', '优于大市', '强于大市', '强力买进', '强推', '强烈推荐', '增持', '推荐', '谨慎增持', '谨慎推荐', '跑赢行业', 'OUTPERFORM', 'OVERWEIGHT', 'Overweight'],
@@ -787,19 +789,19 @@ def get_annual_report_data(
                 'ts_code': ts_code,
                 'eval_date': eval_date,
                 'report_period': report_period,
-                'total_reports': 0,
-                'sentiment_pos': 0,
-                'sentiment_neg': 0,
-                'buy_count': 0,
-                'hold_count': 0,
-                'neutral_count': 0,
-                'sell_count': 0,
-                'depth_reports': 0,
-                'research_reports': 0,
-                'commentary_reports': 0,
-                'general_reports': 0,
-                'other_reports': 0,
-                'avg_report_weight': 0.0,
+                'total_reports': None,
+                'sentiment_pos': None,
+                'sentiment_neg': None,
+                'buy_count': None,
+                'hold_count': None,
+                'neutral_count': None,
+                'sell_count': None,
+                'depth_reports': None,
+                'research_reports': None,
+                'commentary_reports': None,
+                'general_reports': None,
+                'other_reports': None,
+                'avg_report_weight': None,
                 'eps': row.get('eps'),
                 'pe': pe_value,
                 'rd': dv_ratio_value,
@@ -811,8 +813,8 @@ def get_annual_report_data(
                 'next_year_pe': None,
                 'next_year_roe': None,
                 'next_year_ev_ebitda': None,
-                'next_year_reports': 0,
-                'next_year_avg_weight': 0.0,
+                'next_year_reports': None,
+                'next_year_avg_weight': None,
                 'data_source': 'annual_report',
                 'last_updated': datetime.datetime.now()
             }
