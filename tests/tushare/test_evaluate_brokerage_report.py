@@ -1415,6 +1415,7 @@ def test_aggregate_forecasts_pytest():
         'pe': [4.0, 4.1, 4.2, None, 3.9],
         'rd': [5.0, 5.5, None, 6.0, 4.8],
         'roe': [9.5, 10.0, 9.8, None, 9.7],
+        'ev_ebitda': [8.5, 8.8, 9.0, None, 8.2],  # Add ev_ebitda field
         'max_price': [12.5, 13.0, None, 11.8, 12.2],
         'min_price': [11.5, 12.0, None, 11.0, 11.8],
         'report_type': ['点评', '一般', '点评', '一般', '非个股'],  # Add report types for weighting

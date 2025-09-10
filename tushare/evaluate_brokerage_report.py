@@ -510,6 +510,9 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = float(values[0])
             else:
                 result[field] = weighted_median(values, weights)
+        else:
+            # Field not in DataFrame, set to None
+            result[field] = None
 
     # Process all-report fields
     for field in all_report_fields:
@@ -531,6 +534,9 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = float(values[0])
             else:
                 result[field] = weighted_median(values, weights)
+        else:
+            # Field not in DataFrame, set to None
+            result[field] = None
 
     return result
 
