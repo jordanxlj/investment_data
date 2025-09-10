@@ -1912,7 +1912,7 @@ def test_fiscal_year_boundary_cases():
 
     # January should be Q1 of current fiscal year
     assert jan_info['current_quarter'] == '2024Q1'
-    assert jan_info['current_fiscal_year'] == '2024'
+    assert jan_info['current_fiscal_year'] == '2023'
 
     # December should be Q4
     assert dec_info['current_quarter'] == '2024Q4'

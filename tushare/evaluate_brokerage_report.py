@@ -186,7 +186,7 @@ def get_report_weight(report_type: Optional[str]) -> float:
         if key.lower() in report_type_lower:
             return weight
 
-    logger.error(f"No match for {report_type_lower}, returning default: {DEFAULT_REPORT_WEIGHT}")
+    logger.debug(f"No match for {report_type_lower}, returning default: {DEFAULT_REPORT_WEIGHT}")
     return DEFAULT_REPORT_WEIGHT
 
 
@@ -299,34 +299,29 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     year = eval_dt.year
     month = eval_dt.month
 
+    current_year = f"{year}"
+    next_year = f"{year + 1}"
+
     if month <= 3:
         current_quarter = f"{year}Q1"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
-        current_fiscal_year = f"{year}"
-        current_fiscal_period = f"{year}0331"
-        next_fiscal_year = f"{year + 1}"
-        next_fiscal_period = f"{year + 1}0331"
+        current_fiscal_year = f"{year - 1}"
+        current_fiscal_period = f"{year - 1}1231"
+        next_fiscal_year = f"{year}"
+        next_fiscal_period = f"{year}1231"
     elif month <= 6:
         current_quarter = f"{year}Q2"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0331"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 9:
         current_quarter = f"{year}Q3"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0630"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     else:
         current_quarter = f"{year}Q4"
-        current_year = f"{year}"
-        next_year = f"{year + 1}"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year + 1}"
@@ -418,9 +413,6 @@ def _apply_field_ranges(field: str, values: np.ndarray, weights: np.ndarray) -> 
     Returns:
         Filtered values and weights
     """
-    if len(values) == 0:
-        return values, weights
-
     if field == 'eps':
         mask = (values >= -50) & (values <= 50)
     elif field in ['pe', 'ev_ebitda']:
@@ -437,7 +429,7 @@ def _apply_field_ranges(field: str, values: np.ndarray, weights: np.ndarray) -> 
 
 def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     """
-    Calculate weighted median
+    Calculate weighted median, averaging middle values for even total weight cases
 
     Args:
         values: Array of values
@@ -457,30 +449,17 @@ def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     cum_weights = np.cumsum(sorted_weights)
     total_weight = cum_weights[-1]
     median_weight = total_weight / 2
+    median_index = np.searchsorted(cum_weights, median_weight, side='right')
 
-    # Find the smallest index where cumulative weight >= median_weight
-    for i in range(len(cum_weights)):
-        if cum_weights[i] >= median_weight:
-            # If this is the first element
-            if i == 0:
-                return float(sorted_values[0])
-            # If cumulative weight exactly equals median_weight
-            elif cum_weights[i] == median_weight:
-                return float(sorted_values[i])
-            # If previous cumulative weight is less than median_weight
-            elif cum_weights[i-1] < median_weight:
-                # Check if we have equal weights around the median
-                if i < len(sorted_values) - 1 and sorted_weights[i-1] == sorted_weights[i]:
-                    # For equal weights, return the average of the two values
-                    return float((sorted_values[i-1] + sorted_values[i]) / 2)
-                else:
-                    return float(sorted_values[i])
-            else:
-                # The median falls between previous and current cumulative weights
-                return float(sorted_values[i-1])
+    if median_index == 0:
+        return float(sorted_values[0])
+    if median_index >= len(sorted_values):
+        return float(sorted_values[-1])
 
-    # Fallback (should not reach here)
-    return float(sorted_values[-1])
+    if median_index > 0 and cum_weights[median_index - 1] == median_weight:
+        return (float(sorted_values[median_index - 1]) + float(sorted_values[median_index])) / 2
+
+    return float(sorted_values[median_index])
 
 
 def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: str = 'ALL') -> Dict[str, Any]:
@@ -489,8 +468,8 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
 
     Args:
         df: DataFrame with brokerage reports
-        sentiment_source: 'bullish' or 'bearish'
-        min_quarter: Minimum quarter filter ('ALL' to use all data)
+        sentiment_source: 'bullish' or 'bearish' or 'next_year'
+        min_quarter: Minimum quarter for filtering ('ALL' or specific quarter)
 
     Returns:
         Dictionary with aggregated forecast values
@@ -503,11 +482,8 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
 
     df = df.copy()
     if 'report_weight' not in df.columns:
-        if 'report_type' not in df.columns or df['report_type'].isna().all():
-            logger.warning("No valid report_types, assigning default weight")
-            df['report_weight'] = DEFAULT_REPORT_WEIGHT
-        else:
-            df['report_weight'] = pd.Series([get_report_weight(t) for t in df['report_type']], index=df.index)
+        df['report_weight'] = pd.Series([get_report_weight(t) for t in df['report_type']], index=df.index)
+
     quarter_specific_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda']
     all_report_fields = ['max_price', 'min_price']
 
@@ -516,30 +492,17 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
     # Process quarter-specific fields
     for field in quarter_specific_fields:
         if field in df.columns:
-            # Use all data if min_quarter is 'ALL', otherwise filter by quarter_comparison
-            if min_quarter == 'ALL':
-                field_df = df
-            elif 'quarter_comparison' in df.columns:
-                field_df = df[df['quarter_comparison']]
-            else:
-                field_df = df
-
+            field_df = df if min_quarter == 'ALL' else df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df
             field_data = field_df[[field, 'report_weight']].dropna()
             if field_data.empty:
                 result[field] = None
                 continue
 
-            try:
-                values = field_data[field].values
-                weights = field_data['report_weight'].values
+            values = field_data[field].values
+            weights = field_data['report_weight'].values
 
-                values, weights = _filter_outliers(values, weights)
-                values, weights = _apply_field_ranges(field, values, weights)
-            except Exception as e:
-                # Log the error but continue with None value
-                print(f"Warning: Error processing field {field}: {e}")
-                result[field] = None
-                continue
+            values, weights = _filter_outliers(values, weights)
+            values, weights = _apply_field_ranges(field, values, weights)
 
             if len(values) == 0:
                 result[field] = None
@@ -547,8 +510,6 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = float(values[0])
             else:
                 result[field] = weighted_median(values, weights)
-        else:
-            result[field] = None
 
     # Process all-report fields
     for field in all_report_fields:
@@ -558,17 +519,11 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = None
                 continue
 
-            try:
-                values = field_data[field].values
-                weights = field_data['report_weight'].values
+            values = field_data[field].values
+            weights = field_data['report_weight'].values
 
-                values, weights = _filter_outliers(values, weights)
-                values, weights = _apply_field_ranges(field, values, weights)
-            except Exception as e:
-                # Log the error but continue with None value
-                print(f"Warning: Error processing field {field}: {e}")
-                result[field] = None
-                continue
+            values, weights = _filter_outliers(values, weights)
+            values, weights = _apply_field_ranges(field, values, weights)
 
             if len(values) == 0:
                 result[field] = None
@@ -576,8 +531,6 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = float(values[0])
             else:
                 result[field] = weighted_median(values, weights)
-        else:
-            result[field] = None
 
     return result
 
@@ -622,14 +575,14 @@ def get_brokerage_consensus(
             if df.empty:
                 return None
 
-            if min_quarter != 'ALL':
-                df = df[df['quarter'].apply(lambda q: compare_quarters(q, min_quarter) >= 0)]
+            df['quarter_comparison'] = df['quarter'].apply(lambda q: compare_quarters(q, min_quarter) >= 0 if q else False)
+            df = df[df['quarter_comparison']]
 
             if df.empty:
                 return None
 
             df['rating_category'] = df['rating'].apply(classify_rating)
-            df['report_weight'] = df['report_type'].apply(get_report_weight)
+            df['report_weight'] = pd.Series([get_report_weight(t) for t in df['report_type']], index=df.index)
             df['report_type_category'] = df['report_type'].apply(categorize_report_type)
 
             rating_counts = df['rating_category'].value_counts()
@@ -652,12 +605,15 @@ def get_brokerage_consensus(
 
             if sentiment_pos > sentiment_neg:
                 sentiment_df = df[df['rating_category'].isin(['BUY', 'HOLD'])]
+                sentiment = 'bullish'
             elif sentiment_neg > sentiment_pos:
                 sentiment_df = df[df['rating_category'].isin(['NEUTRAL', 'SELL'])]
+                sentiment = 'bearish'
             else:
                 sentiment_df = df
+                sentiment = 'neutral'
 
-            forecasts = aggregate_forecasts(sentiment_df, 'neutral' if sentiment_pos == sentiment_neg else 'bullish' if sentiment_pos > sentiment_neg else 'bearish', min_quarter)
+            forecasts = aggregate_forecasts(sentiment_df, sentiment, min_quarter=min_quarter)
 
             return {
                 'ts_code': ts_code,
@@ -763,7 +719,7 @@ def get_next_year_consensus(
             avg_report_weight = df['report_weight'].mean() if not df.empty else 0.0
 
             try:
-                forecasts = aggregate_forecasts(df, 'next_year', 'ALL')
+                forecasts = aggregate_forecasts(df, 'next_year', min_quarter='ALL')
             except Exception as e:
                 logger.warning(f"Error in forecast aggregation: {e}. Returning basic stats only.")
                 forecasts = {
