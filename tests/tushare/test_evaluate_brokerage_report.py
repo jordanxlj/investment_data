@@ -7,6 +7,7 @@ It simulates database queries and API calls to test the complete evaluation work
 """
 
 import pandas as pd
+import numpy as np
 import os
 import sys
 import datetime
@@ -26,7 +27,8 @@ try:
         aggregate_forecasts,
         get_trade_cal,
         get_fiscal_period_info,
-        get_date_window
+        get_date_window,
+        weighted_median
     )
 except ImportError:
     # If that fails, try direct import from the file
@@ -47,6 +49,7 @@ except ImportError:
         get_trade_cal = eval_module.get_trade_cal
         get_fiscal_period_info = eval_module.get_fiscal_period_info
         get_date_window = eval_module.get_date_window
+        weighted_median = eval_module.weighted_median
 
         print("Successfully loaded evaluate_brokerage_report module directly")
     except Exception as e:
@@ -510,7 +513,7 @@ class TestBrokerageReportEvaluation:
             'max_price': [12.5, 13.0, None, 11.8, 12.2],
             'min_price': [11.5, 12.0, None, 11.0, 11.8],
             'report_type': ['点评', '一般', '点评', '一般', '非个股'],  # Add report types for weighting
-            'rating': ['买入', '增持', '买入', '中性', '买入'],  # Add ratings for sentiment
+            'rating': ['买入', '增持', '买入', '卖出', '买入'],  # Add ratings for sentiment (changed 中性 to 卖出 for bearish data)
             'quarter_comparison': [True, True, True, True, True]  # Mock quarter comparison
         })
 
@@ -533,15 +536,50 @@ class TestBrokerageReportEvaluation:
         import evaluate_brokerage_report as eval_module
         eval_module.min_quarter = 'ALL'  # Use 'ALL' to aggregate all quarters
 
-        # Test aggregation for bullish sentiment
-        result_bullish = aggregate_forecasts(test_df, 'bullish')
+        # First, classify ratings (simulate what get_brokerage_consensus does)
+        def classify_rating(rating):
+            if rating in ['BUY', 'Buy', '买入', '买进', '优于大市', '强于大市', '强力买进', '强推', '强烈推荐', '增持', '推荐', '谨慎增持', '谨慎推荐', '跑赢行业', 'OUTPERFORM', 'OVERWEIGHT', 'Overweight']:
+                return 'BUY'
+            elif rating in ['HOLD', 'Hold', '持有', '区间操作']:
+                return 'HOLD'
+            elif rating in ['Neutral', '中性', '无']:
+                return 'NEUTRAL'
+            elif rating in ['SELL', 'Sell', '卖出', 'Underweight']:
+                return 'SELL'
+            else:
+                return 'NEUTRAL'  # Default
 
-        logger.info(f"Bullish aggregation result: {result_bullish}")
+        test_df['rating_category'] = test_df['rating'].apply(classify_rating)
 
-        # Test aggregation for bearish sentiment
-        result_bearish = aggregate_forecasts(test_df, 'bearish')
+        # Count sentiments
+        buy_count = len(test_df[test_df['rating_category'] == 'BUY'])
+        hold_count = len(test_df[test_df['rating_category'] == 'HOLD'])
+        neutral_count = len(test_df[test_df['rating_category'] == 'NEUTRAL'])
+        sell_count = len(test_df[test_df['rating_category'] == 'SELL'])
 
-        logger.info(f"Bearish aggregation result: {result_bearish}")
+        sentiment_pos = buy_count + hold_count
+        sentiment_neg = neutral_count + sell_count
+
+        logger.info(f"Sentiment analysis: BUY={buy_count}, HOLD={hold_count}, NEUTRAL={neutral_count}, SELL={sell_count}")
+        logger.info(f"Sentiment counts: POS={sentiment_pos}, NEG={sentiment_neg}")
+
+        # Test aggregation for bullish sentiment (BUY + HOLD data)
+        if sentiment_pos > 0:
+            bullish_df = test_df[test_df['rating_category'].isin(['BUY', 'HOLD'])]
+            result_bullish = aggregate_forecasts(bullish_df, 'bullish')
+            logger.info(f"Bullish aggregation result (using {len(bullish_df)} BUY/HOLD reports): {result_bullish}")
+        else:
+            result_bullish = {'eps': None, 'pe': None, 'rd': None, 'roe': None, 'ev_ebitda': None, 'max_price': None, 'min_price': None}
+            logger.info("No bullish data available")
+
+        # Test aggregation for bearish sentiment (NEUTRAL + SELL data)
+        if sentiment_neg > 0:
+            bearish_df = test_df[test_df['rating_category'].isin(['NEUTRAL', 'SELL'])]
+            result_bearish = aggregate_forecasts(bearish_df, 'bearish')
+            logger.info(f"Bearish aggregation result (using {len(bearish_df)} NEUTRAL/SELL reports): {result_bearish}")
+        else:
+            result_bearish = {'eps': None, 'pe': None, 'rd': None, 'roe': None, 'ev_ebitda': None, 'max_price': None, 'min_price': None}
+            logger.info("No bearish data available")
 
         # Validate results
         expected_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price']
@@ -558,9 +596,200 @@ class TestBrokerageReportEvaluation:
                 assert isinstance(result_bearish[field], (int, float)), f"{field} should be numeric in bearish result"
 
         # Additional validation for weighted average calculations
-        self._validate_weighted_averages(test_df, result_bullish, 'bullish')
+        if sentiment_pos > 0:
+            self._validate_weighted_averages(bullish_df, result_bullish, 'bullish')
+        if sentiment_neg > 0:
+            self._validate_weighted_averages(bearish_df, result_bearish, 'bearish')
+
+        # Demonstrate the difference between weighted mean and weighted median
+        if sentiment_pos > 0 and sentiment_neg > 0:
+            logger.info("\n" + "="*60)
+            logger.info("DEMONSTRATION: Weighted Mean vs Weighted Median")
+            logger.info("="*60)
+
+            # Show bullish data calculation
+            bullish_eps = bullish_df['eps'].dropna().values
+            bullish_weights = bullish_df['report_weight'].values[:len(bullish_eps)]
+
+            if len(bullish_eps) > 1:
+                # Calculate weighted mean manually
+                weighted_mean = (bullish_eps * bullish_weights).sum() / bullish_weights.sum()
+
+                logger.info(f"Bullish EPS data: {bullish_eps}")
+                logger.info(f"Bullish weights: {bullish_weights}")
+                logger.info(f"Weighted Mean = ({' + '.join([f'{v}×{w}' for v, w in zip(bullish_eps, bullish_weights)])}) / {bullish_weights.sum()}")
+                logger.info(f"Weighted Mean = {weighted_mean:.4f}")
+                logger.info(f"Weighted Median = {result_bullish['eps']:.4f}")
+
+            # Show bearish data calculation
+            bearish_eps = bearish_df['eps'].dropna().values
+            bearish_weights = bearish_df['report_weight'].values[:len(bearish_eps)]
+
+            if len(bearish_eps) > 0:
+                logger.info(f"\nBearish EPS data: {bearish_eps}")
+                logger.info(f"Bearish weights: {bearish_weights}")
+                if len(bearish_eps) > 1:
+                    weighted_mean = (bearish_eps * bearish_weights).sum() / bearish_weights.sum()
+                    logger.info(f"Weighted Mean = {weighted_mean:.4f}")
+                logger.info(f"Weighted Median = {result_bearish['eps']:.4f}")
+
+            logger.info("\nKEY DIFFERENCE:")
+            logger.info("- Weighted Mean: Simple average weighted by importance")
+            logger.info("- Weighted Median: Value that splits the total weight in half")
+            logger.info("- Median is more robust to outliers and extreme values")
+            logger.info("="*60)
 
         logger.info("Aggregate forecasts test passed")
+
+    def test_weighted_median_explanation(self):
+        """Detailed explanation of how weighted median is calculated"""
+        logger.info("Detailed explanation of weighted median calculation")
+        logger.info("="*70)
+
+        # Example 1: Simple case
+        logger.info("EXAMPLE 1: Simple weighted median calculation")
+        logger.info("-" * 50)
+
+        values = np.array([1.0, 3.0, 5.0, 7.0, 9.0])
+        weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])  # Equal weights
+
+        logger.info(f"Values: {values}")
+        logger.info(f"Weights: {weights}")
+        logger.info("")
+
+        # Step 1: Sort values and weights
+        sorted_indices = np.argsort(values)
+        sorted_values = values[sorted_indices]
+        sorted_weights = weights[sorted_indices]
+
+        logger.info("Step 1 - Sort by values:")
+        logger.info(f"Sorted values: {sorted_values}")
+        logger.info(f"Corresponding weights: {sorted_weights}")
+        logger.info("")
+
+        # Step 2: Calculate cumulative weights
+        cum_weights = np.cumsum(sorted_weights)
+        total_weight = cum_weights[-1]
+
+        logger.info("Step 2 - Cumulative weights:")
+        for i, (val, wt, cum) in enumerate(zip(sorted_values, sorted_weights, cum_weights)):
+            logger.info(f"  Position {i}: value={val}, weight={wt}, cumulative={cum}")
+        logger.info("")
+
+        # Step 3: Find median weight
+        median_weight = total_weight / 2
+        logger.info(f"Step 3 - Total weight: {total_weight}")
+        logger.info(f"Step 4 - Median weight (total/2): {median_weight}")
+        logger.info("")
+
+        # Step 4: Find insertion point
+        median_index = np.searchsorted(cum_weights, median_weight, side='left')
+        logger.info(f"Step 5 - Find where {median_weight} fits in cumulative weights")
+        logger.info(f"Median index: {median_index}")
+        logger.info("")
+
+        # Step 5: Determine result
+        if median_index == 0:
+            result = sorted_values[0]
+        elif median_index >= len(sorted_values):
+            result = sorted_values[-1]
+        else:
+            if cum_weights[median_index - 1] < median_weight <= cum_weights[median_index]:
+                result = sorted_values[median_index]
+            else:
+                result = sorted_values[median_index - 1]
+
+        logger.info("Step 6 - Result determination:")
+        logger.info(f"Result: {result}")
+        logger.info("For equal weights, weighted median = regular median = 5.0")
+        logger.info("")
+
+        # Example 2: Unequal weights
+        logger.info("EXAMPLE 2: Unequal weights - high weight on low value")
+        logger.info("-" * 50)
+
+        values2 = np.array([1.0, 3.0, 5.0, 7.0, 100.0])
+        weights2 = np.array([4.0, 1.0, 1.0, 1.0, 1.0])  # High weight on lowest value
+
+        logger.info(f"Values: {values2}")
+        logger.info(f"Weights: {weights2}")
+        logger.info("")
+
+        # Repeat the calculation process
+        sorted_indices2 = np.argsort(values2)
+        sorted_values2 = values2[sorted_indices2]
+        sorted_weights2 = weights2[sorted_indices2]
+        cum_weights2 = np.cumsum(sorted_weights2)
+        total_weight2 = cum_weights2[-1]
+        median_weight2 = total_weight2 / 2
+
+        logger.info("Sorted data:")
+        logger.info(f"Sorted values: {sorted_values2}")
+        logger.info(f"Sorted weights: {sorted_weights2}")
+        logger.info(f"Cumulative weights: {cum_weights2}")
+        logger.info(f"Total weight: {total_weight2}, Median weight: {median_weight2}")
+        logger.info("")
+
+        median_index2 = np.searchsorted(cum_weights2, median_weight2, side='left')
+        logger.info(f"Median index: {median_index2}")
+
+        # The median falls within the first weight (4.0), so result is first value
+        result2 = sorted_values2[0]  # 1.0
+        logger.info(f"Result: {result2}")
+        logger.info("High weight on low value pulls median toward 1.0")
+        logger.info("")
+
+        # Example 3: Real brokerage data example
+        logger.info("EXAMPLE 3: Real brokerage EPS data")
+        logger.info("-" * 50)
+
+        # Using the actual test data
+        eps_values = np.array([2.5, 2.6, 2.7, None, 2.4])
+        eps_weights = np.array([3.0, 2.0, 3.0, 2.0, 1.0])
+
+        # Remove None values
+        valid_mask = ~pd.isna(eps_values)
+        clean_values = eps_values[valid_mask]
+        clean_weights = eps_weights[valid_mask]
+
+        logger.info(f"EPS values: {clean_values}")
+        logger.info(f"Weights: {clean_weights}")
+        logger.info("")
+
+        # Calculate weighted median
+        sorted_indices3 = np.argsort(clean_values)
+        sorted_values3 = clean_values[sorted_indices3]
+        sorted_weights3 = clean_weights[sorted_indices3]
+        cum_weights3 = np.cumsum(sorted_weights3)
+        total_weight3 = cum_weights3[-1]
+        median_weight3 = total_weight3 / 2
+
+        logger.info("Calculation:")
+        logger.info(f"Sorted values: {sorted_values3}")
+        logger.info(f"Sorted weights: {sorted_weights3}")
+        logger.info(f"Cumulative weights: {cum_weights3}")
+        logger.info(f"Total weight: {total_weight3}, Median weight: {median_weight3}")
+        logger.info("")
+
+        median_index3 = np.searchsorted(cum_weights3, median_weight3, side='left')
+        result3 = sorted_values3[median_index3] if median_index3 < len(sorted_values3) else sorted_values3[-1]
+
+        logger.info(f"Median index: {median_index3}")
+        logger.info(f"Weighted median result: {result3}")
+        logger.info("")
+
+        logger.info("KEY CONCEPTS:")
+        logger.info("1. Sort values in ascending order")
+        logger.info("2. Calculate cumulative weights")
+        logger.info("3. Find the weight threshold (total_weight / 2)")
+        logger.info("4. Find where this threshold falls in cumulative weights")
+        logger.info("5. Return the corresponding value")
+        logger.info("")
+        logger.info("WHY WEIGHTED MEDIAN?")
+        logger.info("- More robust than simple mean (resistant to outliers)")
+        logger.info("- Gives higher-weight reports more influence")
+        logger.info("- Better for financial consensus where some reports are more credible")
+        logger.info("="*70)
 
     def _validate_weighted_averages(self, df, result, sentiment_source):
         """Validate weighted median calculations with same logic as aggregate_forecasts"""
@@ -568,7 +797,7 @@ class TestBrokerageReportEvaluation:
 
         # Import required functions
         import numpy as np
-        from tushare.evaluate_brokerage_report import weighted_median
+        # weighted_median is already imported at the top of the file
 
         # Test fields that should have weighted medians
         test_fields = ['eps', 'pe', 'rd', 'roe', 'max_price', 'min_price']
@@ -876,6 +1105,7 @@ class TestBrokerageReportEvaluation:
             self.test_trade_calendar()
             self.test_aggregate_forecasts()
             self.test_weighted_median_calculation()
+            self.test_weighted_median_explanation()
             self.test_get_brokerage_consensus()
             self.test_get_next_year_consensus()
             self.test_full_evaluation_workflow()
