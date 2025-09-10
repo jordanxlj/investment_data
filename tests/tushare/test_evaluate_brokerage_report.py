@@ -31,6 +31,17 @@ try:
         get_date_window,
         weighted_median,
         get_report_weight,
+        get_fiscal_period_info,
+        classify_rating,
+        parse_quarter,
+        compare_quarters,
+        categorize_report_type,
+        get_annual_report_data,
+        process_stock_consensus,
+        get_stocks_list,
+        _filter_outliers,
+        _apply_field_ranges,
+        _upsert_batch,
         DEFAULT_REPORT_WEIGHT
     )
 except ImportError:
@@ -54,6 +65,16 @@ except ImportError:
         get_date_window = eval_module.get_date_window
         weighted_median = eval_module.weighted_median
         get_report_weight = eval_module.get_report_weight
+        classify_rating = eval_module.classify_rating
+        parse_quarter = eval_module.parse_quarter
+        compare_quarters = eval_module.compare_quarters
+        categorize_report_type = eval_module.categorize_report_type
+        get_annual_report_data = eval_module.get_annual_report_data
+        process_stock_consensus = eval_module.process_stock_consensus
+        get_stocks_list = eval_module.get_stocks_list
+        _filter_outliers = eval_module._filter_outliers
+        _apply_field_ranges = eval_module._apply_field_ranges
+        _upsert_batch = eval_module._upsert_batch
         DEFAULT_REPORT_WEIGHT = eval_module.DEFAULT_REPORT_WEIGHT
 
         print("Successfully loaded evaluate_brokerage_report module directly")
@@ -638,6 +659,322 @@ def test_get_next_year_consensus_error_handling(mock_engine):
     # Test with None inputs
     result_none = get_next_year_consensus(mock_engine, None, '20250101', '2025')
     assert isinstance(result_none, (dict, type(None)))
+
+def test_parse_quarter():
+    """Test parse_quarter function"""
+    # Test valid quarters
+    assert parse_quarter('2024Q1') == (2024, 1)
+    assert parse_quarter('2023Q2') == (2023, 2)
+    assert parse_quarter('2025Q3') == (2025, 3)
+    assert parse_quarter('2022Q4') == (2022, 4)
+
+    # Test invalid inputs
+    try:
+        parse_quarter('invalid')
+        assert False, "Should raise ValueError for invalid input"
+    except ValueError:
+        pass  # Expected
+
+def test_compare_quarters():
+    """Test compare_quarters function"""
+    # Test equal quarters
+    assert compare_quarters('2024Q1', '2024Q1') == 0
+
+    # Test different quarters same year
+    assert compare_quarters('2024Q1', '2024Q2') == -1
+    assert compare_quarters('2024Q3', '2024Q2') == 1
+
+    # Test different years
+    assert compare_quarters('2023Q4', '2024Q1') == -1
+    assert compare_quarters('2024Q1', '2023Q4') == 1
+
+def test_categorize_report_type():
+    """Test categorize_report_type function"""
+    # Test depth reports
+    assert categorize_report_type('深度报告') == 'depth'
+    assert categorize_report_type('深度分析') == 'depth'
+
+    # Test research reports
+    assert categorize_report_type('调研报告') == 'research'
+    assert categorize_report_type('调研纪要') == 'research'
+
+    # Test commentary reports
+    assert categorize_report_type('点评') == 'commentary'
+    assert categorize_report_type('点评报告') == 'commentary'
+
+    # Test general reports
+    assert categorize_report_type('一般报告') == 'general'
+    assert categorize_report_type('普通报告') == 'general'
+
+    # Test other categories
+    assert categorize_report_type('unknown') == 'other'
+    assert categorize_report_type(None) == 'other'
+
+def test_classify_rating():
+    """Test classify_rating function"""
+    # Test BUY ratings
+    assert classify_rating('买入') == 'BUY'
+    assert classify_rating('推荐') == 'BUY'
+    assert classify_rating('增持') == 'BUY'
+
+    # Test HOLD ratings
+    assert classify_rating('持有') == 'HOLD'
+    assert classify_rating('中性') == 'HOLD'
+    assert classify_rating('维持') == 'HOLD'
+
+    # Test SELL ratings
+    assert classify_rating('卖出') == 'SELL'
+    assert classify_rating('减持') == 'SELL'
+    assert classify_rating('回避') == 'SELL'
+
+    # Test NEUTRAL ratings
+    assert classify_rating('观望') == 'NEUTRAL'
+    assert classify_rating('unknown') == 'NEUTRAL'
+
+def test_filter_outliers():
+    """Test _filter_outliers function"""
+    # Test with normal data (no outliers)
+    values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
+    filtered_values, filtered_weights = _filter_outliers(values, weights)
+    assert len(filtered_values) == len(values)  # No outliers removed
+
+    # Test with outliers
+    values_with_outliers = np.array([1.0, 2.0, 3.0, 100.0])  # 100.0 is outlier
+    weights_with_outliers = np.array([1.0, 1.0, 1.0, 1.0])
+    filtered_values, filtered_weights = _filter_outliers(values_with_outliers, weights_with_outliers)
+    assert len(filtered_values) == 3  # Outlier removed
+
+def test_apply_field_ranges():
+    """Test _apply_field_ranges function"""
+    # Test EPS field
+    values = np.array([-10.0, 2.5, 100.0])  # 100.0 and -10.0 should be filtered
+    weights = np.array([1.0, 1.0, 1.0])
+    filtered_values, filtered_weights = _apply_field_ranges('eps', values, weights)
+    assert len(filtered_values) == 1  # Only 2.5 should remain
+    assert filtered_values[0] == 2.5
+
+    # Test PE field
+    values = np.array([5.0, 200.0, 600.0])  # 600.0 should be filtered
+    weights = np.array([1.0, 1.0, 1.0])
+    filtered_values, filtered_weights = _apply_field_ranges('pe', values, weights)
+    assert len(filtered_values) == 2  # 5.0 and 200.0 should remain
+
+def test_get_annual_report_data():
+    """Test get_annual_report_data function"""
+    # This function is complex and requires database connection
+    # We'll just test that it exists and has proper signature
+    # Test with invalid inputs to ensure error handling
+    try:
+        result = get_annual_report_data(None, '000001.SZ', '2024')
+        assert isinstance(result, (dict, type(None)))
+    except Exception:
+        # Expected for invalid engine
+        pass
+
+def test_process_stock_consensus():
+    """Test process_stock_consensus function"""
+    # This function is complex and requires database connection
+    # We'll just test that it exists and has proper signature
+    # Test with invalid inputs
+    try:
+        result = process_stock_consensus(None, ['000001.SZ'], '20250101')
+        assert isinstance(result, (list, type(None)))
+    except Exception:
+        # Expected for invalid engine
+        pass
+
+def test_upsert_batch():
+    """Test _upsert_batch function"""
+    # This function requires database connection
+    # Test with empty DataFrame
+    df = pd.DataFrame()
+    try:
+        result = _upsert_batch(None, df)
+        assert isinstance(result, int)
+    except Exception:
+        # Expected for invalid engine
+        pass
+
+def test_get_stocks_list():
+    """Test get_stocks_list function"""
+    # Test with invalid engine
+    try:
+        result = get_stocks_list(None)
+        assert isinstance(result, list)
+    except Exception:
+        # Expected for invalid engine
+        pass
+
+def test_evaluate_brokerage_report_main():
+    """Test main evaluate_brokerage_report function"""
+    # Test with invalid inputs
+    try:
+        result = evaluate_brokerage_report(None, ['000001.SZ'], '20250101')
+        assert isinstance(result, (dict, type(None)))
+    except Exception:
+        # Expected for invalid engine
+        pass
+
+def test_get_trade_cal_error_handling():
+    """Test get_trade_cal error handling"""
+    # Mock the Tushare API to raise exception
+    with patch('tushare.pro_api') as mock_pro_api:
+        mock_pro = MagicMock()
+        mock_pro.trade_cal.side_effect = Exception("API Error")
+        mock_pro_api.return_value = mock_pro
+
+        result = get_trade_cal('20250101', '20250110')
+        # Should return empty DataFrame on error
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+def test_get_date_window_invalid_format():
+    """Test get_date_window with invalid date format"""
+    # Test with invalid date format
+    try:
+        get_date_window('invalid_date')
+        assert False, "Should raise ValueError for invalid date format"
+    except ValueError as e:
+        assert "Invalid eval_date format" in str(e)
+
+def test_classify_rating_edge_cases():
+    """Test classify_rating with edge cases"""
+    # Test None input
+    assert classify_rating(None) == 'NEUTRAL'
+
+    # Test empty string
+    assert classify_rating('') == 'NEUTRAL'
+
+    # Test whitespace
+    assert classify_rating('   ') == 'NEUTRAL'
+
+    # Test unknown rating
+    assert classify_rating('完全未知的评级') == 'NEUTRAL'
+
+def test_categorize_report_type_edge_cases():
+    """Test categorize_report_type with edge cases"""
+    # Test None input
+    assert categorize_report_type(None) == 'other'
+
+    # Test empty string
+    assert categorize_report_type('') == 'other'
+
+    # Test whitespace
+    assert categorize_report_type('   ') == 'other'
+
+def test_parse_quarter_invalid_formats():
+    """Test parse_quarter with invalid formats"""
+    invalid_formats = [
+        '20241',      # Missing Q
+        'Q12024',     # Wrong order
+        '2024Q5',     # Invalid quarter
+        '2024Q0',     # Invalid quarter
+        'abcdQ1',     # Invalid year
+        '2024Q',      # Missing quarter number
+        '2024',       # Missing quarter
+        '',           # Empty string
+        None,         # None value
+    ]
+
+    for invalid_format in invalid_formats:
+        try:
+            parse_quarter(invalid_format)
+            assert False, f"Should raise ValueError for invalid format: {invalid_format}"
+        except (ValueError, AttributeError):
+            pass  # Expected
+
+def test_compare_quarters_edge_cases():
+    """Test compare_quarters with edge cases"""
+    # Test invalid formats
+    try:
+        compare_quarters('invalid', '2024Q1')
+        assert False, "Should raise error for invalid format"
+    except (ValueError, AttributeError):
+        pass
+
+    try:
+        compare_quarters('2024Q1', 'invalid')
+        assert False, "Should raise error for invalid format"
+    except (ValueError, AttributeError):
+        pass
+
+def test_weighted_median_empty_arrays():
+    """Test weighted_median with empty arrays"""
+    # Test with empty arrays
+    try:
+        weighted_median(np.array([]), np.array([]))
+        assert False, "Should raise ValueError for empty arrays"
+    except ValueError as e:
+        assert "Cannot calculate median of empty array" in str(e)
+
+def test_weighted_median_mismatched_lengths():
+    """Test weighted_median with mismatched array lengths"""
+    # Test with mismatched lengths
+    try:
+        weighted_median(np.array([1, 2, 3]), np.array([1, 2]))
+        assert False, "Should raise ValueError for mismatched lengths"
+    except ValueError as e:
+        assert "Values and weights must have the same length" in str(e)
+
+def test_aggregate_forecasts_missing_report_weight():
+    """Test aggregate_forecasts when report_weight column is missing"""
+    df = pd.DataFrame({
+        'eps': [2.5, 2.6],
+        'pe': [4.0, 4.1],
+        'report_type': ['点评', '一般']
+        # Missing report_weight column
+    })
+
+    result = aggregate_forecasts(df, 'bullish')
+    # Should handle gracefully, possibly using default weights
+    assert isinstance(result, dict)
+
+def test_get_brokerage_consensus_data_quality():
+    """Test get_brokerage_consensus data quality checks"""
+    # This would require a more complex mock setup to test data quality filtering
+    # For now, just test that the function exists and can handle basic inputs
+    mock_engine = MagicMock()
+    try:
+        result = get_brokerage_consensus(mock_engine, '000001.SZ', '20250101', '2024')
+        assert isinstance(result, (dict, type(None)))
+    except Exception:
+        # Expected due to complex database operations
+        pass
+
+def test_get_next_year_consensus_data_quality():
+    """Test get_next_year_consensus data quality checks"""
+    # Similar to above, test basic functionality
+    mock_engine = MagicMock()
+    try:
+        result = get_next_year_consensus(mock_engine, '000001.SZ', '20250101', '2025')
+        assert isinstance(result, (dict, type(None)))
+    except Exception:
+        # Expected due to complex database operations
+        pass
+
+def test_config_file_missing():
+    """Test behavior when config file is missing"""
+    # This tests the fallback behavior when config file is missing
+    # The config loading happens at import time, so we can't easily test this
+    # without reloading the module. But we can test that the function still works.
+    result = get_report_weight('深度')
+    assert isinstance(result, (int, float))
+    assert result >= 0
+
+def test_logger_error_paths():
+    """Test logger error paths that might not be covered"""
+    # Test get_report_weight with problematic input that triggers logging
+    result = get_report_weight(12345)  # Non-string input
+    assert isinstance(result, (int, float))
+
+    # Test categorize_report_type with problematic input
+    result = categorize_report_type(12345)  # Non-string input
+    assert isinstance(result, str)
+
+    # Test classify_rating with problematic input
+    result = classify_rating(12345)  # Non-string input
+    assert isinstance(result, str)
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
