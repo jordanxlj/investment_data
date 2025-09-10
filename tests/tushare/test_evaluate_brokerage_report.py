@@ -434,10 +434,13 @@ class TestBrokerageReportEvaluation:
             if month <= 3:
                 # Q1: current should be previous year Q4, next should be current year Q4
                 assert fiscal_info['current_fiscal_year'] == str(eval_dt.year - 1)
-                assert fiscal_info['next_fiscal_year'] == str(eval_dt.year)
+                assert fiscal_info['next_fiscal_year'] == str(eval_dt.year)  # Current year Q4
+            elif month <= 9:
+                # Q2-Q3: next year should be current year Q4
+                assert fiscal_info['next_fiscal_year'] == str(eval_dt.year)  # Current year Q4
             else:
-                # Other quarters: next year should be next calendar year
-                assert fiscal_info['next_fiscal_year'] == str(eval_dt.year + 1)
+                # Q4: next year should be next calendar year Q4
+                assert fiscal_info['next_fiscal_year'] == str(eval_dt.year + 1)  # Next year Q4
 
         logger.info("Fiscal period info test passed")
 

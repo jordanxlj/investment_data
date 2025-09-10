@@ -413,15 +413,23 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         current_fiscal_period = f"{year}0930"  # Q3 end
         logger.debug("Fiscal period: Q4 - looking at Q3 data")
 
-    # Fix next year calculation
+    # Fix next year calculation - next year always refers to Q4 of the current fiscal year
     if month <= 3:
-        # Q1: next year should be current year (e.g., 202501 -> next is 2025Q4)
+        # Q1: next year should be current year Q4 (e.g., 202501 -> next is 2025Q4)
+        next_fiscal_year = f"{year}"
+        next_fiscal_period = f"{year}1231"  # Current year end
+    elif month <= 6:
+        # Q2: next year should be current year Q4 (e.g., 202504 -> next is 2025Q4)
+        next_fiscal_year = f"{year}"
+        next_fiscal_period = f"{year}1231"  # Current year end
+    elif month <= 9:
+        # Q3: next year should be current year Q4 (e.g., 202507 -> next is 2025Q4)
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"  # Current year end
     else:
-        # Other quarters: next year is next calendar year
+        # Q4: next year should be next calendar year Q4 (e.g., 202510 -> next is 2026Q4)
         next_fiscal_year = f"{year + 1}"
-        next_fiscal_period = f"{year + 1}0331" if month <= 3 else f"{year + 1}1231"
+        next_fiscal_period = f"{year + 1}1231"  # Next year end
 
     fiscal_info = {
         'eval_date': eval_date,
