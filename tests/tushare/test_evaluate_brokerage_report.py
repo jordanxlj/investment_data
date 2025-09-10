@@ -28,7 +28,8 @@ try:
         get_trade_cal,
         get_fiscal_period_info,
         get_date_window,
-        weighted_median
+        weighted_median,
+        get_report_weight
     )
 except ImportError:
     # If that fails, try direct import from the file
@@ -50,6 +51,7 @@ except ImportError:
         get_fiscal_period_info = eval_module.get_fiscal_period_info
         get_date_window = eval_module.get_date_window
         weighted_median = eval_module.weighted_median
+        get_report_weight = eval_module.get_report_weight
 
         print("Successfully loaded evaluate_brokerage_report module directly")
     except Exception as e:
@@ -1024,6 +1026,8 @@ class TestBrokerageReportEvaluation:
             logger.info(f"- Price range: Max={current_consensus.get('max_price')}, Min={current_consensus.get('min_price')}")
 
             # Test next year consensus (should use 2025Q4 data for 20250102)
+            # Note: This call is still within the patch context, so it should work correctly
+            import pdb; pdb.set_trace()
             next_year_consensus = get_next_year_consensus(self.engine, ts_code, eval_date, fiscal_info['next_fiscal_year'])
 
             if next_year_consensus:

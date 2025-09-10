@@ -72,7 +72,7 @@ except UnicodeDecodeError as e:
         '点评': 3.0, 'commentary': 3.0, 'comment': 3.0, 'analysis': 3.0, 'review': 3.0,
         '会议纪要': 3.0, '会议': 3.0,
         '一般': 2.0, 'general': 2.0, 'regular': 2.0, 'standard': 2.0,
-        '新股': 1.5, '港股': 1.5, '非各股': 1.0, 'non-stock': 1.0, 'industry': 1.0, 'strategy': 1.0, 'sector': 1.0
+        '新股': 1.5, '港股': 1.5, '非个股': 1.0, 'non-stock': 1.0, 'industry': 1.0, 'strategy': 1.0, 'sector': 1.0
     }
 
 DEFAULT_REPORT_WEIGHT = 2.0
@@ -167,20 +167,26 @@ def get_report_weight(report_type: Optional[str]) -> float:
     Returns:
         Weight value (1.0 to 5.0)
     """
-    if not report_type:
+    if pd.isna(report_type) or not report_type:  # Explicit NaN/None/empty check
+        logger.debug(f"Empty report_type, returning default: {DEFAULT_REPORT_WEIGHT}")
         return DEFAULT_REPORT_WEIGHT
 
-    report_type_lower = str(report_type).strip().lower()
+    try:
+        report_type_lower = str(report_type).strip().lower()
+    except Exception as e:
+        logger.error(f"Error converting report_type to str: {report_type} - {e}")
+        return DEFAULT_REPORT_WEIGHT
 
-    # Direct match first
+    # Direct match
     if report_type_lower in REPORT_TYPE_WEIGHTS:
         return REPORT_TYPE_WEIGHTS[report_type_lower]
 
-    # Partial match
+    # Partial match (return first match)
     for key, weight in REPORT_TYPE_WEIGHTS.items():
         if key.lower() in report_type_lower:
             return weight
 
+    logger.error(f"No match for {report_type_lower}, returning default: {DEFAULT_REPORT_WEIGHT}")
     return DEFAULT_REPORT_WEIGHT
 
 
@@ -207,7 +213,7 @@ def categorize_report_type(report_type: Optional[str]) -> str:
         return 'commentary'
     if any(k in report_type_lower for k in ['一般', 'general', 'regular', 'standard', '新股', '港股']):
         return 'general'
-    if any(k in report_type_lower for k in ['非各股', 'non-stock', 'industry', 'strategy', 'sector']):
+    if any(k in report_type_lower for k in ['非个股', 'non-stock', 'industry', 'strategy', 'sector']):
         return 'other'
 
     return 'other'
@@ -412,6 +418,9 @@ def _apply_field_ranges(field: str, values: np.ndarray, weights: np.ndarray) -> 
     Returns:
         Filtered values and weights
     """
+    if len(values) == 0:
+        return values, weights
+
     if field == 'eps':
         mask = (values >= -50) & (values <= 50)
     elif field in ['pe', 'ev_ebitda']:
@@ -480,8 +489,11 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
 
     df = df.copy()
     if 'report_weight' not in df.columns:
-        df['report_weight'] = df['report_type'].apply(get_report_weight)
-
+        if 'report_type' not in df.columns or df['report_type'].isna().all():
+            logger.warning("No valid report_types, assigning default weight")
+            df['report_weight'] = DEFAULT_REPORT_WEIGHT
+        else:
+            df['report_weight'] = pd.Series([get_report_weight(t) for t in df['report_type']], index=df.index)
     quarter_specific_fields = ['eps', 'pe', 'rd', 'roe', 'ev_ebitda']
     all_report_fields = ['max_price', 'min_price']
 
@@ -503,11 +515,17 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = None
                 continue
 
-            values = field_data[field].values
-            weights = field_data['report_weight'].values
+            try:
+                values = field_data[field].values
+                weights = field_data['report_weight'].values
 
-            values, weights = _filter_outliers(values, weights)
-            values, weights = _apply_field_ranges(field, values, weights)
+                values, weights = _filter_outliers(values, weights)
+                values, weights = _apply_field_ranges(field, values, weights)
+            except Exception as e:
+                # Log the error but continue with None value
+                print(f"Warning: Error processing field {field}: {e}")
+                result[field] = None
+                continue
 
             if len(values) == 0:
                 result[field] = None
@@ -526,11 +544,17 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
                 result[field] = None
                 continue
 
-            values = field_data[field].values
-            weights = field_data['report_weight'].values
+            try:
+                values = field_data[field].values
+                weights = field_data['report_weight'].values
 
-            values, weights = _filter_outliers(values, weights)
-            values, weights = _apply_field_ranges(field, values, weights)
+                values, weights = _filter_outliers(values, weights)
+                values, weights = _apply_field_ranges(field, values, weights)
+            except Exception as e:
+                # Log the error but continue with None value
+                print(f"Warning: Error processing field {field}: {e}")
+                result[field] = None
+                continue
 
             if len(values) == 0:
                 result[field] = None
@@ -714,12 +738,24 @@ def get_next_year_consensus(
             if df.empty:
                 return None
 
-            df['report_weight'] = df['report_type'].apply(get_report_weight)
+            # Apply report weights with error handling
+            try:
+                df['report_weight'] = pd.Series([get_report_weight(t) for t in df['report_type']], index=df.index)
+            except Exception as e:
+                logger.warning(f"Error applying report weights: {e}. Using default weights.")
+                df['report_weight'] = DEFAULT_REPORT_WEIGHT
 
             total_reports = len(df)
             avg_report_weight = df['report_weight'].mean() if not df.empty else 0.0
 
-            forecasts = aggregate_forecasts(df, 'next_year', 'ALL')
+            try:
+                forecasts = aggregate_forecasts(df, 'next_year', 'ALL')
+            except Exception as e:
+                logger.warning(f"Error in forecast aggregation: {e}. Returning basic stats only.")
+                forecasts = {
+                    'eps': None, 'pe': None, 'rd': None, 'roe': None,
+                    'ev_ebitda': None, 'max_price': None, 'min_price': None
+                }
 
             return {
                 'total_reports': total_reports,
