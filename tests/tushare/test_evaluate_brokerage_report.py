@@ -513,6 +513,7 @@ class TestBrokerageReportEvaluation:
             'pe': [4.0, 4.1, 4.2, None, 3.9],
             'rd': [5.0, 5.5, None, 6.0, 4.8],
             'roe': [9.5, 10.0, 9.8, None, 9.7],
+            'ev_ebitda': [8.5, 9.0, None, 8.8, 7.9],  # Add ev_ebitda field
             'max_price': [12.5, 13.0, None, 11.8, 12.2],
             'min_price': [11.5, 12.0, None, 11.0, 11.8],
             'report_type': ['点评', '一般', '点评', '一般', '非个股'],  # Add report types for weighting
@@ -569,7 +570,7 @@ class TestBrokerageReportEvaluation:
         # Test aggregation for bullish sentiment (BUY + HOLD data)
         if sentiment_pos > 0:
             bullish_df = test_df[test_df['rating_category'].isin(['BUY', 'HOLD'])]
-            result_bullish = aggregate_forecasts(bullish_df, 'bullish')
+            result_bullish = aggregate_forecasts(bullish_df, 'bullish', 'ALL')
             logger.info(f"Bullish aggregation result (using {len(bullish_df)} BUY/HOLD reports): {result_bullish}")
         else:
             result_bullish = {'eps': None, 'pe': None, 'rd': None, 'roe': None, 'ev_ebitda': None, 'max_price': None, 'min_price': None}
@@ -578,7 +579,7 @@ class TestBrokerageReportEvaluation:
         # Test aggregation for bearish sentiment (NEUTRAL + SELL data)
         if sentiment_neg > 0:
             bearish_df = test_df[test_df['rating_category'].isin(['NEUTRAL', 'SELL'])]
-            result_bearish = aggregate_forecasts(bearish_df, 'bearish')
+            result_bearish = aggregate_forecasts(bearish_df, 'bearish', 'ALL')
             logger.info(f"Bearish aggregation result (using {len(bearish_df)} NEUTRAL/SELL reports): {result_bearish}")
         else:
             result_bearish = {'eps': None, 'pe': None, 'rd': None, 'roe': None, 'ev_ebitda': None, 'max_price': None, 'min_price': None}
