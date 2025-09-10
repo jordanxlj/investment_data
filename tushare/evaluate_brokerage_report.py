@@ -355,7 +355,11 @@ def parse_quarter(quarter_str: str) -> Tuple[int, int]:
 
     try:
         year_str, q_str = quarter_str.split('Q')
-        return (int(year_str), int(q_str))
+        year = int(year_str)
+        quarter = int(q_str)
+        if quarter < 1 or quarter > 4:
+            return (0, 0)
+        return (year, quarter)
     except (ValueError, IndexError):
         return (0, 0)
 
@@ -370,9 +374,15 @@ def compare_quarters(quarter1: str, quarter2: str) -> int:
 
     Returns:
         -1 if quarter1 < quarter2, 0 if equal, 1 if quarter1 > quarter2
+
+    Raises:
+        ValueError: If either quarter string is invalid
     """
     y1, q1 = parse_quarter(quarter1)
     y2, q2 = parse_quarter(quarter2)
+
+    if (y1 == 0 and q1 == 0) or (y2 == 0 and q2 == 0):
+        raise ValueError(f"Invalid quarter format: {quarter1} or {quarter2}")
 
     if y1 < y2: return -1
     if y1 > y2: return 1
@@ -394,7 +404,7 @@ def _filter_outliers(values: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarra
     """
     if len(values) > 2:
         mean_val = np.mean(values)
-        std_val = np.std(values)
+        std_val = np.std(values, ddof=1)  # Use sample standard deviation
         if std_val > 0:
             valid_mask = (values >= mean_val - 3 * std_val) & (values <= mean_val + 3 * std_val)
             return values[valid_mask], weights[valid_mask]
@@ -581,7 +591,13 @@ def get_brokerage_consensus(
             if df.empty:
                 return None
 
-            df['quarter_comparison'] = df['quarter'].apply(lambda q: compare_quarters(q, min_quarter) >= 0 if q else False)
+            # Handle min_quarter format - if it's just a year, convert to Q4 format for comparison
+            min_quarter_for_comparison = min_quarter
+            if min_quarter and 'Q' not in min_quarter:
+                # If min_quarter is just a year (e.g., '2024'), treat it as '2024Q4' for comparison
+                min_quarter_for_comparison = f"{min_quarter}Q4"
+
+            df['quarter_comparison'] = df['quarter'].apply(lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False)
             df = df[df['quarter_comparison']]
 
             if df.empty:

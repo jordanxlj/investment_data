@@ -164,9 +164,9 @@ def test_fiscal_year_boundary_cases():
     jan_info = get_fiscal_period_info('20240101')
     dec_info = get_fiscal_period_info('20241231')
 
-    # January should be Q1 of current fiscal year (natural year accounting)
+    # January should be Q1 of current fiscal year
     assert jan_info['current_quarter'] == '2024Q1'
-    assert jan_info['current_fiscal_year'] == '2023'  # Current year for Jan
+    assert jan_info['current_fiscal_year'] == '2023'
 
     # December should be Q4
     assert dec_info['current_quarter'] == '2024Q4'
@@ -735,92 +735,90 @@ def test_filter_outliers():
     values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
     filtered_values, filtered_weights = _filter_outliers(values, weights)
-    assert len(filtered_values) == len(values)  # No outliers removed
+    assert len(filtered_values) == len(values) # No outliers removed
 
-    # Test with outliers - use values with clear outlier
-    values_with_outliers = np.array([10.0, 10.5, 11.0, 50.0])  # 50.0 is clear outlier
-    weights_with_outliers = np.array([1.0, 1.0, 1.0, 1.0])
+    # Test with outliers - use values with extreme outlier
+    values_with_outliers = np.array([10.0] * 20 + [1000.0]) # 1000.0 is extreme outlier with large n
+    weights_with_outliers = np.array([1.0] * 21)
     filtered_values, filtered_weights = _filter_outliers(values_with_outliers, weights_with_outliers)
-    # With small standard deviation, 50.0 will be filtered out
-    assert len(filtered_values) == 3
+    # 1000.0 should be filtered out
+    assert len(filtered_values) == 20
 
 def test_apply_field_ranges():
     """Test _apply_field_ranges function"""
-    # Test EPS field
-    values = np.array([-100.0, 2.5, 100.0])  # -100.0 and 100.0 should be filtered (out of -50 to 50 range)
-    weights = np.array([1.0, 1.0, 1.0])
+    # Test with eps field - range -50 to 50
+    values = np.array([-60.0, -40.0, 0.0, 40.0, 60.0])
+    weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
     filtered_values, filtered_weights = _apply_field_ranges('eps', values, weights)
-    assert len(filtered_values) == 1  # Only 2.5 should remain
-    assert filtered_values[0] == 2.5
+    assert len(filtered_values) == 3 # -40, 0, 40 should remain
 
-    # Test PE field
-    values = np.array([5.0, 200.0, 600.0])  # 600.0 should be filtered
-    weights = np.array([1.0, 1.0, 1.0])
+    # Test with pe field - range >0 to 500
+    values = np.array([-1.0, 0.0, 100.0, 600.0])
+    weights = np.array([1.0, 1.0, 1.0, 1.0])
     filtered_values, filtered_weights = _apply_field_ranges('pe', values, weights)
-    assert len(filtered_values) == 2  # 5.0 and 200.0 should remain
+    assert len(filtered_values) == 1 # 100.0 should remain
 
-def test_get_annual_report_data():
-    """Test get_annual_report_data function"""
-    # This function is complex and requires database connection
-    # We'll just test that it exists and has proper signature
-    # Test with invalid inputs to ensure error handling
-    try:
-        result = get_annual_report_data(None, '000001.SZ', '2024')
-        assert isinstance(result, (dict, type(None)))
-    except Exception:
-        # Expected for invalid engine
-        pass
+def test_get_report_weight():
+    """Test get_report_weight function"""
+    # Test with known report type
+    assert get_report_weight('深度') == 5.0
 
-def test_process_stock_consensus():
-    """Test process_stock_consensus function"""
-    # This function is complex and requires database connection
-    # We'll just test that it exists and has proper signature
-    # Test with invalid inputs
-    try:
-        result = process_stock_consensus(None, ['000001.SZ'], '20250101')
-        assert isinstance(result, (list, type(None)))
-    except Exception:
-        # Expected for invalid engine
-        pass
+    # Test with unknown report type
+    assert get_report_weight('unknown') == DEFAULT_REPORT_WEIGHT
 
-def test_upsert_batch():
-    """Test _upsert_batch function"""
-    # This function requires database connection
-    # Test with empty DataFrame
-    df = pd.DataFrame()
-    try:
-        result = _upsert_batch(None, df)
-        assert isinstance(result, int)
-    except Exception:
-        # Expected for invalid engine
-        pass
+    # Test with None
+    assert get_report_weight(None) == DEFAULT_REPORT_WEIGHT
 
-def test_get_stocks_list():
-    """Test get_stocks_list function"""
-    # Test with invalid engine
-    try:
-        result = get_stocks_list(None)
-        assert isinstance(result, list)
-    except Exception:
-        # Expected for invalid engine
-        pass
+def test_classify_rating():
+    """Test classify_rating function"""
+    # Test with BUY rating
+    assert classify_rating('买入') == 'BUY'
 
-def test_evaluate_brokerage_report_main():
-    """Test main evaluate_brokerage_report function"""
-    # Test with invalid inputs
-    try:
-        result = evaluate_brokerage_report(None, ['000001.SZ'], '20250101')
-        assert isinstance(result, (dict, type(None)))
-    except Exception:
-        # Expected for invalid engine
-        pass
+    # Test with NEUTRAL rating
+    assert classify_rating('中性') == 'NEUTRAL'
+
+    # Test with unknown rating
+    assert classify_rating('unknown') == 'NEUTRAL'
+
+def test_categorize_report_type():
+    """Test categorize_report_type function"""
+    # Test with depth report
+    assert categorize_report_type('深度') == 'depth'
+
+    # Test with commentary report
+    assert categorize_report_type('点评') == 'commentary'
+
+    # Test with other report
+    assert categorize_report_type('industry') == 'other'
+
+def test_parse_quarter():
+    """Test parse_quarter function"""
+    # Test with valid quarter
+    year, quarter = parse_quarter('2024Q4')
+    assert year == 2024
+    assert quarter == 4
+
+    # Test with invalid quarter
+    year, quarter = parse_quarter('invalid')
+    assert year == 0
+    assert quarter == 0
+
+def test_compare_quarters():
+    """Test compare_quarters function"""
+    # Test with same quarter
+    assert compare_quarters('2024Q4', '2024Q4') == 0
+
+    # Test with earlier quarter
+    assert compare_quarters('2024Q3', '2024Q4') == -1
+
+    # Test with later quarter
+    assert compare_quarters('2025Q1', '2024Q4') == 1
 
 def test_get_trade_cal_error_handling():
     """Test get_trade_cal error handling"""
-
-    # Mock the global pro variable to raise exception
-    with patch('tushare.pro_api') as mock_pro:
-        mock_pro.trade_cal.side_effect = Exception("API Error")
+    # Mock the pro variable to raise exception
+    with patch('evaluate_brokerage_report.pro.trade_cal') as mock_trade_cal:
+        mock_trade_cal.side_effect = Exception("API Error")
 
         result = get_trade_cal('20250101', '20250110')
         # Should return empty DataFrame on error
