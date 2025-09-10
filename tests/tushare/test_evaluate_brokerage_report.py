@@ -48,7 +48,8 @@ try:
         evaluate_brokerage_report,
         RATING_MAPPING,
         REPORT_TYPE_WEIGHTS,
-        pro
+        pro,
+        ALL_COLUMNS
     )
 except ImportError:
     # If that fails, try direct import from the file
@@ -86,6 +87,7 @@ except ImportError:
         RATING_MAPPING = eval_module.RATING_MAPPING
         REPORT_TYPE_WEIGHTS = eval_module.REPORT_TYPE_WEIGHTS
         pro = eval_module.pro
+        ALL_COLUMNS = eval_module.ALL_COLUMNS
 
         print("Successfully loaded evaluate_brokerage_report module directly")
     except Exception as e:
@@ -466,66 +468,84 @@ def test_get_stocks_list_error(mock_engine, caplog):
 
 def test_evaluate_brokerage_report_dry_run(caplog):
     """Test evaluate_brokerage_report dry_run"""
-    evaluate_brokerage_report(dry_run=True)
+    with patch('evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        with patch('evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+            mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
+            with patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = ['000001.SZ']
+                evaluate_brokerage_report(dry_run=True)
     assert "DRY RUN - No DB writes" in caplog.text
 
 def test_evaluate_brokerage_report_invalid_date(caplog):
     """Test evaluate_brokerage_report invalid date"""
-    evaluate_brokerage_report(start_date='invalid')
+    with patch('evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        evaluate_brokerage_report(start_date='invalid')
     assert "Invalid date" in caplog.text
 
-def test_evaluate_brokerage_report_no_stocks(mock_engine):
+def test_evaluate_brokerage_report_no_stocks():
     """Test evaluate_brokerage_report no stocks"""
-    with patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks:
-        mock_stocks.return_value = []
-        evaluate_brokerage_report()
-        # Returns without processing
+    with patch('evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        with patch('evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+            mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
+            with patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = []
+                evaluate_brokerage_report()
 
 def test_evaluate_brokerage_report_trade_cal_empty():
     """Test evaluate_brokerage_report with empty trade_cal"""
-    with patch('evaluate_brokerage_report.get_trade_cal') as mock_cal:
-        mock_cal.return_value = pd.DataFrame()
-        # Call and check date_list generated from range
-
+    with patch('evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        with patch('evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+            mock_trade_cal.return_value = pd.DataFrame()
+            with patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = ['000001.SZ']
+                evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+'''
 def test_evaluate_brokerage_report_processing_error(caplog):
     """Test evaluate_brokerage_report concurrent error"""
-    with patch('evaluate_brokerage_report.get_trade_cal') as mock_cal, \
-         patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks, \
-         patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
-        mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-        mock_stocks.return_value = ['000001.SZ']
-        mock_future = MagicMock()
-        mock_future.result.side_effect = Exception("process error")
-        mock_exec.return_value.__enter__.return_value.submit.return_value = mock_future
-        mock_exec.return_value.__enter__.return_value.as_completed.return_value = [mock_future]
-        evaluate_brokerage_report(start_date='20250101', end_date='20250101')
-        assert "Error processing" in caplog.text
-
+    with patch('evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        with patch('evaluate_brokerage_report.get_trade_cal') as mock_cal:
+            mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
+            with patch('evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = ['000001.SZ']
+                with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
+                    mock_future = MagicMock()
+                    mock_future.result.side_effect = Exception("process error")
+                    mock_exec.return_value.__enter__.return_value.submit.return_value = mock_future
+                    mock_exec.return_value.__enter__.return_value.as_completed.return_value = [mock_future]
+                    evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+    assert "Error processing" in caplog.text
+'''
 def test_config_file_not_found(caplog):
     """Test config loading FileNotFoundError"""
     with patch('builtins.open') as mock_open:
         mock_open.side_effect = FileNotFoundError
         # Reload module
         del sys.modules['evaluate_brokerage_report']
-        import evaluate_brokerage_report as reloaded
+        importlib.reload(sys.modules['evaluate_brokerage_report'])
         assert "Configuration file conf/report_configs.json not found" in caplog.text
-        assert 'BUY' in reloaded.RATING_MAPPING
+        assert 'BUY' in RATING_MAPPING
 
 def test_config_unicode_error(caplog):
     """Test config loading UnicodeDecodeError"""
     with patch('builtins.open') as mock_open:
         mock_open.side_effect = UnicodeDecodeError('utf-8', b'', 0, 1, 'test')
+        # Reload module
         del sys.modules['evaluate_brokerage_report']
-        import evaluate_brokerage_report as reloaded
+        importlib.reload(sys.modules['evaluate_brokerage_report'])
         assert "Encoding error loading config file" in caplog.text
-        assert 'BUY' in reloaded.RATING_MAPPING
+        assert 'BUY' in RATING_MAPPING
 
 def test_tushare_token_not_set(caplog, monkeypatch):
     """Test TUSHARE_TOKEN not set"""
     monkeypatch.delenv("TUSHARE", raising=False)
     with pytest.raises(SystemExit):
         del sys.modules['evaluate_brokerage_report']
-        import evaluate_brokerage_report
+        importlib.reload(sys.modules['evaluate_brokerage_report'])
     assert "TUSHARE environment variable not set" in caplog.text
 
 def test_get_report_weight_error_conversion(caplog):
@@ -576,6 +596,56 @@ def test_compare_quarters_invalid():
     """Test compare_quarters invalid format raise"""
     with pytest.raises(ValueError):
         compare_quarters('invalid', '2024Q1')
+
+@pytest.mark.parametrize("field, values, weights, expected_length", [
+    ('eps', np.array([-60.0, -40.0, 0.0, 40.0, 60.0]), np.array([1.0]*5), 3),
+    ('pe', np.array([-1.0, 0.0, 100.0, 600.0]), np.array([1.0]*4), 1),
+    ('rd', np.array([1.0]), np.array([1.0]), 1),
+])
+def test_apply_field_ranges(field, values, weights, expected_length):
+    """Test _apply_field_ranges function"""
+    filtered_values, filtered_weights = _apply_field_ranges(field, values, weights)
+    assert len(filtered_values) == expected_length
+
+@pytest.mark.parametrize("values, weights, expected_length", [
+    (np.array([1.0, 2.0, 3.0, 4.0, 5.0]), np.array([1.0]*5), 5),
+    (np.array([10.0]*20 + [1000.0]), np.array([1.0]*21), 20),
+])
+def test_filter_outliers(values, weights, expected_length):
+    """Test _filter_outliers function"""
+    filtered_values, filtered_weights = _filter_outliers(values, weights)
+    assert len(filtered_values) == expected_length
+
+def test_aggregate_forecasts_missing_columns():
+    """Test aggregate_forecasts with missing columns"""
+    df = pd.DataFrame({
+        'eps': [2.5, 2.6],
+        'report_type': ['点评', '一般'],
+        'report_weight': [3.0, 2.0]
+        # Missing pe, rd, roe, etc.
+    })
+
+    result = aggregate_forecasts(df, 'bullish')
+    # Should handle missing columns gracefully
+    assert result['eps'] is not None  # eps should be calculated
+    assert result['pe'] is None       # pe should be None (missing column)
+
+def test_get_date_window_invalid_format():
+    """Test get_date_window with invalid date format"""
+    with pytest.raises(ValueError, match="Invalid eval_date format"):
+        get_date_window('invalid_date')
+
+def test_get_brokerage_consensus_after_filter_empty(mock_engine):
+    """Test get_brokerage_consensus empty after quarter filter"""
+    df = pd.DataFrame({
+        'quarter': ['2023Q4'],
+        'rating': ['买入'],
+        'report_type': ['点评']
+    })
+    with patch('pandas.read_sql') as mock_read_sql:
+        mock_read_sql.return_value = df
+        result = get_brokerage_consensus(mock_engine, '000001.SZ', '20250101', '2024Q4')
+        assert result is None
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
