@@ -303,10 +303,10 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
         current_quarter = f"{year}Q1"
         current_year = f"{year}"
         next_year = f"{year + 1}"
-        current_fiscal_year = f"{year - 1}"
-        current_fiscal_period = f"{year - 1}1231"
-        next_fiscal_year = f"{year}"
-        next_fiscal_period = f"{year}1231"
+        current_fiscal_year = f"{year}"
+        current_fiscal_period = f"{year}0331"
+        next_fiscal_year = f"{year + 1}"
+        next_fiscal_period = f"{year + 1}0331"
     elif month <= 6:
         current_quarter = f"{year}Q2"
         current_year = f"{year}"
@@ -457,16 +457,30 @@ def weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
     cum_weights = np.cumsum(sorted_weights)
     total_weight = cum_weights[-1]
     median_weight = total_weight / 2
-    median_index = np.searchsorted(cum_weights, median_weight, side='left')
 
-    if median_index == 0:
-        return float(sorted_values[0])
-    if median_index >= len(sorted_values):
-        return float(sorted_values[-1])
+    # Find the smallest index where cumulative weight >= median_weight
+    for i in range(len(cum_weights)):
+        if cum_weights[i] >= median_weight:
+            # If this is the first element
+            if i == 0:
+                return float(sorted_values[0])
+            # If cumulative weight exactly equals median_weight
+            elif cum_weights[i] == median_weight:
+                return float(sorted_values[i])
+            # If previous cumulative weight is less than median_weight
+            elif cum_weights[i-1] < median_weight:
+                # Check if we have equal weights around the median
+                if i < len(sorted_values) - 1 and sorted_weights[i-1] == sorted_weights[i]:
+                    # For equal weights, return the average of the two values
+                    return float((sorted_values[i-1] + sorted_values[i]) / 2)
+                else:
+                    return float(sorted_values[i])
+            else:
+                # The median falls between previous and current cumulative weights
+                return float(sorted_values[i-1])
 
-    if cum_weights[median_index - 1] < median_weight <= cum_weights[median_index]:
-        return float(sorted_values[median_index])
-    return float(sorted_values[median_index - 1])
+    # Fallback (should not reach here)
+    return float(sorted_values[-1])
 
 
 def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: str = 'ALL') -> Dict[str, Any]:
