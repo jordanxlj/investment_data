@@ -833,6 +833,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 db_periods_list.append(db_period)
             else:
                 db_periods_list.append(period)  # Keep as-is if not in expected format
+        logger.debug(f"db_periods_list: {db_periods_list}")
 
         # Convert date_list to datetime for fundamental table query
         date_objs = [datetime.datetime.strptime(date, "%Y%m%d") for date in date_list]
