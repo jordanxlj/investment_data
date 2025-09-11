@@ -1137,44 +1137,66 @@ def evaluate_brokerage_report(
         logger.info("DRY RUN - No DB writes")
         return
 
-    logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers")
+    # Create a function to process all dates for a single stock and upsert immediately
+    def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], batch_size: int) -> int:
+        """Process all dates for a single stock and upsert results immediately"""
+        stock_results = []
+        for current_date in date_list:
+            try:
+                result = process_stock_consensus(engine, ts_code, current_date)
+                if result:
+                    stock_results.append(result)
+            except Exception as e:
+                logger.error(f"Error processing {ts_code} for date {current_date}: {e}")
+
+        # Upsert results immediately after processing this stock
+        if stock_results:
+            try:
+                df = pd.DataFrame(stock_results)
+                df['last_updated'] = pd.to_datetime(df['last_updated'])
+                df = df.replace({np.nan: None})
+                for col in ALL_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
+                df = df[ALL_COLUMNS]
+                upserted = _upsert_batch(engine, df, batch_size)
+                logger.debug(f"Upserted {upserted} records for stock {ts_code}")
+                return upserted
+            except Exception as e:
+                logger.error(f"Error upserting results for stock {ts_code}: {e}")
+                return 0
+        return 0
+
+    logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers (each worker handles one stock for all {len(date_list)} dates)")
     logger.info(f"Stocks to process: {stocks_list[:10]}..." if len(stocks_list) > 10 else f"Stocks to process: {stocks_list}")
 
-    for current_date in date_list:
-        logger.info(f"Processing date: {current_date}")
-        date_results = []
+    # Log connection pool status
+    logger.info(f"Connection pool status - size: {engine.pool.size()}, checkedin: {engine.pool.checkedin()}, overflow: {engine.pool.overflow()}")
 
-        # Log connection pool status
-        logger.info(f"Connection pool status - size: {engine.pool.size()}, checkedin: {engine.pool.checkedin()}, overflow: {engine.pool.overflow()}")
+    total_upserted = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit one task per stock (each task processes all dates for that stock and upserts immediately)
+        futures = {executor.submit(process_stock_all_dates, engine, ts_code, date_list, batch_size): ts_code for ts_code in stocks_list}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_stock_consensus, engine, ts_code, current_date): ts_code for ts_code in stocks_list}
+        logger.info(f"Submitted {len(futures)} tasks to thread pool (one per stock)")
 
-            logger.info(f"Submitted {len(futures)} tasks to thread pool")
+        completed_count = 0
+        for future in concurrent.futures.as_completed(futures):
+            ts_code = futures[future]
+            try:
+                upserted_count = future.result()
+                total_upserted += upserted_count
+                completed_count += 1
 
-            completed_count = 0
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    result = future.result()
-                    if result:
-                        date_results.append(result)
-                    completed_count += 1
-                    if completed_count % 100 == 0:  # Log progress every 100 stocks
-                        logger.info(f"Completed {completed_count}/{len(futures)} stocks")
-                except Exception as e:
-                    logger.error(f"Error processing {futures[future]}: {e}")
+                if completed_count % 50 == 0:  # Log progress every 50 stocks
+                    logger.info(f"Completed {completed_count}/{len(futures)} stocks, total upserted: {total_upserted}")
 
-        logger.info(f"Completed processing {len(date_results)} stocks for date {current_date}")
+            except Exception as e:
+                logger.error(f"Error processing stock {ts_code}: {e}")
+                completed_count += 1
 
-        if date_results:
-            df = pd.DataFrame(date_results)
-            df['last_updated'] = pd.to_datetime(df['last_updated'])
-            df = df.replace({np.nan: None})
-            for col in ALL_COLUMNS:
-                if col not in df.columns:
-                    df[col] = None
-            df = df[ALL_COLUMNS]
-            _upsert_batch(engine, df, batch_size)
+    logger.info(f"Completed processing all stocks. Total upserted: {total_upserted} records")
+    logger.info(f"Processed: {len(stocks_list)} stocks * {len(date_list)} dates = {len(stocks_list) * len(date_list)} stock-date combinations")
 
 
 if __name__ == "__main__":
