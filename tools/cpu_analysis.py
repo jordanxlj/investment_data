@@ -67,11 +67,11 @@ def analyze_mysql_configuration(conn):
                             if isinstance(value, str):
                                 value = int(value)
                             if value > 1024**3:
-                                print(".1f")
+                                print(f"{desc}: {value / 1024**3:.1f} GB")
                             elif value > 1024**2:
-                                print(".1f")
+                                print(f"{desc}: {value / 1024**2:.1f} MB")
                             elif value > 1024:
-                                print(".1f")
+                                print(f"{desc}: {value / 1024:.1f} KB")
                             else:
                                 print(f"{desc}: {value}")
                         except:
@@ -180,7 +180,7 @@ def analyze_query_performance_schema(conn):
                 print(f"🐌 Top {len(slow_queries)} slowest queries:")
                 for i, query in enumerate(slow_queries, 1):
                     print(f"{i}. Schema: {query[0]}")
-                    print(".3f")
+                    print(f"   Avg time: {query[3]:.3f}s")
                     print(f"   Max: {query[4]:.3f}s, Count: {query[2]}")
                     print(f"   Rows examined: {query[5]}, Rows sent: {query[6]}")
                     if query[1]:  # digest_text
@@ -326,7 +326,7 @@ def analyze_thread_activity():
     for i, proc in enumerate(all_threads[:10], 1):
         cpu = proc['cpu_percent'] or 0
         mem = proc['memory_percent'] or 0
-        print(".1f")
+        print(f"  {i}. {proc['name']} (PID: {proc['pid']}) - CPU: {cpu:.1f}%, Mem: {mem:.1f}%")
 
     # Analyze Python threads specifically
     python_threads = [t for t in threading.enumerate()]
@@ -459,7 +459,7 @@ def monitor_system_resources(duration: int = 30, interval: int = 1):
 
             # Print current values
             if i % 5 == 0:  # Print every 5 seconds
-                print("5d")
+                print(f"{time.time() - start_time:5.1f} | {cpu_percent:4.1f} | {mem_percent:4.1f} | {disk_read/1024/1024:9.1f} | {disk_write/1024/1024:10.1f} | {net_sent/1024/1024:8.1f} | {net_recv/1024/1024:8.1f}")
 
             time.sleep(interval)
 
@@ -475,10 +475,10 @@ def monitor_system_resources(duration: int = 30, interval: int = 1):
         avg_mem = sum(mem_history) / len(mem_history)
         max_mem = max(mem_history)
 
-        print("
-=== Monitoring Summary ==="        print(".1f")
-        print(".1f")
-        print(".1f")
+        print("\n=== Monitoring Summary ===")
+        print(f"Average CPU: {avg_cpu:.1f}%")
+        print(f"Max CPU: {max_cpu:.1f}%")
+        print(f"Min CPU: {min_cpu:.1f}%")
 
         # CPU utilization analysis
         if avg_cpu < 30:
@@ -498,7 +498,7 @@ def monitor_system_resources(duration: int = 30, interval: int = 1):
         if len(disk_history) > 1:
             disk_read_rate = (disk_history[-1][0] - disk_history[0][0]) / duration / 1024 / 1024
             disk_write_rate = (disk_history[-1][1] - disk_history[0][1]) / duration / 1024 / 1024
-            print(".1f")
+            print(f"Disk read rate: {disk_read_rate:.1f} MB/s")
 
             if disk_read_rate > 50 or disk_write_rate > 50:
                 print("⚠️  HIGH DISK I/O - Possible I/O bottleneck")
@@ -507,8 +507,8 @@ def monitor_system_resources(duration: int = 30, interval: int = 1):
 
 def analyze_query_execution_plan(conn, query: str):
     """Analyze query execution plan for performance bottlenecks"""
-    print("
-=== Query Execution Plan Analysis ==="    print(f"Analyzing query: {query[:100]}...")
+    print("\n=== Query Execution Plan Analysis ===")
+    print(f"Analyzing query: {query[:100]}...")
 
     try:
         with conn.cursor() as cursor:
@@ -577,7 +577,7 @@ def analyze_index_usage(conn):
 
                 for idx in indexes:
                     size_mb = (idx[7] * 16384) / 1024 / 1024 if idx[7] else 0  # Approximate page size
-                    print("10")
+                    print(f"{idx[0]:10} | {idx[1]:10} | {idx[2]:15} | {idx[3]:6} | {idx[4]:6} | {idx[5]:8} | {size_mb:.1f}")
 
                 # Check for unused indexes
                 unused_indexes = [idx for idx in indexes if idx[3] == 0 and idx[4] == 0]  # No reads or writes
