@@ -269,10 +269,14 @@ def get_financial_data_only_consensus(engine: Any, ts_code: str, eval_date: str)
                 'avg_report_weight': 0.0,
                 'data_source': 'financial_only'
             })
+
+            # Add last_updated timestamp
+            current_consensus['last_updated'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             return current_consensus
 
+        # If no annual report data
         return None
-
     except Exception as e:
         logger.error(f"Error getting financial data only consensus for {ts_code} {eval_date}: {e}")
         return None
@@ -503,53 +507,6 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
 
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
 
-
-def diagnose_concurrency():
-    """Diagnose concurrency issues in the system"""
-    import psutil
-    import threading
-
-    print("=== Concurrency Diagnosis ===")
-
-    # System info
-    print(f"CPU cores: {psutil.cpu_count()}")
-    print(f"CPU usage: {psutil.cpu_percent()}%")
-    print(f"Memory usage: {psutil.virtual_memory().percent}%")
-
-    # Thread info
-    print(f"Active threads: {threading.active_count()}")
-    print(f"Thread names: {[t.name for t in threading.enumerate()]}")
-
-    # MySQL connection info (if available)
-    try:
-        import pymysql
-        conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', password='', database='investment_data')
-        with conn.cursor() as cursor:
-            cursor.execute("SHOW PROCESSLIST")
-            processes = cursor.fetchall()
-            print(f"MySQL active connections: {len(processes)}")
-            for proc in processes[:5]:  # Show first 5
-                print(f"  Process {proc[0]}: {proc[1]}@{proc[2]} - {proc[7]}")
-        conn.close()
-    except Exception as e:
-        print(f"MySQL connection check failed: {e}")
-
-def test_fiscal_period_info():
-    """Test fiscal period info calculation for different dates"""
-    test_dates = [
-        ("20180102", "2017Q4"),  # January - should be Q4 of previous year
-        ("20180430", "2017Q4"),  # April - should be Q4 of previous year
-        ("20180515", "2018Q1"),  # May - should be Q1 of current year
-        ("20180715", "2018Q2"),  # July - should be Q2 of current year
-        ("20181015", "2018Q3"),  # October - should be Q3 of current year
-        ("20181215", "2018Q4"),  # December - should be Q4 of current year
-    ]
-
-    for eval_date, expected_quarter in test_dates:
-        fiscal_info = get_fiscal_period_info(eval_date)
-        actual_quarter = fiscal_info['current_quarter']
-        print(f"Date: {eval_date}, Expected: {expected_quarter}, Actual: {actual_quarter}")
-        assert actual_quarter == expected_quarter, f"Mismatch for {eval_date}: expected {expected_quarter}, got {actual_quarter}"
 
 def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     """
@@ -789,8 +746,24 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
             values = field_data[field].values
             weights = field_data['report_weight'].values
 
-            values, weights = _filter_outliers(values, weights)
-            values, weights = _apply_field_ranges(field, values, weights)
+            # Convert values to numeric, handling conversion errors
+            try:
+                values = pd.to_numeric(values, errors='coerce')
+                # Remove NaN values after conversion
+                valid_mask = ~pd.isna(values)
+                values = values[valid_mask]
+                weights = weights[valid_mask]
+
+                if len(values) > 0:
+                    values, weights = _filter_outliers(values, weights)
+                    values, weights = _apply_field_ranges(field, values, weights)
+                else:
+                    values = np.array([])
+                    weights = np.array([])
+            except Exception as e:
+                logger.warning(f"Error processing field {field}: {e}")
+                values = np.array([])
+                weights = np.array([])
 
             if len(values) == 0:
                 result[field] = None
@@ -813,8 +786,24 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
             values = field_data[field].values
             weights = field_data['report_weight'].values
 
-            values, weights = _filter_outliers(values, weights)
-            values, weights = _apply_field_ranges(field, values, weights)
+            # Convert values to numeric, handling conversion errors
+            try:
+                values = pd.to_numeric(values, errors='coerce')
+                # Remove NaN values after conversion
+                valid_mask = ~pd.isna(values)
+                values = values[valid_mask]
+                weights = weights[valid_mask]
+
+                if len(values) > 0:
+                    values, weights = _filter_outliers(values, weights)
+                    values, weights = _apply_field_ranges(field, values, weights)
+                else:
+                    values = np.array([])
+                    weights = np.array([])
+            except Exception as e:
+                logger.warning(f"Error processing field {field}: {e}")
+                values = np.array([])
+                weights = np.array([])
 
             if len(values) == 0:
                 result[field] = None
@@ -1150,9 +1139,13 @@ def get_annual_report_data(
                 'next_year_ev_ebitda': None,
                 'next_year_reports': None,
                 'next_year_avg_weight': None,
-                'data_source': 'annual_report',
-                'last_updated': datetime.datetime.now()
+                'data_source': 'annual_report'
             }
+
+            # Add last_updated timestamp
+            result['last_updated'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            return result
     except Exception as e:
         logger.error(f"Error getting annual report data for {ts_code}: {e}")
         return None
