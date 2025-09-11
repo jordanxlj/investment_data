@@ -930,9 +930,9 @@ def test_get_annual_data_bulk_with_data(mock_engine):
         'roe_waa': [10.0]
     })
     fund_df = pd.DataFrame({
-        'trade_date': ['20241231', '20250101'],
-        'pe': [15.0, 15.5],
-        'dv_ratio': [2.0, 2.1]
+        'trade_date': [datetime.date(2025, 1, 1)],
+        'pe': [15.5],
+        'dv_ratio': [2.1]
     })
     with patch('pandas.read_sql') as mock_read_sql:
         mock_read_sql.side_effect = [fp_df, fund_df]
@@ -943,6 +943,7 @@ def test_get_annual_data_bulk_with_data(mock_engine):
     assert result['20250101']['rd'] == 2.1
     assert result['20250101']['data_source'] == 'annual_report'
 
+
 def test_get_annual_data_bulk_no_data(mock_engine):
     """Test get_annual_data_bulk with no data"""
     date_list = ['20250101']
@@ -950,6 +951,29 @@ def test_get_annual_data_bulk_no_data(mock_engine):
         mock_read_sql.side_effect = [pd.DataFrame(), pd.DataFrame()]
         result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
     assert result['20250101'] is None
+
+
+def test_get_annual_data_bulk_ann_date_after_current_date(mock_engine):
+    """Test get_annual_data_bulk when ann_date is after current_date"""
+    date_list = ['20250101']
+    # ann_date is after current_date, so no data should be available
+    fp_df = pd.DataFrame({
+        'ann_date': ['20250401'],  # After evaluation date 20250101
+        'report_period': ['2024-12-31'],
+        'eps': [1.0],
+        'roe_waa': [10.0]
+    })
+    fund_df = pd.DataFrame({
+        'trade_date': [datetime.date(2024, 12, 31), datetime.date(2025, 1, 1)],
+        'pe': [15.0, 15.5],
+        'dv_ratio': [2.0, 2.1]
+    })
+    with patch('pandas.read_sql') as mock_read_sql:
+        mock_read_sql.side_effect = [fp_df, fund_df]
+        result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
+    # When ann_date is after current_date, the annual data should be None
+    assert result['20250101'] is None
+
 
 def test_process_stock_all_dates_with_annual(mock_engine):
     """Test process_stock_all_dates with annual data"""

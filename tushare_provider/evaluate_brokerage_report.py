@@ -847,7 +847,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 FROM ts_a_stock_financial_profile
                 WHERE ts_code = :ts_code
                 AND report_period IN :periods
-                ORDER BY report_period DESC
+                ORDER BY report_period DESC, ann_date DESC
             """)
             fp_df = pd.read_sql(fp_query, conn, params={
                 'ts_code': ts_code,
@@ -929,10 +929,12 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                     'last_updated': datetime.datetime.now()
                 }
 
-                # Get fundamental data for the same date (most recent available)
-                fund_available = fund_df[fund_df['trade_date'] <= current_date]
-                if not fund_available.empty:
-                    f_row = fund_available.iloc[0]  # Most recent
+                # Get fundamental data for the exact current date
+                # Convert current_date to datetime for proper comparison with database datetime
+                current_date_dt = datetime.datetime.strptime(current_date, "%Y%m%d").date()
+                fund_exact = fund_df[fund_df['trade_date'] == current_date_dt]
+                if not fund_exact.empty:
+                    f_row = fund_exact.iloc[0]
                     annual_data['pe'] = f_row['pe']
                     annual_data['rd'] = f_row['dv_ratio']  # Use dv_ratio as rd
 
