@@ -603,6 +603,12 @@ def get_brokerage_consensus(
             if df.empty:
                 return None
 
+            # Debug: Log quarter values for this stock
+            logger.debug(f"Brokerage data for {ts_code}: {len(df)} records")
+            logger.debug(f"Quarter values: {df['quarter'].unique()[:10].tolist()}")  # Show first 10 unique quarters
+            logger.debug(f"Quarter null count: {df['quarter'].isnull().sum()}")
+            logger.debug(f"Min quarter: {min_quarter}, min_quarter_for_comparison: {min_quarter_for_comparison}")
+
             # Handle min_quarter format - if it's just a year, convert to Q4 format for comparison
             min_quarter_for_comparison = min_quarter
             if min_quarter and 'Q' not in min_quarter:
