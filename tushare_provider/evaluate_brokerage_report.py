@@ -592,7 +592,6 @@ def get_brokerage_consensus(
                 WHERE ts_code = :ts_code
                 AND report_date BETWEEN :start_date AND :end_date
                 AND report_date >= :max_age_date
-                AND quarter IS NOT NULL
                 AND rating IS NOT NULL
                 AND report_type IS NOT NULL
             """)
@@ -604,7 +603,9 @@ def get_brokerage_consensus(
                 return None
 
             # Debug: Log quarter values for this stock
+            logger.debug(f"start_date: {start_date}, end_date: {end_date}, max_age_date: {max_age_date}")
             logger.debug(f"Brokerage data for {ts_code}: {len(df)} records")
+            logger.debug(f"Brokerage data : {df}")
             logger.debug(f"Quarter values: {df['quarter'].unique()[:10].tolist()}")  # Show first 10 unique quarters
             logger.debug(f"Quarter null count: {df['quarter'].isnull().sum()}")
 
