@@ -602,6 +602,29 @@ def get_brokerage_consensus(
             if df.empty:
                 return None
 
+            # Filter out invalid quarters (None, empty, or incomplete like 'Q')
+            def is_valid_quarter(q):
+                if not q or pd.isna(q):
+                    return False
+                q_str = str(q).strip()
+                if len(q_str) <= 1 or not q_str.endswith(('Q1', 'Q2', 'Q3', 'Q4')):
+                    return False
+                # Check if it follows YYYYQX pattern
+                if len(q_str) != 6:  # YYYYQX format
+                    return False
+                try:
+                    year = int(q_str[:4])
+                    quarter = int(q_str[5])
+                    return 1 <= quarter <= 4 and 2000 <= year <= 2100
+                except ValueError:
+                    return False
+
+            valid_quarters_mask = df['quarter'].apply(is_valid_quarter)
+            invalid_count = len(df) - valid_quarters_mask.sum()
+            if invalid_count > 0:
+                logger.debug(f"Filtered out {invalid_count} records with invalid quarters")
+            df = df[valid_quarters_mask]
+
             # Debug: Log quarter values for this stock
             logger.debug(f"start_date: {start_date}, end_date: {end_date}, max_age_date: {max_age_date}")
             logger.debug(f"Brokerage data for {ts_code}: {len(df)} records")
