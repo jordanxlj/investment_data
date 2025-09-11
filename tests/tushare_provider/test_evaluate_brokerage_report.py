@@ -922,9 +922,10 @@ def test_get_annual_data_bulk_with_data(mock_engine):
     """Test get_annual_data_bulk with data"""
     date_list = ['20250101']
     # For 20250101 (January), fiscal period should be 20241231
+    # Mock data includes ann_date filtering (only data available on or before 20250101)
     fp_df = pd.DataFrame({
-        'ann_date': ['20250101'],
-        'period': ['2024-12-31'],  # Correct fiscal period for January 2025
+        'ann_date': ['20241231'],  # Available before evaluation date
+        'report_period': ['2024-12-31'],
         'eps': [1.0],
         'roe_waa': [10.0]
     })

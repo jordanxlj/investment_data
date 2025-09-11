@@ -854,6 +854,29 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 'periods': tuple(db_periods_list)
             })
 
+            # Filter by ann_date <= current_date for each period
+            # This ensures we only use annual reports that were available on the evaluation date
+            filtered_fp_rows = []
+            for current_date in date_list:
+                fiscal_info = get_fiscal_period_info(current_date)
+                period = fiscal_info['current_fiscal_period']
+                db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
+
+                period_rows = fp_df[fp_df['report_period'] == db_period]
+                if not period_rows.empty:
+                    # Filter by ann_date < current_date
+                    available_rows = period_rows[period_rows['ann_date'] < current_date]
+                    if not available_rows.empty:
+                        # Take the most recent available annual report for this period
+                        latest_row = available_rows.iloc[0]
+                        filtered_fp_rows.append(latest_row)
+
+            # Create filtered dataframe
+            if filtered_fp_rows:
+                fp_df = pd.DataFrame(filtered_fp_rows)
+            else:
+                fp_df = pd.DataFrame(columns=['ann_date', 'report_period', 'eps', 'roe_waa'])
+
             # Bulk query fundamental (daily data by trade_date)
             fund_query = text("""
                 SELECT trade_date, pe, dv_ratio
@@ -876,7 +899,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
             # Convert to database format for matching
             db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
 
-            # Get financial profile data for the fiscal period
+            # Get financial profile data for the fiscal period (already filtered by ann_date)
             fp_row = fp_df[fp_df['report_period'] == db_period]
 
             if not fp_row.empty:
