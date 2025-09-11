@@ -1,59 +1,87 @@
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 set -x
 
-[ ! -d "/workspace/dolt/investment_data" ] && echo "initializing dolt repo" && cd /workspace/dolt && dolt clone chenditc/investment_data
-cd /workspace/dolt/investment_data
-dolt pull
-#dolt push
+# Config via environment variables (override as needed)
+# MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
+# WORKERS, START_DATE_OVERRIDE, MIN_SYMBOLS_PER_DAY, WHERE_TRADEDATE_AFTER, CHUNKSIZE
 
-echo "Updating index weight"
-startdate=$(dolt sql -q "select * from max_index_date" -r csv | tail -1)
-#python3 /workspace/investment_data/tushare/dump_index_weight.py --start_date=$startdate
-#for file in $(ls /investment_data/tushare/index_weight/); 
-#do  
-#  dolt table import -u ts_index_weight /workspace/investment_data/tushare/index_weight/$file; 
-#done
+MYSQL_HOST=${MYSQL_HOST:-127.0.0.1}
+MYSQL_PORT=${MYSQL_PORT:-3307}
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+MYSQL_DB=${MYSQL_DB:-investment_data_new}
 
-echo "Updating index price"
-#python3 /workspace/investment_data/tushare/dump_index_eod_price.py 
-#for file in $(ls /workspace/investment_data/tushare/index/); 
-#do   
-#  dolt table import -u ts_a_stock_eod_price /workspace/investment_data/tushare/index/$file; 
-#done
+WORKERS=${WORKERS:-8}
+START_DATE_OVERRIDE=${START_DATE_OVERRIDE:-}
+MIN_SYMBOLS_PER_DAY=${MIN_SYMBOLS_PER_DAY:-1000}
+WHERE_TRADEDATE_AFTER=${WHERE_TRADEDATE_AFTER:-2023-05-01}
+CHUNKSIZE=${CHUNKSIZE:-2000}
 
-echo "Updating fundamentals"
-# Try to get last date from fundamentals table; fallback if missing
-fund_startdate=$(dolt sql -q "select date_format(max(trade_date), '%Y%m%d') from ts_a_stock_fundamental" -r csv 2>/dev/null || true)
-fund_startdate=$(echo "$fund_startdate" | tail -1)
-if [ -z "$fund_startdate" ] || [ "$fund_startdate" = "NULL" ]; then fund_startdate=20080101; fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ensure ts_a_stock_fundamental exists (rates float, shares/mv decimal)
-#dolt sql -q "CREATE TABLE IF NOT EXISTS ts_a_stock_fundamental ( ts_code VARCHAR(16) NOT NULL, trade_date VARCHAR(8) NOT NULL, turnover_rate FLOAT, turnover_rate_f FLOAT, volume_ratio FLOAT, pe FLOAT, pe_ttm FLOAT, pb FLOAT, ps FLOAT, ps_ttm FLOAT, dv_ratio FLOAT, dv_ttm FLOAT, total_share DECIMAL(16,4), float_share DECIMAL(16,4), free_share DECIMAL(16,4), total_mv DECIMAL(16,4), circ_mv DECIMAL(16,4), PRIMARY KEY (ts_code, trade_date))"
-python3 /workspace/investment_data/tushare/update_a_stock_fundamental.py --start_date=$fund_startdate
-for file in $(ls /workspace/investment_data/tushare/astock_fundamental/); 
-do  
-  dolt table import -u -pk ts_code,trade_date ts_a_stock_fundamental /investment_data/tushare/astock_fundamental/$file; 
-done
+MYSQL_URL="mysql+pymysql://${MYSQL_USER}:@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DB}"
 
-echo "Updating stock price"
-dolt sql-server &
-sleep 5 && python3 /workspace/investment_data/tushare/update_a_stock_eod_price_to_latest.py
-killall dolt
+echo "Updating index weight (dump CSV and import to MySQL)"
+# Determine start date from existing table
+PASS_OPT=""
+if [[ -n "${MYSQL_PASSWORD}" ]]; then PASS_OPT="-p${MYSQL_PASSWORD}"; fi
+IDX_WEIGHT_START=$(mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} -N -s -e \
+  "SELECT IFNULL(DATE_FORMAT(DATE_ADD(MAX(trade_date), INTERVAL 1 DAY),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_index_weight" 2>/dev/null || echo "19900101")
+python3 "${SCRIPT_DIR}/tushare_provider/dump_index_weight.py" --start_date="${IDX_WEIGHT_START}"
 
-dolt sql --file /workspace/investment_data/tushare/regular_update.sql
+# Import all CSVs under tushare_provider/index_weight into ts_index_weight
+python3 "${SCRIPT_DIR}/tushare_provider/import_index_weight_mysql.py" \
+  --mysql_url="${MYSQL_URL}" \
+  --csv_dir="${SCRIPT_DIR}/tushare_provider/index_weight" \
+  --chunksize=2000
 
-dolt add -A
+echo "Updating index price (dump CSV and import to MySQL)"
+# Compute start date from existing index symbols in ts_a_stock_eod_price
+INDEX_LIST="('399300.SZ','000905.SH','000300.SH','000906.SH','000852.SH','000985.SH')"
+IDX_PRICE_START=$(mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} -N -s -e \
+  "SELECT IFNULL(DATE_FORMAT(DATE_ADD(MAX(tradedate), INTERVAL 1 DAY),'%Y%m%d'),'19900101') FROM ${MYSQL_DB}.ts_a_stock_eod_price WHERE symbol IN ${INDEX_LIST}" 2>/dev/null || echo "19900101")
+python3 "${SCRIPT_DIR}/tushare_provider/dump_index_eod_price.py" --start_date="${IDX_PRICE_START}"
 
-status_output=$(dolt status)
+# Import index CSVs into ts_a_stock_eod_price
+python3 "${SCRIPT_DIR}/tushare_provider/import_index_price_mysql.py" \
+  --mysql_url="${MYSQL_URL}" \
+  --csv_dir="${SCRIPT_DIR}/tushare_provider/index" \
+  --chunksize=2000
 
-# Check if the status output contains the "nothing to commit, working tree clean" message
-if [[ $status_output == *"nothing to commit, working tree clean"* ]]; then
-    echo "No changes to commit. Working tree is clean."
-else
-    echo "Changes found. Committing and pushing..."
-    # Run the necessary commands
-    dolt commit -m "Daily update"
-    dolt push 
-    echo "Changes committed and pushed."
+echo "Updating A-share EOD price (direct MySQL)"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_eod_price_to_latest.py" 
+
+echo "Updating fundamentals (direct MySQL)"
+# Note: update_a_stock_fundamental.py currently connects to 127.0.0.1:3306/investment_data by default.
+# If your MySQL runs elsewhere, adjust that script or ensure a port forward to 3306.
+START_ARG=()
+if [[ -n "${START_DATE_OVERRIDE}" ]]; then
+  START_ARG=("--start_date_override=${START_DATE_OVERRIDE}")
 fi
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_fundamental.py" "${START_ARG[@]}"
 
+echo "Updating A-share basic info"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_basic.py" --mysql_url="${MYSQL_URL}" 
+
+echo "Updating A-share financial profile"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_financial_profile.py" --mysql_url="${MYSQL_URL}" --period quarter --limit 1
+
+echo "Updating A-share suspend info"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_suspend_info.py" --mysql_url="${MYSQL_URL}"
+
+echo "Updating A-share cost percentage"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_cost_pct.py" --mysql_url="${MYSQL_URL}"
+
+echo "Updating A-share moenyflow"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_moneyflow.py" --mysql_url="${MYSQL_URL}"
+
+echo "Updating A-share brokerage report"
+python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_brokerage_report.py" --mysql_url="${MYSQL_URL}"
+
+#echo "Merging to final tables"
+#PASS_OPT=""
+#if [[ -n "${MYSQL_PASSWORD}" ]]; then PASS_OPT="-p${MYSQL_PASSWORD}"; fi
+#mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/tushare_provider/regular_update.sql"
+
+echo "Daily MySQL update finished."
