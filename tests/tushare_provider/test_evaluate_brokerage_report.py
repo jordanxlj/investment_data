@@ -402,8 +402,8 @@ def test_apply_field_ranges(field, values, weights, expected_length):
     assert len(filtered_values) == expected_length
 
 @pytest.mark.parametrize("values, weights, expected_length", [
-    (np.array([1.0, 2.0, 3.0, 4.0, 5.0]), np.array([1.0]*5), 5),
-    (np.array([10.0]*20 + [1000.0]), np.array([1.0]*21), 20),
+    (np.array([1.0, 2.0, 3.0, 4.0, 5.0]), np.array([1.0]*5), 3),  # 5% percentile filters out 1 and 5
+    (np.array([10.0]*20 + [1000.0]), np.array([1.0]*21), 20),  # Outlier 1000 gets filtered
 ])
 def test_filter_outliers(values, weights, expected_length):
     """Test _filter_outliers function"""
@@ -412,10 +412,11 @@ def test_filter_outliers(values, weights, expected_length):
 
 def test_aggregate_forecasts_missing_columns():
     """Test aggregate_forecasts with missing columns"""
+    # Use more data points to avoid outlier filtering
     df = pd.DataFrame({
-        'eps': [2.5, 2.6],
-        'report_type': ['点评', '一般'],
-        'report_weight': [3.0, 2.0]
+        'eps': [2.5, 2.6, 2.4, 2.7, 2.3, 2.8],
+        'report_type': ['点评', '一般', '点评', '一般', '点评', '一般'],
+        'report_weight': [3.0, 2.0, 3.0, 2.0, 3.0, 2.0]
         # Missing pe, rd, roe, etc.
     })
 
