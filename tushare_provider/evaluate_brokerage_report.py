@@ -242,6 +242,224 @@ def classify_rating(rating: Optional[str]) -> str:
     return 'NEUTRAL'
 
 
+def get_financial_data_only_consensus(engine: Any, ts_code: str, eval_date: str) -> Optional[Dict[str, Any]]:
+    """Get consensus data from financial data only (when no brokerage reports available)"""
+    try:
+        fiscal_info = get_fiscal_period_info(eval_date)
+
+        # Try to get financial data
+        current_consensus = get_annual_report_data(engine, ts_code, eval_date, fiscal_info['current_fiscal_period'])
+
+        if current_consensus:
+            # Update with basic consensus structure
+            current_consensus.update({
+                'eval_date': eval_date,
+                'total_reports': 0,
+                'sentiment_pos': 0,
+                'sentiment_neg': 0,
+                'buy_count': 0,
+                'hold_count': 0,
+                'neutral_count': 0,
+                'sell_count': 0,
+                'depth_reports': 0,
+                'research_reports': 0,
+                'commentary_reports': 0,
+                'general_reports': 0,
+                'other_reports': 0,
+                'avg_report_weight': 0.0,
+                'data_source': 'financial_only'
+            })
+            return current_consensus
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting financial data only consensus for {ts_code} {eval_date}: {e}")
+        return None
+
+def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: str, fiscal_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Aggregate consensus data from pre-filtered DataFrame"""
+    try:
+        total_reports = len(date_df)
+
+        # Count ratings
+        buy_count = len(date_df[date_df['rating_category'] == 'BUY'])
+        hold_count = len(date_df[date_df['rating_category'] == 'HOLD'])
+        neutral_count = len(date_df[date_df['rating_category'] == 'NEUTRAL'])
+        sell_count = len(date_df[date_df['rating_category'] == 'SELL'])
+
+        # Calculate sentiment
+        sentiment_pos = buy_count + hold_count
+        sentiment_neg = neutral_count + sell_count
+
+        # Determine dominant sentiment and filter data accordingly
+        if sentiment_pos > sentiment_neg:
+            # Bullish sentiment - use BUY+HOLD data
+            sentiment_df = date_df[date_df['rating_category'].isin(['BUY', 'HOLD'])]
+            sentiment = 'bullish'
+        elif sentiment_neg > sentiment_pos:
+            # Bearish sentiment - use NEUTRAL+SELL data
+            sentiment_df = date_df[date_df['rating_category'].isin(['NEUTRAL', 'SELL'])]
+            sentiment = 'bearish'
+        else:
+            # Neutral sentiment - use all data
+            sentiment_df = date_df
+            sentiment = 'neutral'
+
+        # Count report types
+        depth_reports = len(date_df[date_df['report_type'].str.contains('深度|depth|comprehensive|detailed', case=False, na=False)])
+        research_reports = len(date_df[date_df['report_type'].str.contains('调研|research|field|visit|survey', case=False, na=False)])
+        commentary_reports = len(date_df[date_df['report_type'].str.contains('点评|commentary|comment|analysis|review|会议纪要|会议', case=False, na=False)])
+        general_reports = len(date_df[date_df['report_type'].str.contains('一般|general|regular|standard', case=False, na=False)])
+        other_reports = total_reports - depth_reports - research_reports - commentary_reports - general_reports
+
+        avg_report_weight = date_df['report_weight'].mean() if not date_df.empty else 0.0
+
+        # Aggregate forecasts
+        forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_quarter'])
+
+        result = {
+            'ts_code': ts_code,
+            'eval_date': eval_date,
+            'report_period': fiscal_info['current_quarter'],
+            'total_reports': total_reports,
+            'sentiment_pos': sentiment_pos,
+            'sentiment_neg': sentiment_neg,
+            'buy_count': buy_count,
+            'hold_count': hold_count,
+            'neutral_count': neutral_count,
+            'sell_count': sell_count,
+            'depth_reports': depth_reports,
+            'research_reports': research_reports,
+            'commentary_reports': commentary_reports,
+            'general_reports': general_reports,
+            'other_reports': other_reports,
+            'avg_report_weight': avg_report_weight,
+            'eps': forecasts.get('eps'),
+            'pe': forecasts.get('pe'),
+            'rd': forecasts.get('rd'),
+            'roe': forecasts.get('roe'),
+            'ev_ebitda': forecasts.get('ev_ebitda'),
+            'max_price': forecasts.get('max_price'),
+            'min_price': forecasts.get('min_price'),
+            'data_source': 'brokerage_consensus'
+        }
+
+        # Add last_updated timestamp
+        result['last_updated'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error aggregating consensus from DataFrame for {ts_code} {eval_date}: {e}")
+        return None
+
+def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], batch_size: int) -> int:
+    """Optimized: Process all dates for a single stock and upsert results immediately"""
+    from datetime import datetime, timedelta
+
+    # Calculate date range for bulk query (start_date - 6 months to end_date)
+    start_dt = datetime.strptime(min(date_list), "%Y%m%d")
+    end_dt = datetime.strptime(max(date_list), "%Y%m%d")
+    bulk_start_dt = start_dt - timedelta(days=180)  # 6 months back
+
+    bulk_start_date = bulk_start_dt.strftime("%Y%m%d")
+    bulk_end_date = end_dt.strftime("%Y%m%d")
+
+    try:
+        # Bulk query all brokerage data for this stock in the date range
+        with engine.begin() as conn:
+            query = text("""
+                SELECT * FROM ts_a_stock_brokerage_report
+                WHERE ts_code = :ts_code
+                AND report_date BETWEEN :start_date AND :end_date
+                AND rating IS NOT NULL
+                AND report_type IS NOT NULL
+                ORDER BY report_date, org_name, report_title
+            """)
+
+            bulk_df = pd.read_sql(query, conn, params={
+                'ts_code': ts_code,
+                'start_date': bulk_start_date,
+                'end_date': bulk_end_date
+            })
+
+        logger.debug(f"Bulk loaded {len(bulk_df)} brokerage records for {ts_code} from {bulk_start_date} to {bulk_end_date}")
+
+        stock_results = []
+
+        # Precompute fiscal info for each date
+        fiscal_infos = {date: get_fiscal_period_info(date) for date in date_list}
+
+        # Group bulk_df by report_date for efficient access
+        grouped = bulk_df.groupby('report_date')
+
+        for current_date in date_list:
+            try:
+                # Get group for current date or empty df
+                date_df = grouped.get_group(current_date).copy() if current_date in grouped.groups else pd.DataFrame()
+
+                if date_df.empty:
+                    result = get_financial_data_only_consensus(engine, ts_code, current_date)
+                    if result:
+                        stock_results.append(result)
+                    continue
+
+                # Apply report weights vectorized
+                date_df['report_weight'] = date_df['report_type'].apply(get_report_weight)
+
+                # Classify ratings vectorized
+                date_df['rating_category'] = date_df['rating'].apply(classify_rating)
+
+                # Get precomputed fiscal info
+                fiscal_info = fiscal_infos[current_date]
+                min_quarter = fiscal_info['current_quarter']
+
+                # Filter by quarter if needed
+                if min_quarter != 'ALL':
+                    min_quarter_for_comparison = f"{min_quarter}Q4" if min_quarter and 'Q' not in min_quarter else min_quarter
+                    date_df['quarter_comparison'] = date_df['quarter'].apply(
+                        lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
+                    )
+                    date_df = date_df[date_df['quarter_comparison']]
+
+                if date_df.empty:
+                    result = get_financial_data_only_consensus(engine, ts_code, current_date)
+                    if result:
+                        stock_results.append(result)
+                    continue
+
+                # Aggregate consensus
+                result = aggregate_consensus_from_df(date_df, ts_code, current_date, fiscal_info)
+                if result:
+                    stock_results.append(result)
+
+            except Exception as e:
+                logger.error(f"Error processing {ts_code} for date {current_date}: {e}")
+                continue
+
+        # Upsert results immediately after processing this stock
+        if stock_results:
+            try:
+                df = pd.DataFrame(stock_results)
+                df['last_updated'] = pd.to_datetime(df['last_updated'])
+                df = df.replace({np.nan: None})
+                for col in ALL_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = None
+                df = df[ALL_COLUMNS]
+                upserted = _upsert_batch(engine, df, batch_size)
+                logger.debug(f"Upserted {upserted} records for stock {ts_code}")
+                return upserted
+            except Exception as e:
+                logger.error(f"Error upserting results for stock {ts_code}: {e}")
+                return 0
+        return 0
+
+    except Exception as e:
+        logger.error(f"Error in bulk processing for {ts_code}: {e}")
+        return 0
+
 def get_trade_cal(start_date: str, end_date: str) -> pd.DataFrame:
     """
     Get trading calendar from Tushare API
@@ -1137,35 +1355,6 @@ def evaluate_brokerage_report(
         logger.info("DRY RUN - No DB writes")
         return
 
-    # Create a function to process all dates for a single stock and upsert immediately
-    def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], batch_size: int) -> int:
-        """Process all dates for a single stock and upsert results immediately"""
-        stock_results = []
-        for current_date in date_list:
-            try:
-                result = process_stock_consensus(engine, ts_code, current_date)
-                if result:
-                    stock_results.append(result)
-            except Exception as e:
-                logger.error(f"Error processing {ts_code} for date {current_date}: {e}")
-
-        # Upsert results immediately after processing this stock
-        if stock_results:
-            try:
-                df = pd.DataFrame(stock_results)
-                df['last_updated'] = pd.to_datetime(df['last_updated'])
-                df = df.replace({np.nan: None})
-                for col in ALL_COLUMNS:
-                    if col not in df.columns:
-                        df[col] = None
-                df = df[ALL_COLUMNS]
-                upserted = _upsert_batch(engine, df, batch_size)
-                logger.debug(f"Upserted {upserted} records for stock {ts_code}")
-                return upserted
-            except Exception as e:
-                logger.error(f"Error upserting results for stock {ts_code}: {e}")
-                return 0
-        return 0
 
     logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers (each worker handles one stock for all {len(date_list)} dates)")
     logger.info(f"Stocks to process: {stocks_list[:10]}..." if len(stocks_list) > 10 else f"Stocks to process: {stocks_list}")
