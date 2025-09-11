@@ -824,40 +824,58 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
         if not periods_list:
             return annual_data_cache
 
-        # Bulk query financial_profile
+        # Convert periods to database format (YYYY-MM-DD)
+        db_periods_list = []
+        for period in periods_list:
+            if len(period) == 8:  # Format: YYYYMMDD
+                db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}"
+                db_periods_list.append(db_period)
+            else:
+                db_periods_list.append(period)  # Keep as-is if not in expected format
+
+        # Convert date_list to datetime for fundamental table query
+        date_objs = [datetime.datetime.strptime(date, "%Y%m%d") for date in date_list]
+        min_date = min(date_objs).strftime("%Y%m%d")
+        max_date = max(date_objs).strftime("%Y%m%d")
+
+        # Bulk query financial_profile (annual data by period)
         with engine.begin() as conn:
             fp_query = text("""
-                SELECT ann_date, f_ann_date, period, eps, roe_waa
+                SELECT ann_date, report_period, eps, roe_waa
                 FROM ts_a_stock_financial_profile
                 WHERE ts_code = :ts_code
-                AND period IN :periods
-                ORDER BY period
+                AND report_period IN :periods
+                ORDER BY period DESC
             """)
             fp_df = pd.read_sql(fp_query, conn, params={
                 'ts_code': ts_code,
-                'periods': tuple(periods_list)
+                'periods': tuple(db_periods_list)
             })
 
-            # Bulk query fundamental
+            # Bulk query fundamental (daily data by trade_date)
             fund_query = text("""
-                SELECT ann_date, period, pe, ev_to_ebitda, dv_ratio
+                SELECT trade_date, pe, dv_ratio
                 FROM ts_a_stock_fundamental
                 WHERE ts_code = :ts_code
-                AND period IN :periods
-                ORDER BY period
+                AND trade_date BETWEEN :start_date AND :end_date
+                ORDER BY trade_date DESC
             """)
             fund_df = pd.read_sql(fund_query, conn, params={
                 'ts_code': ts_code,
-                'periods': tuple(periods_list)
+                'start_date': min_date,
+                'end_date': max_date
             })
 
         # Process and cache per date
-        for date in date_list:
-            fiscal_info = get_fiscal_period_info(date)
+        for current_date in date_list:
+            fiscal_info = get_fiscal_period_info(current_date)
             period = fiscal_info['current_fiscal_period']
 
-            fp_row = fp_df[fp_df['period'] == period]
-            fund_row = fund_df[fund_df['period'] == period]
+            # Convert to database format for matching
+            db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
+
+            # Get financial profile data for the fiscal period
+            fp_row = fp_df[fp_df['period'] == db_period]
 
             if not fp_row.empty:
                 row = fp_row.iloc[0]
@@ -886,15 +904,16 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                     'last_updated': datetime.datetime.now()
                 }
 
-                if not fund_row.empty:
-                    f_row = fund_row.iloc[0]
+                # Get fundamental data for the same date (most recent available)
+                fund_available = fund_df[fund_df['trade_date'] <= current_date]
+                if not fund_available.empty:
+                    f_row = fund_available.iloc[0]  # Most recent
                     annual_data['pe'] = f_row['pe']
-                    annual_data['ev_ebitda'] = f_row['ev_to_ebitda']
-                    annual_data['rd'] = f_row['dv_ratio']  # Assuming rd is dv_ratio, adjust if needed
+                    annual_data['rd'] = f_row['dv_ratio']  # Use dv_ratio as rd
 
-                annual_data_cache[date] = annual_data
+                annual_data_cache[current_date] = annual_data
             else:
-                annual_data_cache[date] = None
+                annual_data_cache[current_date] = None
 
         logger.debug(f"Bulk loaded annual data for {ts_code} with {len(annual_data_cache)} entries")
         return annual_data_cache

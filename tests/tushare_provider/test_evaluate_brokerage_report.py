@@ -921,28 +921,25 @@ def test_aggregate_consensus_from_df_quarter_filter():
 def test_get_annual_data_bulk_with_data(mock_engine):
     """Test get_annual_data_bulk with data"""
     date_list = ['20250101']
-    # For 20250101 (January), fiscal period should be 20241231 (previous year annual report)
+    # For 20250101 (January), fiscal period should be 20241231
     fp_df = pd.DataFrame({
         'ann_date': ['20250101'],
-        'f_ann_date': ['20250101'],
-        'period': ['20241231'],  # Correct fiscal period for January 2025
+        'period': ['2024-12-31'],  # Correct fiscal period for January 2025
         'eps': [1.0],
         'roe_waa': [10.0]
     })
     fund_df = pd.DataFrame({
-        'ann_date': ['20250101'],
-        'period': ['20241231'],  # Correct fiscal period for January 2025
-        'pe': [15.0],
-        'ev_to_ebitda': [8.0],
-        'dv_ratio': [2.0]
+        'trade_date': ['20241231', '20250101'],
+        'pe': [15.0, 15.5],
+        'dv_ratio': [2.0, 2.1]
     })
     with patch('pandas.read_sql') as mock_read_sql:
         mock_read_sql.side_effect = [fp_df, fund_df]
         result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
     assert '20250101' in result
-    assert result['20250101']['eps'] == 1.0
-    assert result['20250101']['pe'] == 15.0
-    assert result['20250101']['rd'] == 2.0
+    assert result['20250101']['eps'] == 1.0  # From financial_profile (annual data)
+    assert result['20250101']['pe'] == 15.5  # Most recent from fundamental (20250101)
+    assert result['20250101']['rd'] == 2.1
     assert result['20250101']['data_source'] == 'annual_report'
 
 def test_get_annual_data_bulk_no_data(mock_engine):
