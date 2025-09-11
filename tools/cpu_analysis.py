@@ -20,7 +20,7 @@ def analyze_mysql_performance():
             port=3307,
             user='root',
             password='',
-            database='investment_data',
+            database='investment_data_new',
             connect_timeout=5
         )
 
