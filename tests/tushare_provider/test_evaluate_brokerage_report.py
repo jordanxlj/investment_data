@@ -139,6 +139,11 @@ def test_weighted_median_mismatched_lengths():
     ('20240915', '2024Q3', '2024'),
     ('20241001', '2024Q3', '2024'),
     ('20241231', '2024Q4', '2024'),
+    ('20250601', '2025Q2', '2025'),  # Additional for month=6
+    ('20250801', '2025Q2', '2025'),  # Month=8
+    ('20250915', '2025Q3', '2025'),  # Month=9
+    ('20251101', '2025Q3', '2025'),  # Month=11
+    ('20251201', '2025Q4', '2025'),  # Month=12
 ])
 def test_fiscal_period_info(eval_date, expected_quarter, expected_fiscal_year):
     """Test fiscal period info calculation comprehensively"""
@@ -264,7 +269,6 @@ def test_get_stocks_list_error(mock_engine, caplog):
 
 def test_evaluate_brokerage_report_dry_run(caplog):
     """Test evaluate_brokerage_report dry_run"""
-    # Ensure we capture the right logger
     caplog.set_level(logging.INFO)
     with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
@@ -301,6 +305,7 @@ def test_evaluate_brokerage_report_trade_cal_empty():
             with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+
 '''
 def test_evaluate_brokerage_report_processing_error(caplog):
     """Test evaluate_brokerage_report concurrent error"""
@@ -318,28 +323,37 @@ def test_evaluate_brokerage_report_processing_error(caplog):
                     evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
     assert "Error processing" in caplog.text
 '''
+
 def test_config_file_not_found(caplog):
     """Test config loading FileNotFoundError"""
-    # Test that the module handles FileNotFoundError gracefully
-    # Since the module is already loaded, we'll test by checking the config loading behavior
-    # The module should have loaded with defaults when config file was not found during import
+    with patch('builtins.open') as mock_open:
+        mock_open.side_effect = FileNotFoundError
+        importlib.reload(evaluate_brokerage_report)
+    assert "Configuration file" in caplog.text
     assert 'BUY' in evaluate_brokerage_report.RATING_MAPPING
-    assert isinstance(evaluate_brokerage_report.RATING_MAPPING['BUY'], list)
 
 def test_config_unicode_error(caplog):
     """Test config loading UnicodeDecodeError"""
-    # Test that the module handles UnicodeDecodeError gracefully
-    # Since the module is already loaded, we'll test by checking that it has default mappings
+    with patch('builtins.open') as mock_open:
+        mock_open.side_effect = UnicodeDecodeError('utf-8', b'', 0, 1, 'test')
+        importlib.reload(evaluate_brokerage_report)
+    assert "Encoding error" in caplog.text
     assert 'BUY' in evaluate_brokerage_report.RATING_MAPPING
-    assert isinstance(evaluate_brokerage_report.RATING_MAPPING['BUY'], list)
+
+def test_config_load_success(caplog):
+    """Test successful config loading"""
+    mock_json = '{"rating_mapping": {"BUY": ["Buy"]}, "report_type_weights": {"depth": 5.0}}'
+    with patch('builtins.open', patch.mock_open(read_data=mock_json)):
+        importlib.reload(evaluate_brokerage_report)
+    assert evaluate_brokerage_report.RATING_MAPPING['BUY'] == ["Buy"]
+    assert evaluate_brokerage_report.REPORT_TYPE_WEIGHTS['depth'] == 5.0
 
 def test_tushare_token_not_set(caplog, monkeypatch):
     """Test TUSHARE_TOKEN not set"""
-    # Since the module is already loaded with TUSHARE_TOKEN set,
-    # we can't test the SystemExit case without reloading.
-    # Instead, test that the module loaded successfully with token set
-    assert hasattr(evaluate_brokerage_report, 'pro')
-    assert evaluate_brokerage_report.pro is not None
+    monkeypatch.delenv("TUSHARE", raising=False)
+    with pytest.raises(SystemExit):
+        importlib.reload(evaluate_brokerage_report)
+    assert "TUSHARE environment variable not set" in caplog.text
 
 def test_get_report_weight_error_conversion(caplog):
     """Test error in str conversion in get_report_weight"""
@@ -348,8 +362,12 @@ def test_get_report_weight_error_conversion(caplog):
             raise Exception("conversion error")
     result = evaluate_brokerage_report.get_report_weight(BadType())
     assert result == evaluate_brokerage_report.DEFAULT_REPORT_WEIGHT
-    # Assert the log message, but since it may fail due to recursive error, comment out
-    # assert "Error converting report_type to str" in caplog.text
+
+def test_get_report_weight_no_match(caplog):
+    """Test get_report_weight with no match"""
+    result = evaluate_brokerage_report.get_report_weight('unknown_type')
+    assert result == evaluate_brokerage_report.DEFAULT_REPORT_WEIGHT
+    assert "No match" in caplog.text
 
 @pytest.mark.parametrize("report_type, expected_category", [
     ('深度报告', 'depth'),
@@ -359,7 +377,7 @@ def test_get_report_weight_error_conversion(caplog):
     ('点评', 'commentary'),
     ('点评报告', 'commentary'),
     ('一般报告', 'general'),
-    ('industry', 'other'),  # To cover line 217
+    ('industry', 'other'),
     ('unknown', 'other'),
     (None, 'other'),
     ('', 'other'),
@@ -377,13 +395,34 @@ def test_get_trade_cal_error():
         result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
         assert result.empty
 
+def test_get_trade_cal_normal():
+    """Test get_trade_cal normal path"""
+    mock_df = pd.DataFrame({'cal_date': ['20250101']})
+    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+        mock_cal.return_value = mock_df
+        result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
+        pd.testing.assert_frame_equal(result, mock_df)
+
 @pytest.mark.parametrize("quarter_str, expected", [
+    ('2024Q1', (2024, 1)),  # Valid
+    ('2025Q4', (2025, 4)),
     ('2024Q5', (0, 0)),  # Invalid quarter >4
     ('2024Q0', (0, 0)),  # <1
+    ('invalid', (0, 0)),
 ])
-def test_parse_quarter_invalid_range(quarter_str, expected):
-    """Test parse_quarter invalid quarter range"""
+def test_parse_quarter(quarter_str, expected):
+    """Test parse_quarter with valid and invalid"""
     result = evaluate_brokerage_report.parse_quarter(quarter_str)
+    assert result == expected
+
+@pytest.mark.parametrize("q1, q2, expected", [
+    ('2024Q1', '2024Q2', -1),
+    ('2024Q2', '2024Q2', 0),
+    ('2025Q1', '2024Q4', 1),
+])
+def test_compare_quarters(q1, q2, expected):
+    """Test compare_quarters normal cases"""
+    result = evaluate_brokerage_report.compare_quarters(q1, q2)
     assert result == expected
 
 def test_compare_quarters_invalid():
@@ -395,6 +434,7 @@ def test_compare_quarters_invalid():
     ('eps', np.array([-60.0, -40.0, 0.0, 40.0, 60.0]), np.array([1.0]*5), 3),
     ('pe', np.array([-1.0, 0.0, 100.0, 600.0]), np.array([1.0]*4), 1),
     ('rd', np.array([1.0]), np.array([1.0]), 1),
+    ('unknown', np.array([1.0, 2.0]), np.array([1.0, 1.0]), 2),  # Covers full mask=ones
 ])
 def test_apply_field_ranges(field, values, weights, expected_length):
     """Test _apply_field_ranges function"""
@@ -404,6 +444,7 @@ def test_apply_field_ranges(field, values, weights, expected_length):
 @pytest.mark.parametrize("values, weights, expected_length", [
     (np.array([1.0, 2.0, 3.0, 4.0, 5.0]), np.array([1.0]*5), 3),  # 5% percentile filters out 1 and 5
     (np.array([10.0]*20 + [1000.0]), np.array([1.0]*21), 20),  # Outlier 1000 gets filtered
+    (np.array([]), np.array([]), 0),  # Empty
 ])
 def test_filter_outliers(values, weights, expected_length):
     """Test _filter_outliers function"""
@@ -412,22 +453,35 @@ def test_filter_outliers(values, weights, expected_length):
 
 def test_aggregate_forecasts_missing_columns():
     """Test aggregate_forecasts with missing columns"""
-    # Use more data points to avoid outlier filtering
     df = pd.DataFrame({
         'eps': [2.5, 2.6, 2.4, 2.7, 2.3, 2.8],
         'report_type': ['点评', '一般', '点评', '一般', '点评', '一般'],
         'report_weight': [3.0, 2.0, 3.0, 2.0, 3.0, 2.0]
-        # Missing pe, rd, roe, etc.
     })
-
     result = evaluate_brokerage_report.aggregate_forecasts(df, 'bullish')
-    assert result['eps'] is not None  # eps should be calculated
-    assert result['pe'] is None       # pe should be None (missing column)
+    assert result['eps'] is not None
+    assert result['pe'] is None
+
+def test_aggregate_forecasts_outliers_filtered():
+    """Test aggregate_forecasts with outliers filtered out"""
+    df = pd.DataFrame({
+        'eps': [2.5, 1000.0, -1000.0],
+        'report_weight': [3.0, 3.0, 3.0],
+        'quarter_comparison': [True, True, True]
+    })
+    result = evaluate_brokerage_report.aggregate_forecasts(df, 'bullish')
+    assert result['eps'] == 2.5  # Outliers filtered, only one left
 
 def test_get_date_window_invalid_format():
     """Test get_date_window with invalid date format"""
     with pytest.raises(ValueError, match="Invalid eval_date format"):
         evaluate_brokerage_report.get_date_window('invalid_date')
+
+def test_get_date_window_normal():
+    """Test get_date_window normal"""
+    start, end = evaluate_brokerage_report.get_date_window('20250101', window_months=6)
+    assert start == '20240701'  # Approx 6 months back
+    assert end == '20250101'
 
 @pytest.fixture
 def sample_bulk_data():
@@ -436,7 +490,6 @@ def sample_bulk_data():
     data = []
 
     for date in dates:
-        # Add 5-15 reports per date to simulate realistic data
         num_reports = np.random.randint(5, 16)
         for _ in range(num_reports):
             data.append({
@@ -459,12 +512,10 @@ def sample_bulk_data():
 
     return pd.DataFrame(data)
 
-
 def test_bulk_query_date_range_calculation():
     """Test bulk query date range calculation"""
     date_list = ['20240101', '20240115', '20240201', '20240215', '20240301']
 
-    # Calculate expected bulk range
     start_dt = dt.strptime(min(date_list), "%Y%m%d")
     end_dt = dt.strptime(max(date_list), "%Y%m%d")
     bulk_start_dt = start_dt - datetime.timedelta(days=180)
@@ -472,49 +523,39 @@ def test_bulk_query_date_range_calculation():
     expected_bulk_start = bulk_start_dt.strftime("%Y%m%d")
     expected_bulk_end = end_dt.strftime("%Y%m%d")
 
-    # Simulate the calculation in process_stock_all_dates
     actual_bulk_start = expected_bulk_start
     actual_bulk_end = expected_bulk_end
 
     assert actual_bulk_start == expected_bulk_start
     assert actual_bulk_end == expected_bulk_end
 
-    # Verify bulk range covers original dates plus buffer
     assert actual_bulk_start < min(date_list)
     assert actual_bulk_end >= max(date_list)
-
 
 def test_fiscal_info_precomputation():
     """Test fiscal info precomputation performance"""
     date_list = [f"2024{i:02d}{j:02d}" for i in range(1, 13) for j in [1, 15]]
 
-    # Measure precomputation time
     start_time = time.perf_counter()
     fiscal_infos = {date: evaluate_brokerage_report.get_fiscal_period_info(date) for date in date_list}
     precompute_time = time.perf_counter() - start_time
 
-    # Measure on-demand computation time
     start_time = time.perf_counter()
     for date in date_list:
         _ = evaluate_brokerage_report.get_fiscal_period_info(date)
     ondemand_time = time.perf_counter() - start_time
 
-    # Precomputation should be reasonably close in performance
-    # Allow up to 2x difference due to small dataset and measurement overhead
     assert precompute_time <= ondemand_time * 2.0
 
-    # Verify all dates have fiscal info
     assert len(fiscal_infos) == len(date_list)
     for date in date_list:
         assert date in fiscal_infos
         assert 'current_quarter' in fiscal_infos[date]
 
-
 def test_groupby_performance_vs_filtering(sample_bulk_data):
     """Test groupby performance vs traditional filtering"""
-    target_dates = sample_bulk_data['report_date'].unique()[:10]  # Test first 10 dates
+    target_dates = sample_bulk_data['report_date'].unique()[:10]
 
-    # Method 1: GroupBy approach
     grouped = sample_bulk_data.groupby('report_date')
 
     start_time = time.perf_counter()
@@ -524,22 +565,17 @@ def test_groupby_performance_vs_filtering(sample_bulk_data):
             groupby_results[date] = grouped.get_group(date)
     groupby_time = time.perf_counter() - start_time
 
-    # Method 2: Traditional filtering
     start_time = time.perf_counter()
     filter_results = {}
     for date in target_dates:
         filter_results[date] = sample_bulk_data[sample_bulk_data['report_date'] == date]
     filter_time = time.perf_counter() - start_time
 
-    # GroupBy should be reasonably fast for multiple lookups
-    # Allow more tolerance for small datasets where GroupBy initialization overhead matters
-    assert groupby_time <= filter_time * 3.0  # Allow 200% tolerance for small datasets
+    assert groupby_time <= filter_time * 3.0
 
-    # Log performance comparison for analysis
     logger.info(f"GroupBy time: {groupby_time:.6f}s, Filter time: {filter_time:.6f}s, "
                 f"Ratio: {groupby_time/filter_time:.2f}x")
 
-    # Results should be equivalent
     for date in target_dates:
         if date in groupby_results and date in filter_results:
             pd.testing.assert_frame_equal(
@@ -547,29 +583,24 @@ def test_groupby_performance_vs_filtering(sample_bulk_data):
                 filter_results[date].reset_index(drop=True)
             )
 
-
 def test_vectorized_operations_performance(sample_bulk_data):
     """Test vectorized operations vs loop-based operations"""
     test_data = sample_bulk_data.head(1000).copy()
 
-    # Method 1: Vectorized operations
     start_time = time.perf_counter()
     vectorized_df = test_data.copy()
     vectorized_df['report_weight'] = vectorized_df['report_type'].apply(evaluate_brokerage_report.get_report_weight)
     vectorized_df['rating_category'] = vectorized_df['rating'].apply(evaluate_brokerage_report.classify_rating)
     vectorized_time = time.perf_counter() - start_time
 
-    # Method 2: Loop-based operations
     start_time = time.perf_counter()
     loop_df = test_data.copy()
     loop_df['report_weight'] = [evaluate_brokerage_report.get_report_weight(rt) for rt in loop_df['report_type']]
     loop_df['rating_category'] = [evaluate_brokerage_report.classify_rating(r) for r in loop_df['rating']]
     loop_time = time.perf_counter() - start_time
 
-    # Vectorized should be at least as fast
-    assert vectorized_time <= loop_time * 2.0  # Allow 100% tolerance due to small dataset
+    assert vectorized_time <= loop_time * 2.0
 
-    # Results should be identical
     pd.testing.assert_series_equal(
         vectorized_df['report_weight'],
         loop_df['report_weight'],
@@ -581,33 +612,27 @@ def test_vectorized_operations_performance(sample_bulk_data):
         check_names=False
     )
 
-
 @patch('tushare_provider.evaluate_brokerage_report.create_engine')
 def test_concurrent_processing_simulation(mock_create_engine):
     """Test concurrent processing simulation"""
     mock_engine = MagicMock()
     mock_create_engine.return_value = mock_engine
 
-    # Mock successful processing
     with patch('tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process:
-        mock_process.return_value = 30  # Mock 30 records processed
+        mock_process.return_value = 30
 
         stocks = ['000001.SZ', '000002.SZ', '000003.SZ', '000004.SZ']
         dates = ['20240101', '20240102', '20240103']
 
-        # Simulate concurrent processing
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             futures = {executor.submit(mock_process, mock_engine, stock, dates, 1000): stock for stock in stocks}
             results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
-        # Should process all stocks
         assert len(results) == len(stocks)
         assert all(result == 30 for result in results)
 
-
 def test_memory_usage_optimization():
     """Test memory usage optimization techniques"""
-    # Create test data
     large_df = pd.DataFrame({
         'ts_code': ['000001.SZ'] * 10000,
         'report_date': [f'2024{i:02d}01' for i in range(1, 11)] * 1000,
@@ -615,33 +640,25 @@ def test_memory_usage_optimization():
         'report_type': ['点评'] * 10000
     })
 
-    # Test memory-efficient grouping
     start_memory = large_df.memory_usage(deep=True).sum()
 
-    # Group and process
     grouped = large_df.groupby('report_date')
     processed_groups = {}
 
     for date, group in grouped:
-        # Simulate processing
         processed_groups[date] = group['eps'].mean()
-        # Explicitly delete to free memory
         del group
 
     end_memory = large_df.memory_usage(deep=True).sum()
 
-    # Memory usage should not increase significantly during processing
-    assert end_memory <= start_memory * 1.5  # Allow 50% overhead
+    assert end_memory <= start_memory * 1.5
 
-    # Should have processed all groups
     assert len(processed_groups) == len(large_df['report_date'].unique())
-
 
 def test_error_handling_comprehensive(mock_engine):
     """Test comprehensive error handling in bulk processing"""
     date_list = ['20240101', '20240102', '20240103']
 
-    # Test database connection error
     with patch.object(mock_engine, 'begin') as mock_begin:
         mock_begin.side_effect = Exception("Database connection error")
 
@@ -653,17 +670,14 @@ def test_error_handling_comprehensive(mock_engine):
             assert result == 0
             mock_logger.error.assert_called()
 
-    # Test empty data handling - create proper mock structure
     with patch.object(mock_engine, 'begin') as mock_conn:
         mock_cursor = MagicMock()
         mock_conn.return_value.__enter__.return_value = mock_cursor
 
-        # Mock the query execution
         mock_query = MagicMock()
         mock_conn.return_value.__enter__.return_value.execute.return_value = mock_query
 
         with patch('pandas.read_sql') as mock_read_sql:
-            # Return DataFrame with required columns but no data
             mock_read_sql.return_value = pd.DataFrame(columns=[
                 'ts_code', 'report_date', 'report_title', 'report_type',
                 'classify', 'org_name', 'quarter', 'rating', 'eps', 'pe',
@@ -671,40 +685,33 @@ def test_error_handling_comprehensive(mock_engine):
             ])
 
         with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_bulk_annual:
-            # Mock bulk annual data to return empty cache (no annual reports available)
             mock_bulk_annual.return_value = {date: None for date in date_list}
 
             result = evaluate_brokerage_report.process_stock_all_dates(
                 mock_engine, '000001.SZ', date_list, 1000
             )
 
-            # Should return 0 when no data to process (no annual data and no brokerage data)
             assert result == 0
-
 
 def test_performance_regression_detection():
     """Test performance regression detection"""
-    # Simulate different processing scenarios with more realistic expectations
     scenarios = {
-        'small_dataset': {'stocks': 10, 'dates': 30, 'expected_time': 0.03},  # 30ms
-        'medium_dataset': {'stocks': 100, 'dates': 30, 'expected_time': 0.3},  # 300ms
-        'large_dataset': {'stocks': 1000, 'dates': 30, 'expected_time': 3.0}   # 3s
+        'small_dataset': {'stocks': 10, 'dates': 30, 'expected_time': 0.03},
+        'medium_dataset': {'stocks': 100, 'dates': 30, 'expected_time': 0.3},
+        'large_dataset': {'stocks': 1000, 'dates': 30, 'expected_time': 3.0}
     }
 
     for scenario_name, params in scenarios.items():
         start_time = time.perf_counter()
 
-        # Simulate processing time based on dataset size
         processing_time = params['stocks'] * params['dates'] * 0.0001
-        time.sleep(max(processing_time, 0.001))  # Minimum 1ms to avoid precision issues
+        time.sleep(max(processing_time, 0.001))
 
         actual_time = time.perf_counter() - start_time
 
-        # Allow 100% tolerance for timing variations due to system load and measurement precision
         tolerance = params['expected_time'] * 1.0
         assert abs(actual_time - params['expected_time']) <= tolerance, \
             f"Performance regression in {scenario_name}: expected ~{params['expected_time']:.3f}s, got {actual_time:.3f}s"
-
 
 def test_concurrent_vs_sequential_scaling():
     """Test how concurrent processing scales vs sequential"""
@@ -713,88 +720,67 @@ def test_concurrent_vs_sequential_scaling():
     for num_stocks in stock_counts:
         stocks = [f"{i:06d}.SZ" for i in range(num_stocks)]
 
-        # Sequential processing simulation
         seq_start = time.time()
         for stock in stocks:
-            time.sleep(0.01)  # Simulate processing time
+            time.sleep(0.01)
         seq_time = time.time() - seq_start
 
-        # Concurrent processing simulation
         conc_start = time.time()
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_stocks, 8)) as executor:
             futures = [executor.submit(lambda: time.sleep(0.01)) for _ in stocks]
             concurrent.futures.wait(futures)
         conc_time = time.time() - conc_start
 
-        # Concurrent should be faster for multiple stocks
         if num_stocks > 1:
             assert conc_time < seq_time, f"Concurrent processing slower for {num_stocks} stocks"
 
-        # Calculate speedup
         speedup = seq_time / conc_time if conc_time > 0 else float('inf')
         print(".2f")
 
-
 def test_data_quality_validation(sample_bulk_data):
     """Test data quality validation in bulk processing"""
-    # Prepare test data with required columns
     test_data = sample_bulk_data.head(10).copy()
 
-    # Add required columns that the function expects
     test_data['report_weight'] = test_data['report_type'].apply(evaluate_brokerage_report.get_report_weight)
     test_data['rating_category'] = test_data['rating'].apply(evaluate_brokerage_report.classify_rating)
 
-    # Test with valid data first
     valid_result = evaluate_brokerage_report.aggregate_consensus_from_df(
         test_data, '000001.SZ', '20240101',
         {'current_quarter': '2024Q1'}
     )
     assert valid_result is not None
 
-    # Test missing critical columns - should handle gracefully
     incomplete_data = test_data.drop(columns=['rating'])
 
-    # Should not raise KeyError, but should handle missing column gracefully
     result = evaluate_brokerage_report.aggregate_consensus_from_df(
         incomplete_data, '000001.SZ', '20240101',
         {'current_quarter': '2024Q1'}
     )
-    # Should return result but with None values for missing data
     assert result is not None
-    # Note: buy_count might not be 0 if rating_category was already computed
-    # The important thing is that it doesn't crash
     assert isinstance(result['buy_count'], (int, type(None)))
 
-    # Test invalid data types
     invalid_data = test_data.copy()
-    invalid_data['eps'] = invalid_data['eps'].astype(str)  # Convert to string
+    invalid_data['eps'] = invalid_data['eps'].astype(str)
 
-    # Should handle gracefully
     result = evaluate_brokerage_report.aggregate_consensus_from_df(
         invalid_data, '000001.SZ', '20240101',
         {'current_quarter': '2024Q1'}
     )
 
-    # Should still return a result
     assert result is not None
-
 
 def test_resource_cleanup_verification():
     """Test that resources are properly cleaned up"""
     initial_threads = threading.active_count()
 
-    # Simulate processing with thread pool
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(time.sleep, 0.1) for _ in range(10)]
         concurrent.futures.wait(futures)
 
-    # Allow some time for cleanup
     time.sleep(0.5)
 
     final_threads = threading.active_count()
 
-    # Thread count should return to near initial level
-    # (allowing for some background threads)
     assert abs(final_threads - initial_threads) <= 2, \
         f"Thread leak detected: initial {initial_threads}, final {final_threads}"
 
@@ -807,18 +793,15 @@ def test_full_processing_pipeline(mock_create_engine):
     mock_engine = MagicMock()
     mock_create_engine.return_value = mock_engine
 
-    # Mock successful data retrieval and processing
     with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal, \
          patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks, \
          patch('tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process, \
          patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
 
-        # Setup mocks
         mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20240101', '20240102']})
         mock_stocks.return_value = ['000001.SZ', '000002.SZ']
-        mock_process.return_value = 50  # 50 records per stock
+        mock_process.return_value = 50
 
-        # Mock the DataFrame creation and upsert process
         mock_df = pd.DataFrame({
             'ts_code': ['000001.SZ'] * 50 + ['000002.SZ'] * 50,
             'eval_date': ['20240101'] * 50 + ['20240102'] * 50,
@@ -827,7 +810,6 @@ def test_full_processing_pipeline(mock_create_engine):
         })
         mock_upsert.return_value = 100
 
-        # Run the full pipeline
         result = evaluate_brokerage_report.evaluate_brokerage_report(
             mysql_url="mysql+pymysql://test:test@localhost/test",
             start_date="20240101",
@@ -836,37 +818,225 @@ def test_full_processing_pipeline(mock_create_engine):
             dry_run=False
         )
 
-        # Verify pipeline execution
         mock_trade_cal.assert_called_once()
         mock_stocks.assert_called_once()
-        assert mock_process.call_count == 2  # One per stock
-        # Note: _upsert_batch may not be called directly in the mock setup
-        # The key is that the process runs without errors
-
+        assert mock_process.call_count == 2
 
 def test_error_recovery_scenarios():
-    """Test various error recovery scenarios"""
-    # Test database connection failure
-    # Test partial processing failure
-    # Test network timeout scenarios
-    # Test memory exhaustion scenarios
-
-    # This would require more complex mocking and is beyond the scope
-    # of this basic test suite, but demonstrates the testing approach
     pass
-
 
 def test_performance_under_load():
-    """Test performance under various load conditions"""
-    # Test with different numbers of stocks
-    # Test with different date ranges
-    # Test with different worker counts
-    # Test memory usage patterns
-
-    # Implementation would involve parameterized testing
-    # with different load scenarios
     pass
 
+# Additional new tests
+
+def test_aggregate_consensus_from_df_bullish():
+    """Test aggregate_consensus_from_df with bullish sentiment"""
+    df = pd.DataFrame({
+        'rating_category': ['BUY', 'HOLD', 'BUY'],
+        'report_type': ['深度', '调研', '点评'],
+        'report_weight': [5.0, 4.0, 3.0],
+        'quarter': ['2024Q4', '2024Q4', '2024Q4'],
+    })
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result['sentiment_pos'] == 3
+    assert result['sentiment_neg'] == 0
+    assert result['depth_reports'] == 1
+    assert result['research_reports'] == 1
+    assert result['commentary_reports'] == 1
+
+def test_aggregate_consensus_from_df_bearish():
+    """Test aggregate_consensus_from_df with bearish sentiment"""
+    df = pd.DataFrame({
+        'rating_category': ['NEUTRAL', 'SELL', 'NEUTRAL'],
+        'report_type': ['一般', '非个股', '会议纪要'],
+        'report_weight': [2.0, 1.0, 3.0],
+        'quarter': ['2024Q4', '2024Q4', '2024Q4'],
+    })
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result['sentiment_pos'] == 0
+    assert result['sentiment_neg'] == 3
+    assert result['general_reports'] == 1
+    assert result['other_reports'] == 1
+    assert result['commentary_reports'] == 1
+
+def test_aggregate_consensus_from_df_neutral():
+    """Test aggregate_consensus_from_df with neutral sentiment"""
+    df = pd.DataFrame({
+        'rating_category': ['BUY', 'NEUTRAL'],
+        'report_type': ['深度', '点评'],
+        'report_weight': [5.0, 3.0],
+        'quarter': ['2024Q4', '2024Q4'],
+    })
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result['sentiment_pos'] == 1
+    assert result['sentiment_neg'] == 1
+
+def test_aggregate_consensus_from_df_empty():
+    """Test aggregate_consensus_from_df with empty DF"""
+    df = pd.DataFrame()
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result is None
+
+def test_aggregate_consensus_from_df_error(caplog):
+    """Test aggregate_consensus_from_df error handling"""
+    df = pd.DataFrame()  # Missing required columns to trigger KeyError
+    with patch('pandas.DataFrame.__getitem__') as mock_getitem:
+        mock_getitem.side_effect = KeyError("rating_category")
+        result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result is None
+    assert "Error aggregating consensus" in caplog.text
+
+def test_aggregate_consensus_from_df_quarter_filter():
+    """Test aggregate_consensus_from_df with quarter filtering"""
+    df = pd.DataFrame({
+        'rating_category': ['BUY', 'HOLD', 'BUY'],
+        'report_type': ['深度', '调研', '点评'],
+        'report_weight': [5.0, 4.0, 3.0],
+        'quarter': ['2024Q3', '2024Q4', '2025Q1'],
+    })
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': '2024Q4'})
+    assert result['total_reports'] == 2  # Filters out Q3
+
+def test_get_annual_data_bulk_with_data(mock_engine):
+    """Test get_annual_data_bulk with data"""
+    date_list = ['20250101']
+    fp_df = pd.DataFrame({
+        'ann_date': ['20250101'],
+        'f_ann_date': ['20250101'],
+        'period': ['20251231'],
+        'eps': [1.0],
+        'roe_waa': [10.0]
+    })
+    fund_df = pd.DataFrame({
+        'ann_date': ['20250101'],
+        'period': ['20251231'],
+        'pe': [15.0],
+        'ev_to_ebitda': [8.0],
+        'dv_ratio': [2.0]
+    })
+    with patch('pandas.read_sql') as mock_read_sql:
+        mock_read_sql.side_effect = [fp_df, fund_df]
+        result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
+    assert '20250101' in result
+    assert result['20250101']['eps'] == 1.0
+    assert result['20250101']['pe'] == 15.0
+    assert result['20250101']['rd'] == 2.0
+    assert result['20250101']['data_source'] == 'annual_report'
+
+def test_get_annual_data_bulk_no_data(mock_engine):
+    """Test get_annual_data_bulk with no data"""
+    date_list = ['20250101']
+    with patch('pandas.read_sql') as mock_read_sql:
+        mock_read_sql.side_effect = [pd.DataFrame(), pd.DataFrame()]
+        result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
+    assert result['20250101'] is None
+
+def test_process_stock_all_dates_with_annual(mock_engine):
+    """Test process_stock_all_dates with annual data"""
+    date_list = ['20250101']
+    mock_annual = {'20250101': {'eps': 1.0, 'roe': 10.0}}
+    with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_annual_bulk:
+        mock_annual_bulk.return_value = mock_annual
+        with patch('pandas.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame()  # No brokerage data
+            with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+                mock_upsert.return_value = 1
+                result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
+    assert result == 1
+
+def test_process_stock_all_dates_with_brokerage(mock_engine):
+    """Test process_stock_all_dates with brokerage data"""
+    date_list = ['20250101']
+    brokerage_df = pd.DataFrame({
+        'ts_code': ['000001.SZ'],
+        'report_date': ['20250101'],
+        'report_type': ['深度'],
+        'rating': ['买入'],
+        'quarter': ['2025Q1']
+    })
+    with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_annual:
+        mock_annual.return_value = {'20250101': None}
+        with patch('pandas.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = brokerage_df
+            with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+                mock_upsert.return_value = 1
+                result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
+    assert result == 1
+
+def test_process_stock_all_dates_error(caplog):
+    """Test process_stock_all_dates error in loop"""
+    date_list = ['20250101']
+    mock_engine = MagicMock()
+    with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_annual:
+        mock_annual.return_value = {'20250101': None}
+        with patch('pandas.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame()
+            with patch('tushare_provider.evaluate_brokerage_report.aggregate_consensus_from_df') as mock_agg:
+                mock_agg.side_effect = Exception("agg error")
+                result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
+    assert result == 0
+    assert "Error processing" in caplog.text
+
+def test_process_stock_all_dates_upsert_error(caplog):
+    """Test process_stock_all_dates upsert error"""
+    date_list = ['20250101']
+    mock_engine = MagicMock()
+    with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_annual:
+        mock_annual.return_value = {'20250101': None}
+        with patch('pandas.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame({'report_date': ['20250101'], 'report_type': ['深度'], 'rating': ['买入'], 'quarter': ['2025Q1']})
+            with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+                mock_upsert.side_effect = Exception("upsert error")
+                result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
+    assert result == 0
+    assert "Error upserting" in caplog.text
+
+def test_evaluate_brokerage_report_start_after_end():
+    """Test evaluate_brokerage_report start > end"""
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+        mock_engine.return_value = MagicMock()
+        with pytest.raises(ValueError, match="start_date cannot be after end_date"):
+            evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250102', end_date='20250101')
+'''
+def test_evaluate_brokerage_report_normal(caplog):
+    """Test evaluate_brokerage_report normal run"""
+    caplog.set_level(logging.INFO)
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+        mock_engine.return_value = MagicMock()
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+            mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = ['000001.SZ']
+                with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
+                    mock_future = MagicMock()
+                    mock_future.result.return_value = 1
+                    mock_exec.return_value.__enter__.return_value.submit.return_value = mock_future
+                    mock_exec.return_value.__enter__.return_value.as_completed.return_value = [mock_future]
+                    evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+    assert "Processing 1 stocks" in caplog.text
+    assert "Completed processing all stocks. Total upserted: 1 records" in caplog.text
+
+def test_evaluate_brokerage_report_progress_log(caplog):
+    """Test evaluate_brokerage_report progress logging for many stocks"""
+    caplog.set_level(logging.INFO)
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+        mock_engine.return_value = MagicMock()
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+            mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
+            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+                mock_stocks.return_value = [f'{i:06d}.SZ' for i in range(100)]  # Enough for %50 log
+                with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
+                    mock_futures = [MagicMock() for _ in range(100)]
+                    for f in mock_futures:
+                        f.result.return_value = 1
+                    mock_exec.return_value.__enter__.return_value.submit.side_effect = mock_futures
+                    mock_exec.return_value.__enter__.return_value.as_completed.return_value = mock_futures
+                    evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+    assert "Completed 50/100 stocks" in caplog.text
+    assert "Completed 100/100 stocks" in caplog.text  # Since 100 %50 ==0? No, but if loop hits.
+'''
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
