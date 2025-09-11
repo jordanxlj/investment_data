@@ -32,6 +32,7 @@ import fire
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine, text, and_, or_, func, MetaData, Table
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 import tushare as ts
 
@@ -284,6 +285,36 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
 
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
 
+
+def diagnose_concurrency():
+    """Diagnose concurrency issues in the system"""
+    import psutil
+    import threading
+
+    print("=== Concurrency Diagnosis ===")
+
+    # System info
+    print(f"CPU cores: {psutil.cpu_count()}")
+    print(f"CPU usage: {psutil.cpu_percent()}%")
+    print(f"Memory usage: {psutil.virtual_memory().percent}%")
+
+    # Thread info
+    print(f"Active threads: {threading.active_count()}")
+    print(f"Thread names: {[t.name for t in threading.enumerate()]}")
+
+    # MySQL connection info (if available)
+    try:
+        import pymysql
+        conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', password='', database='investment_data')
+        with conn.cursor() as cursor:
+            cursor.execute("SHOW PROCESSLIST")
+            processes = cursor.fetchall()
+            print(f"MySQL active connections: {len(processes)}")
+            for proc in processes[:5]:  # Show first 5
+                print(f"  Process {proc[0]}: {proc[1]}@{proc[2]} - {proc[7]}")
+        conn.close()
+    except Exception as e:
+        print(f"MySQL connection check failed: {e}")
 
 def test_fiscal_period_info():
     """Test fiscal period info calculation for different dates"""
@@ -1077,7 +1108,24 @@ def evaluate_brokerage_report(
             for i in range((end_dt - start_dt).days + 1)
         ]
 
-    engine = create_engine(mysql_url, pool_recycle=3600, pool_pre_ping=True)
+    # Optimize MySQL connection parameters for high concurrency
+    mysql_url_with_params = mysql_url + "?charset=utf8mb4&autocommit=true&max_allowed_packet=67108864"
+
+    engine = create_engine(
+        mysql_url_with_params,
+        poolclass=QueuePool,
+        pool_size=50,  # 增加连接池大小
+        max_overflow=50,  # 增加额外连接数
+        pool_recycle=1800,  # 减少回收时间
+        pool_pre_ping=True,  # 连接前ping
+        pool_timeout=60,  # 增加获取连接超时时间
+        echo=False,  # 不打印SQL语句
+        connect_args={
+            'connect_timeout': 10,
+            'read_timeout': 30,
+            'write_timeout': 30,
+        }
+    )
     with engine.begin() as conn:
         conn.execute(text(CREATE_TABLE_DDL))
 
@@ -1089,17 +1137,34 @@ def evaluate_brokerage_report(
         logger.info("DRY RUN - No DB writes")
         return
 
+    logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers")
+    logger.info(f"Stocks to process: {stocks_list[:10]}..." if len(stocks_list) > 10 else f"Stocks to process: {stocks_list}")
+
     for current_date in date_list:
+        logger.info(f"Processing date: {current_date}")
         date_results = []
+
+        # Log connection pool status
+        logger.info(f"Connection pool status - size: {engine.pool.size()}, checkedin: {engine.pool.checkedin()}, overflow: {engine.pool.overflow()}")
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(process_stock_consensus, engine, ts_code, current_date): ts_code for ts_code in stocks_list}
+
+            logger.info(f"Submitted {len(futures)} tasks to thread pool")
+
+            completed_count = 0
             for future in concurrent.futures.as_completed(futures):
                 try:
                     result = future.result()
                     if result:
                         date_results.append(result)
+                    completed_count += 1
+                    if completed_count % 100 == 0:  # Log progress every 100 stocks
+                        logger.info(f"Completed {completed_count}/{len(futures)} stocks")
                 except Exception as e:
                     logger.error(f"Error processing {futures[future]}: {e}")
+
+        logger.info(f"Completed processing {len(date_results)} stocks for date {current_date}")
 
         if date_results:
             df = pd.DataFrame(date_results)
