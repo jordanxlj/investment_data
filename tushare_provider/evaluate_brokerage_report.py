@@ -49,18 +49,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Load configurations from JSON
-CONFIG_FILE = 'conf/report_configs.json'
-try:
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        configs = json.load(f)
-    RATING_MAPPING = configs.get('rating_mapping', {})
-    REPORT_TYPE_WEIGHTS = configs.get('report_type_weights', {})
-except FileNotFoundError:
-    logger.error(f"Configuration file {CONFIG_FILE} not found. Using defaults.")
-except UnicodeDecodeError as e:
-    logger.error(f"Encoding error loading config file: {e}. Using defaults.")
-    # Default mappings (same as original)
+def load_config():
+    """Load configuration from JSON file"""
+    CONFIG_FILE = 'conf/report_configs.json'
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            configs = json.load(f)
+        global RATING_MAPPING, REPORT_TYPE_WEIGHTS
+        RATING_MAPPING = configs.get('rating_mapping', {})
+        REPORT_TYPE_WEIGHTS = configs.get('report_type_weights', {})
+    except FileNotFoundError:
+        logger.error(f"Configuration file {CONFIG_FILE} not found. Using defaults.")
+        load_default_config()
+    except UnicodeDecodeError as e:
+        logger.error(f"Encoding error loading config file: {e}. Using defaults.")
+        load_default_config()
+
+def load_default_config():
+    """Load default configuration values"""
+    global RATING_MAPPING, REPORT_TYPE_WEIGHTS
     RATING_MAPPING = {
         'BUY': ['BUY', 'Buy', '买入', '买进', '优于大市', '强于大市', '强力买进', '强推', '强烈推荐', '增持', '推荐', '谨慎增持', '谨慎推荐', '跑赢行业', 'OUTPERFORM', 'OVERWEIGHT', 'Overweight'],
         'HOLD': ['HOLD', 'Hold', '持有', '区间操作'],
@@ -75,6 +82,9 @@ except UnicodeDecodeError as e:
         '一般': 2.0, 'general': 2.0, 'regular': 2.0, 'standard': 2.0,
         '新股': 1.5, '港股': 1.5, '非个股': 1.0, 'non-stock': 1.0, 'industry': 1.0, 'strategy': 1.0, 'sector': 1.0
     }
+
+# Load configurations from JSON
+load_config()
 
 DEFAULT_REPORT_WEIGHT = 2.0
 
@@ -187,7 +197,7 @@ def get_report_weight(report_type: Optional[str]) -> float:
         if key.lower() in report_type_lower:
             return weight
 
-    logger.debug(f"No match for {report_type_lower}, returning default: {DEFAULT_REPORT_WEIGHT}")
+    logger.info(f"No match for {report_type_lower}, returning default: {DEFAULT_REPORT_WEIGHT}")
     return DEFAULT_REPORT_WEIGHT
 
 
@@ -245,6 +255,17 @@ def classify_rating(rating: Optional[str]) -> str:
 def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: str, fiscal_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Aggregate consensus data from pre-filtered DataFrame"""
     try:
+        # Apply quarter filtering first if quarter column exists
+        if 'quarter' in date_df.columns and fiscal_info['current_quarter'] != 'ALL':
+            min_quarter_for_comparison = f"{fiscal_info['current_quarter']}Q4" if fiscal_info['current_quarter'] and 'Q' not in fiscal_info['current_quarter'] else fiscal_info['current_quarter']
+            try:
+                date_df['quarter_comparison'] = date_df['quarter'].apply(
+                    lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
+                )
+                date_df = date_df[date_df['quarter_comparison']]
+            except Exception as e:
+                logger.warning(f"Quarter filtering failed: {e}")
+
         total_reports = len(date_df)
 
         # Count ratings
@@ -280,8 +301,8 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 
         avg_report_weight = date_df['report_weight'].mean() if not date_df.empty else 0.0
 
-        # Aggregate forecasts
-        forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_quarter'])
+        # Aggregate forecasts (no additional quarter filtering needed since we did it above)
+        forecasts = aggregate_forecasts(sentiment_df, sentiment, 'ALL')  # Pass 'ALL' since we already filtered
 
         result = {
             'ts_code': ts_code,
@@ -473,7 +494,15 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
         raise ValueError(f"Invalid eval_date format: {eval_date}. Expected YYYYMMDD.")
 
     end_dt = eval_dt
-    start_dt = eval_dt - datetime.timedelta(days=window_months * 30)
+
+    # More accurate month calculation
+    start_dt = eval_dt
+    for _ in range(window_months):
+        # Go back one month at a time to handle different month lengths
+        if start_dt.month == 1:
+            start_dt = start_dt.replace(year=start_dt.year - 1, month=12)
+        else:
+            start_dt = start_dt.replace(month=start_dt.month - 1)
 
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
 
