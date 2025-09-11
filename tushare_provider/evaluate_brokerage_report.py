@@ -1485,8 +1485,5 @@ def evaluate_brokerage_report(
     logger.info(f"Processed: {len(stocks_list)} stocks * {len(date_list)} dates = {len(stocks_list) * len(date_list)} stock-date combinations")
 
 if __name__ == "__main__":
-    fire.Fire({
-        'evaluate': evaluate_brokerage_report,
-        'test_priority': test_annual_report_priority
-    })
+    fire.Fire(evaluate_brokerage_report)
 
