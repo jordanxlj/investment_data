@@ -845,7 +845,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 FROM ts_a_stock_financial_profile
                 WHERE ts_code = :ts_code
                 AND report_period IN :periods
-                ORDER BY period DESC
+                ORDER BY report_period DESC
             """)
             fp_df = pd.read_sql(fp_query, conn, params={
                 'ts_code': ts_code,
