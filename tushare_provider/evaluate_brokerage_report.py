@@ -285,6 +285,23 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
 
 
+def test_fiscal_period_info():
+    """Test fiscal period info calculation for different dates"""
+    test_dates = [
+        ("20180102", "2017Q4"),  # January - should be Q4 of previous year
+        ("20180430", "2017Q4"),  # April - should be Q4 of previous year
+        ("20180515", "2018Q1"),  # May - should be Q1 of current year
+        ("20180715", "2018Q2"),  # July - should be Q2 of current year
+        ("20181015", "2018Q3"),  # October - should be Q3 of current year
+        ("20181215", "2018Q4"),  # December - should be Q4 of current year
+    ]
+
+    for eval_date, expected_quarter in test_dates:
+        fiscal_info = get_fiscal_period_info(eval_date)
+        actual_quarter = fiscal_info['current_quarter']
+        print(f"Date: {eval_date}, Expected: {expected_quarter}, Actual: {actual_quarter}")
+        assert actual_quarter == expected_quarter, f"Mismatch for {eval_date}: expected {expected_quarter}, got {actual_quarter}"
+
 def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     """
     Get comprehensive fiscal period information for the evaluation date
@@ -917,7 +934,7 @@ def process_stock_consensus(
     """
     fiscal_info = get_fiscal_period_info(eval_date)
 
-    current_consensus = get_brokerage_consensus(engine, ts_code, eval_date, fiscal_info['current_fiscal_year'])
+    current_consensus = get_brokerage_consensus(engine, ts_code, eval_date, fiscal_info['current_quarter'])
 
     if not current_consensus:
         annual_data = get_annual_report_data(engine, ts_code, eval_date, fiscal_info['current_fiscal_period'])
@@ -927,7 +944,7 @@ def process_stock_consensus(
     if not current_consensus:
         return None
 
-    next_year_data = get_next_year_consensus(engine, ts_code, eval_date, fiscal_info['next_fiscal_year'])
+    next_year_data = get_next_year_consensus(engine, ts_code, eval_date, fiscal_info['next_year'])
 
     if next_year_data:
         current_consensus.update({
