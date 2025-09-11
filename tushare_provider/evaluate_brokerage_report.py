@@ -1028,10 +1028,15 @@ def evaluate_brokerage_report(
         return
 
     trade_date_df = get_trade_cal(start_date, end_date)
-    date_list = trade_date_df['cal_date'].tolist() if not trade_date_df.empty else [
-        (start_dt + datetime.timedelta(days=i)).strftime("%Y%m%d")
-        for i in range((end_dt - start_dt).days + 1)
-    ]
+    if not trade_date_df.empty:
+        # 确保按日期正序排序（从早到晚）
+        trade_date_df = trade_date_df.sort_values('cal_date', ascending=True)
+        date_list = trade_date_df['cal_date'].tolist()
+    else:
+        date_list = [
+            (start_dt + datetime.timedelta(days=i)).strftime("%Y%m%d")
+            for i in range((end_dt - start_dt).days + 1)
+        ]
 
     engine = create_engine(mysql_url, pool_recycle=3600, pool_pre_ping=True)
     with engine.begin() as conn:
