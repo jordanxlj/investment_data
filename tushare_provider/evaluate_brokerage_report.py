@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   next_year_ev_ebitda  FLOAT NULL,   -- 下一年EV/EBITDA预测
 
   -- 下一年度统计信息
-  next_year_reports    INT          NOT NULL DEFAULT 0,  -- 下一年报告数
+  next_year_reports    INT          NULL    DEFAULT 0,  -- 下一年报告数
   next_year_avg_weight FLOAT        NULL,               -- 下一年平均研报权重
 
   -- 数据来源标记
