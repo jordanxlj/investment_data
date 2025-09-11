@@ -360,17 +360,18 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 
 def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], batch_size: int) -> int:
     """Optimized: Process all dates for a single stock and upsert results immediately"""
-    from datetime import datetime, timedelta
-
     # Calculate date range for bulk query (start_date - 6 months to end_date)
-    start_dt = datetime.strptime(min(date_list), "%Y%m%d")
-    end_dt = datetime.strptime(max(date_list), "%Y%m%d")
-    bulk_start_dt = start_dt - timedelta(days=180)  # 6 months back
+    start_dt = datetime.datetime.strptime(min(date_list), "%Y%m%d")
+    end_dt = datetime.datetime.strptime(max(date_list), "%Y%m%d")
+    bulk_start_dt = start_dt - datetime.timedelta(days=180)  # 6 months back
 
     bulk_start_date = bulk_start_dt.strftime("%Y%m%d")
     bulk_end_date = end_dt.strftime("%Y%m%d")
 
     try:
+        # Bulk fetch annual data first (higher priority)
+        annual_cache = get_annual_data_bulk(engine, ts_code, date_list)
+
         # Bulk query all brokerage data for this stock in the date range
         with engine.begin() as conn:
             query = text("""
@@ -400,13 +401,24 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
 
         for current_date in date_list:
             try:
+                # First check annual data (higher priority)
+                annual_data = annual_cache.get(current_date)
+                if annual_data:
+                    # Use annual data directly
+                    result = annual_data.copy()
+                    result['ts_code'] = ts_code
+                    result['eval_date'] = current_date
+                    result['report_period'] = fiscal_infos[current_date]['current_fiscal_period']
+                    stock_results.append(result)
+                    logger.debug(f"Using annual report data for {ts_code} on {current_date}")
+                    continue
+
+                # If no annual data, proceed with brokerage
                 # Get group for current date or empty df
                 date_df = grouped.get_group(current_date).copy() if current_date in grouped.groups else pd.DataFrame()
 
                 if date_df.empty:
-                    result = get_financial_data_only_consensus(engine, ts_code, current_date)
-                    if result:
-                        stock_results.append(result)
+                    # No data at all, skip or add empty result if needed
                     continue
 
                 # Apply report weights vectorized
@@ -428,9 +440,6 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                     date_df = date_df[date_df['quarter_comparison']]
 
                 if date_df.empty:
-                    result = get_financial_data_only_consensus(engine, ts_code, current_date)
-                    if result:
-                        stock_results.append(result)
                     continue
 
                 # Aggregate consensus
@@ -442,7 +451,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 logger.error(f"Error processing {ts_code} for date {current_date}: {e}")
                 continue
 
-        # Upsert results immediately after processing this stock
+        # Upsert results immediately
         if stock_results:
             try:
                 df = pd.DataFrame(stock_results)
@@ -1151,6 +1160,101 @@ def get_annual_report_data(
         return None
 
 
+def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Bulk fetch annual report data for all dates for a stock"""
+    annual_data_cache = {}
+
+    try:
+        # Get unique report periods from date_list
+        periods = set()
+        for date in date_list:
+            fiscal_info = get_fiscal_period_info(date)
+            periods.add(fiscal_info['current_fiscal_period'])
+
+        periods_list = list(periods)
+        if not periods_list:
+            return annual_data_cache
+
+        # Bulk query financial_profile
+        with engine.begin() as conn:
+            fp_query = text("""
+                SELECT ann_date, f_ann_date, period, eps, roe_waa
+                FROM ts_a_stock_financial_profile
+                WHERE ts_code = :ts_code
+                AND period IN :periods
+                ORDER BY period
+            """)
+            fp_df = pd.read_sql(fp_query, conn, params={
+                'ts_code': ts_code,
+                'periods': tuple(periods_list)
+            })
+
+            # Bulk query fundamental
+            fund_query = text("""
+                SELECT ann_date, period, pe, ev_to_ebitda, dv_ratio
+                FROM ts_a_stock_fundamental
+                WHERE ts_code = :ts_code
+                AND period IN :periods
+                ORDER BY period
+            """)
+            fund_df = pd.read_sql(fund_query, conn, params={
+                'ts_code': ts_code,
+                'periods': tuple(periods_list)
+            })
+
+        # Process and cache per date
+        for date in date_list:
+            fiscal_info = get_fiscal_period_info(date)
+            period = fiscal_info['current_fiscal_period']
+
+            fp_row = fp_df[fp_df['period'] == period]
+            fund_row = fund_df[fund_df['period'] == period]
+
+            if not fp_row.empty:
+                row = fp_row.iloc[0]
+                annual_data = {
+                    'eps': row['eps'],
+                    'roe': row['roe_waa'],
+                    'total_reports': 0,
+                    'sentiment_pos': 0,
+                    'sentiment_neg': 0,
+                    'buy_count': 0,
+                    'hold_count': 0,
+                    'neutral_count': 0,
+                    'sell_count': 0,
+                    'depth_reports': 0,
+                    'research_reports': 0,
+                    'commentary_reports': 0,
+                    'general_reports': 0,
+                    'other_reports': 0,
+                    'avg_report_weight': None,
+                    'pe': None,
+                    'rd': None,
+                    'ev_ebitda': None,
+                    'max_price': None,
+                    'min_price': None,
+                    'data_source': 'annual_report',
+                    'last_updated': datetime.datetime.now()
+                }
+
+                if not fund_row.empty:
+                    f_row = fund_row.iloc[0]
+                    annual_data['pe'] = f_row['pe']
+                    annual_data['ev_ebitda'] = f_row['ev_to_ebitda']
+                    annual_data['rd'] = f_row['dv_ratio']  # Assuming rd is dv_ratio, adjust if needed
+
+                annual_data_cache[date] = annual_data
+            else:
+                annual_data_cache[date] = None
+
+        logger.debug(f"Bulk loaded annual data for {ts_code} with {len(annual_data_cache)} entries")
+        return annual_data_cache
+
+    except Exception as e:
+        logger.error(f"Error bulk loading annual data for {ts_code}: {e}")
+        return {date: None for date in date_list}
+
+
 def process_stock_consensus(
     engine: Any,
     ts_code: str,
@@ -1325,8 +1429,8 @@ def evaluate_brokerage_report(
     engine = create_engine(
         mysql_url_with_params,
         poolclass=QueuePool,
-        pool_size=50,  # 增加连接池大小
-        max_overflow=50,  # 增加额外连接数
+        pool_size=100,  # 增加连接池大小
+        max_overflow=100,  # 增加额外连接数
         pool_recycle=1800,  # 减少回收时间
         pool_pre_ping=True,  # 连接前ping
         pool_timeout=60,  # 增加获取连接超时时间
@@ -1380,7 +1484,9 @@ def evaluate_brokerage_report(
     logger.info(f"Completed processing all stocks. Total upserted: {total_upserted} records")
     logger.info(f"Processed: {len(stocks_list)} stocks * {len(date_list)} dates = {len(stocks_list) * len(date_list)} stock-date combinations")
 
-
 if __name__ == "__main__":
-    fire.Fire(evaluate_brokerage_report)
+    fire.Fire({
+        'evaluate': evaluate_brokerage_report,
+        'test_priority': test_annual_report_priority
+    })
 

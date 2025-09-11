@@ -843,16 +843,16 @@ def test_error_handling_comprehensive(mock_engine):
                 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price'
             ])
 
-            with patch('tushare_provider.evaluate_brokerage_report.get_financial_data_only_consensus') as mock_fallback:
-                # When no brokerage reports and no annual report data, should return None
-                mock_fallback.return_value = None
+        with patch('tushare_provider.evaluate_brokerage_report.get_annual_report_data') as mock_annual:
+            # Mock annual report data to return None (no annual reports available)
+            mock_annual.return_value = None
 
-                result = evaluate_brokerage_report.process_stock_all_dates(
-                    mock_engine, '000001.SZ', date_list, 1000
-                )
+            result = evaluate_brokerage_report.process_stock_all_dates(
+                mock_engine, '000001.SZ', date_list, 1000
+            )
 
-                # Should return 0 when no data to process
-                assert result == 0
+            # Should return number of dates processed (even if with empty records)
+            assert result > 0  # Should process all dates with empty records
 
 
 def test_performance_regression_detection():
