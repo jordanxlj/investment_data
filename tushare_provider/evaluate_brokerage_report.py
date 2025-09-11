@@ -875,7 +875,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
             db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
 
             # Get financial profile data for the fiscal period
-            fp_row = fp_df[fp_df['period'] == db_period]
+            fp_row = fp_df[fp_df['report_period'] == db_period]
 
             if not fp_row.empty:
                 row = fp_row.iloc[0]
