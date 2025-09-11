@@ -17,25 +17,68 @@
       "跑赢行业",
       "OUTPERFORM",
       "OVERWEIGHT",
-      "Overweight"
+      "Overweight",
+      "确信买入",
+      "长线买入",
+      "谨慎买入",
+      "审慎增持",
+      "跑赢大市",
+      "强力买进",
+      "超强大市",
+      "强买",
+      "强烈买入",
+      "Conviction BUY",
+      "強力買進",
+      "重点推荐",
+      "買進",
+      "ADD",
+      "买入(2008)",
+      "买入(2005)",
+      "买入(2009)",
+      "买入(2004)",
+      "推荐(2006)",
+      "Increase",
+      "Accumulate"
     ],
     "HOLD": [
       "HOLD",
       "Hold",
       "持有",
-      "区间操作"
+      "区间操作",
+      "审慎推荐",
+      "大市同步",
+      "区间买进",
+      "持有-超越同业",
+      "持有-落后同业",
+      "谨慎持有",
+      "持有-超越大盘",
+      "维持"
     ],
     "NEUTRAL": [
       "Neutral",
       "中性",
-      "无"
+      "无",
+      "中立",
+      "Equal weight",
+      "FULLY VALUED",
+      "审慎推荐",
+      "谨慎"
     ],
     "SELL": [
       "SELL",
       "Sell",
       "卖出",
       "减持",
-      "Underweight"
+      "Underweight",
+      "Underperform",
+      "Reduce",
+      "落后大市",
+      "回避",
+      "弱于大市",
+      "沽出",
+      "跑输行业",
+      "最弱",
+      "U-PF"
     ]
   },
   "report_type_weights": {
