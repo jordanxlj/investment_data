@@ -288,6 +288,7 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
 def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     """
     Get comprehensive fiscal period information for the evaluation date
+    Based on China Securities Regulatory Commission requirements for periodic reports
 
     Args:
         eval_date: Evaluation date in YYYYMMDD format
@@ -302,25 +303,36 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     current_year = f"{year}"
     next_year = f"{year + 1}"
 
-    if month <= 3:
-        current_quarter = f"{year}Q1"
+    if month <= 4:
+        # 1-4月：上年年报发布期，代表上一个会计年度
+        current_quarter = f"{year - 1}Q4"
         current_fiscal_year = f"{year - 1}"
         current_fiscal_period = f"{year - 1}1231"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
-    elif month <= 6:
-        current_quarter = f"{year}Q2"
+    elif month <= 5:
+        # 5月：Q1季报发布期，代表当前会计年度第一季度
+        current_quarter = f"{year}Q1"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0331"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
-    elif month <= 9:
-        current_quarter = f"{year}Q3"
+    elif month <= 8:
+        # 7-8月：半年报发布期，代表当前会计年度上半年
+        current_quarter = f"{year}Q2"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0630"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
+    elif month <= 11:
+        # 10-11月：Q3季报发布期，代表当前会计年度第三季度
+        current_quarter = f"{year}Q3"
+        current_fiscal_year = f"{year}"
+        current_fiscal_period = f"{year}0930"
+        next_fiscal_year = f"{year}"
+        next_fiscal_period = f"{year}1231"
     else:
+        # 12月：Q4季报发布期，代表当前会计年度第四季度
         current_quarter = f"{year}Q4"
         current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0930"
@@ -1051,3 +1063,4 @@ def evaluate_brokerage_report(
 
 if __name__ == "__main__":
     fire.Fire(evaluate_brokerage_report)
+

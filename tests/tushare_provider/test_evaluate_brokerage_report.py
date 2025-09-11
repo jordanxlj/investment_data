@@ -123,13 +123,13 @@ def test_weighted_median_mismatched_lengths():
         evaluate_brokerage_report.weighted_median(np.array([1]), np.array([1, 2]))
 
 @pytest.mark.parametrize("eval_date, expected_quarter, expected_fiscal_year", [
-    ('20240101', '2024Q1', '2023'),
-    ('20240315', '2024Q1', '2023'),
-    ('20240401', '2024Q2', '2024'),
+    ('20240101', '2023Q4', '2023'),
+    ('20240315', '2023Q4', '2023'),
+    ('20240401', '2023Q4', '2023'),
     ('20240615', '2024Q2', '2024'),
-    ('20240701', '2024Q3', '2024'),
+    ('20240701', '2024Q2', '2024'),
     ('20240915', '2024Q3', '2024'),
-    ('20241001', '2024Q4', '2024'),
+    ('20241001', '2024Q3', '2024'),
     ('20241231', '2024Q4', '2024'),
 ])
 def test_fiscal_period_info(eval_date, expected_quarter, expected_fiscal_year):
