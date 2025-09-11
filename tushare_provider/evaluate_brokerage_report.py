@@ -1034,7 +1034,7 @@ def evaluate_brokerage_report(
     stocks: Optional[List[str]] = None,
     force_update: bool = False,
     batch_size: int = 50,
-    max_workers: int = 4,
+    max_workers: int = 16,
     dry_run: bool = False,
     window_months: int = 6
 ) -> None:
