@@ -605,11 +605,11 @@ def get_brokerage_consensus(
             # Debug: Log quarter values for this stock
             logger.debug(f"start_date: {start_date}, end_date: {end_date}, max_age_date: {max_age_date}")
             logger.debug(f"Brokerage data for {ts_code}: {len(df)} records")
-            # Debug: Print specific columns for first few records
+            # Debug: Print specific columns for all records
             debug_cols = ['ts_code', 'report_date', 'report_title', 'classify', 'org_name', 'quarter', 'rating']
             if not df.empty:
-                logger.debug("Sample brokerage records:")
-                for idx, row in df.head(3).iterrows():
+                logger.debug(f"All brokerage records ({len(df)} total):")
+                for idx, row in df.iterrows():
                     record_info = {col: row[col] for col in debug_cols if col in df.columns}
                     logger.debug(f"Record {idx}: {record_info}")
             logger.debug(f"Quarter values: {df['quarter'].unique()[:10].tolist()}")  # Show first 10 unique quarters
