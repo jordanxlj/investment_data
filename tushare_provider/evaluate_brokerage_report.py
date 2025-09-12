@@ -388,8 +388,8 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
         # Precompute fiscal info for each date
         fiscal_infos = {date: get_fiscal_period_info(date) for date in date_list}
 
-        # Group bulk_df by report_date for efficient access
-        grouped = bulk_df.groupby('report_date')
+        # Convert current_date to datetime for comparison
+        bulk_df['report_date_dt'] = pd.to_datetime(bulk_df['report_date'], format='%Y%m%d')
 
         for current_date in date_list:
             try:
@@ -407,10 +407,11 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                     logger.debug(f"Using annual report data for {ts_code} on {current_date}")
                     continue
 
-                logger.debug(f"Using brokerage report data for {ts_code} on {current_date}, grouped: {grouped.groups}")
+                logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
-                # Get group for current date or empty df
-                date_df = grouped.get_group(current_date).copy() if current_date in grouped.groups else pd.DataFrame()
+                # Get all reports available up to current_date
+                current_date_dt = pd.to_datetime(current_date, format='%Y%m%d')
+                date_df = bulk_df[bulk_df['report_date_dt'] < current_date_dt].copy()
 
                 if date_df.empty:
                     # No data at all, skip or add empty result if needed
