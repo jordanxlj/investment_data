@@ -344,10 +344,11 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
 
     bulk_start_date = bulk_start_dt.strftime("%Y%m%d")
     bulk_end_date = end_dt.strftime("%Y%m%d")
+    annual_cache = {}
 
     try:
         # Bulk fetch annual data first (higher priority)
-        annual_cache = get_annual_data_bulk(engine, ts_code, date_list)
+        #annual_cache = get_annual_data_bulk(engine, ts_code, date_list)
 
         # Bulk query all brokerage data for this stock in the date range
         with engine.begin() as conn:
