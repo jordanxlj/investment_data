@@ -867,7 +867,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 if not period_rows.empty:
                     # Filter by ann_date < current_date
                     available_rows = period_rows[period_rows['ann_date'] < current_date]
-                    logger.debug(f"available_rows: {available_rows}")
+                    logger.debug(f"current_date: {current_date}, db_period: {db_period}, ann_date: {period_rows['ann_date']}, available_rows: {available_rows}")
                     if not available_rows.empty:
                         # Take the most recent available annual report for this period
                         latest_row = available_rows.iloc[0]
