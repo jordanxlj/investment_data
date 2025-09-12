@@ -734,13 +734,10 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
 
     result = {}
 
-    logger.debug(f"aggregate_forecasts, df.columns: {df.columns}")
-    # Process quarter-specific fields
-    for field in quarter_specific_fields:
+    # Process all-report fields
+    for field in all_report_fields:
         if field in df.columns:
-            field_df = df if min_quarter == 'ALL' else df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df
-            logger.debug(f"aggregate_forecasts, quarter_specific_fields, min_quarter: {min_quarter}")
-            field_data = field_df[[field, 'report_weight']].dropna()
+            field_data = df[[field, 'report_weight']].dropna()
             if field_data.empty:
                 result[field] = None
                 continue
@@ -777,10 +774,19 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
             # Field not in DataFrame, set to None
             result[field] = None
 
-    # Process all-report fields
-    for field in all_report_fields:
+    logger.debug(f"aggregate_forecasts, before filtering, df lens: {len(df)}")
+    date_df['quarter_comparison'] = date_df['quarter'].apply(
+        lambda q: compare_quarters(q, min_quarter) == 0 if q else False
+    )
+    date_df = date_df[date_df['quarter_comparison']]
+
+    logger.debug(f"aggregate_forecasts, after filtering, df.columns: {len(df)}")
+    # Process quarter-specific fields
+    for field in quarter_specific_fields:
         if field in df.columns:
-            field_data = df[[field, 'report_weight']].dropna()
+            field_df = df if min_quarter == 'ALL' else df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df
+            logger.debug(f"aggregate_forecasts, quarter_specific_fields, min_quarter: {min_quarter}")
+            field_data = field_df[[field, 'report_weight']].dropna()
             if field_data.empty:
                 result[field] = None
                 continue
