@@ -258,24 +258,6 @@ def classify_rating(rating: Optional[str]) -> str:
 def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: str, fiscal_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Aggregate consensus data from pre-filtered DataFrame"""
     try:
-        # Apply quarter filtering first if quarter column exists
-        if 'quarter' in date_df.columns and fiscal_info['current_quarter'] != 'ALL':
-            min_quarter_for_comparison = f"{fiscal_info['current_quarter']}Q4" if fiscal_info['current_quarter'] and 'Q' not in fiscal_info['current_quarter'] else fiscal_info['current_quarter']
-            # Filter out invalid quarter formats before comparison
-            valid_quarter_mask = date_df['quarter'].apply(
-                lambda q: q and 'Q' in str(q) and len(str(q).split('Q')) == 2 and str(q).split('Q')[1].isdigit()
-            )
-            date_df = date_df[valid_quarter_mask]
-
-            if not date_df.empty:
-                try:
-                    date_df['quarter_comparison'] = date_df['quarter'].apply(
-                        lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
-                    )
-                    date_df = date_df[date_df['quarter_comparison']]
-                except Exception as e:
-                    logger.warning(f"Quarter filtering failed: {e}")
-
         total_reports = len(date_df)
 
         # Count ratings
@@ -312,7 +294,10 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
         avg_report_weight = date_df['report_weight'].mean() if not date_df.empty else 0.0
 
         # Aggregate forecasts (no additional quarter filtering needed since we did it above)
-        forecasts = aggregate_forecasts(sentiment_df, sentiment, 'ALL')  # Pass 'ALL' since we already filtered
+        logger.debug(f"aggregate_consensus_from_df, sentiment_df: {sentiment_df}")
+        logger.debug(f"aggregate_consensus_from_df, sentiment: {sentiment}")
+        logger.debug(f"aggregate_consensus_from_df, fiscal_info['current_quarter']: {fiscal_info['current_quarter']}")
+        forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_quarter'])
 
         result = {
             'ts_code': ts_code,
@@ -753,6 +738,9 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
     for field in quarter_specific_fields:
         if field in df.columns:
             field_df = df if min_quarter == 'ALL' else df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df
+            logger.debug(f"aggregate_forecasts, quarter_specific_fields, min_quarter: {min_quarter}")
+            logger.debug(f"aggregate_forecasts, quarter_specific_fields, field_df: {field_df}")
+            logger.debug(f"aggregate_forecasts, quarter_specific_fields, df[df['quarter_comparison']]: {df[df['quarter_comparison']] if 'quarter_comparison' in df.columns else df}")
             field_data = field_df[[field, 'report_weight']].dropna()
             if field_data.empty:
                 result[field] = None
