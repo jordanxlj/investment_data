@@ -292,9 +292,6 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
         avg_report_weight = date_df['report_weight'].mean() if not date_df.empty else 0.0
 
         # Aggregate forecasts (no additional quarter filtering needed since we did it above)
-        logger.debug(f"aggregate_consensus_from_df, sentiment_df: {sentiment_df}")
-        logger.debug(f"aggregate_consensus_from_df, sentiment: {sentiment}")
-        logger.debug(f"aggregate_consensus_from_df, fiscal_info['current_fiscal_year']: {fiscal_info['current_fiscal_year']}")
         forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_fiscal_year'])
 
         result = {
@@ -428,8 +425,6 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
 
                 if date_df.empty:
                     continue
-
-                logger.debug(f"date_df: {date_df}")
 
                 # Aggregate consensus
                 result = aggregate_consensus_from_df(date_df, ts_code, current_date, fiscal_info)
@@ -778,7 +773,7 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
     )
     df = df[df['quarter_comparison']]
 
-    logger.debug(f"aggregate_forecasts, after filtering, df.columns: {len(df)}")
+    logger.debug(f"aggregate_forecasts, after filtering, df lens: {len(df)}")
     # Process quarter-specific fields
     for field in quarter_specific_fields:
         if field in df.columns:
@@ -879,14 +874,11 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 if not period_rows.empty:
                     # Filter by ann_date < current_date
                     available_rows = period_rows[period_rows['ann_date'] < current_date]
-                    logger.debug(f"current_date: {current_date}, db_period: {db_period}, ann_date: {period_rows['ann_date']}, available_rows: {available_rows}")
                     if not available_rows.empty:
                         # Take the most recent available annual report for this period
                         latest_row = available_rows.iloc[0]
                         # Store the filtered row with the corresponding current_date
                         filtered_fp_dict[current_date] = latest_row
-
-            logger.debug(f"filtered_fp_dict keys: {list(filtered_fp_dict.keys())}")
 
             # Bulk query fundamental (daily data by trade_date)
             fund_query = text("""
