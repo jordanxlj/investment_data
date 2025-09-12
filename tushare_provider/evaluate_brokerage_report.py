@@ -775,10 +775,10 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
             result[field] = None
 
     logger.debug(f"aggregate_forecasts, before filtering, df lens: {len(df)}")
-    date_df['quarter_comparison'] = date_df['quarter'].apply(
+    df['quarter_comparison'] = df['quarter'].apply(
         lambda q: compare_quarters(q, min_quarter) == 0 if q else False
     )
-    date_df = date_df[date_df['quarter_comparison']]
+    df = df[df['quarter_comparison']]
 
     logger.debug(f"aggregate_forecasts, after filtering, df.columns: {len(df)}")
     # Process quarter-specific fields
