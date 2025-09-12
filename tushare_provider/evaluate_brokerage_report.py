@@ -1119,30 +1119,8 @@ def evaluate_brokerage_report(
     # Log connection pool status
     logger.info(f"Connection pool status - size: {engine.pool.size()}, checkedin: {engine.pool.checkedin()}, overflow: {engine.pool.overflow()}")
 
-    total_upserted = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit one task per stock (each task processes all dates for that stock and upserts immediately)
-        futures = {executor.submit(process_stock_all_dates, engine, ts_code, date_list, batch_size): ts_code for ts_code in stocks_list}
-
-        logger.info(f"Submitted {len(futures)} tasks to thread pool (one per stock)")
-
-        completed_count = 0
-        for future in concurrent.futures.as_completed(futures):
-            ts_code = futures[future]
-            try:
-                upserted_count = future.result()
-                total_upserted += upserted_count
-                completed_count += 1
-
-                if completed_count % 50 == 0:  # Log progress every 50 stocks
-                    logger.info(f"Completed {completed_count}/{len(futures)} stocks, total upserted: {total_upserted}")
-
-            except Exception as e:
-                logger.error(f"Error processing stock {ts_code}: {e}")
-                completed_count += 1
-
-    logger.info(f"Completed processing all stocks. Total upserted: {total_upserted} records")
-    logger.info(f"Processed: {len(stocks_list)} stocks * {len(date_list)} dates = {len(stocks_list) * len(date_list)} stock-date combinations")
+    for ts_code in stocks_list:
+        process_stock_all_dates(engine, ts_code, date_list, batch_size)
 
 if __name__ == "__main__":
     fire.Fire(evaluate_brokerage_report)
