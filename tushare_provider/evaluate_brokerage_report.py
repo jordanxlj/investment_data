@@ -384,9 +384,10 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
         for current_date in date_list:
             try:
                 # First check annual data (higher priority)
-                logger.debug(f"annual_cache: {annual_cache.keys()}")
+                #logger.debug(f"annual_cache: {annual_cache.keys()}")
                 annual_data = annual_cache.get(current_date)
                 if annual_data:
+                    logger.debug(f"annual report {annual_data}")
                     # Use annual data directly
                     result = annual_data.copy()
                     result['ts_code'] = ts_code
