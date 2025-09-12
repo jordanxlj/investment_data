@@ -39,7 +39,7 @@ import tushare as ts
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -63,6 +63,9 @@ def load_config():
         load_default_config()
     except UnicodeDecodeError as e:
         logger.error(f"Encoding error loading config file: {e}. Using defaults.")
+        load_default_config()
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error loading config file: {e}. Using defaults.")
         load_default_config()
 
 def load_default_config():
@@ -404,7 +407,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                     logger.debug(f"Using annual report data for {ts_code} on {current_date}")
                     continue
 
-                logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
+                logger.debug(f"Using brokerage report data for {ts_code} on {current_date}, grouped: {grouped.groups}")
                 # If no annual data, proceed with brokerage
                 # Get group for current date or empty df
                 date_df = grouped.get_group(current_date).copy() if current_date in grouped.groups else pd.DataFrame()
