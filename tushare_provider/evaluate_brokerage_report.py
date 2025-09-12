@@ -296,13 +296,13 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
         # Aggregate forecasts (no additional quarter filtering needed since we did it above)
         logger.debug(f"aggregate_consensus_from_df, sentiment_df: {sentiment_df}")
         logger.debug(f"aggregate_consensus_from_df, sentiment: {sentiment}")
-        logger.debug(f"aggregate_consensus_from_df, fiscal_info['current_quarter']: {fiscal_info['current_quarter']}")
-        forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_quarter'])
+        logger.debug(f"aggregate_consensus_from_df, fiscal_info['current_fiscal_year']: {fiscal_info['current_fiscal_year']}")
+        forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_fiscal_year'])
 
         result = {
             'ts_code': ts_code,
             'eval_date': eval_date,
-            'report_period': fiscal_info['current_quarter'],
+            'report_period': fiscal_info['current_fiscal_year'],
             'total_reports': total_reports,
             'sentiment_pos': sentiment_pos,
             'sentiment_neg': sentiment_neg,
@@ -537,35 +537,35 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     if month <= 4:
         # 1-4月：上年年报发布期，代表上一个会计年度
         current_quarter = f"{year - 1}Q4"
-        current_fiscal_year = f"{year - 1}"
+        current_fiscal_year = f"{year - 1}Q4"
         current_fiscal_period = f"{year - 1}1231"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 5:
         # 5月：Q1季报发布期，代表当前会计年度第一季度
         current_quarter = f"{year}Q1"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0331"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 8:
         # 7-8月：半年报发布期，代表当前会计年度上半年
         current_quarter = f"{year}Q2"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0630"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 11:
         # 10-11月：Q3季报发布期，代表当前会计年度第三季度
         current_quarter = f"{year}Q3"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     else:
         # 12月：Q4季报发布期，代表当前会计年度第四季度
         current_quarter = f"{year}Q4"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year + 1}"
         next_fiscal_period = f"{year + 1}1231"
