@@ -39,7 +39,7 @@ import tushare as ts
 
 # Setup logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -147,7 +147,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   next_year_avg_weight FLOAT        NULL,               -- 下一年平均研报权重
 
   -- 数据来源标记
-  data_source          VARCHAR(32)  NULL,   -- 'brokerage_consensus' or 'annual_report'
   last_updated         DATETIME     NOT NULL,
 
   PRIMARY KEY (ts_code, eval_date, report_period),
@@ -166,8 +165,7 @@ ALL_COLUMNS = [
     "general_reports", "other_reports", "avg_report_weight",
     "eps", "pe", "rd", "roe", "ev_ebitda", "max_price", "min_price",
     "next_year_eps", "next_year_pe", "next_year_roe", "next_year_ev_ebitda",
-    "next_year_reports", "next_year_avg_weight",
-    "data_source", "last_updated"
+    "next_year_reports", "next_year_avg_weight", "last_updated"
 ]
 
 
@@ -323,7 +321,6 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
             'ev_ebitda': forecasts.get('ev_ebitda'),
             'max_price': forecasts.get('max_price'),
             'min_price': forecasts.get('min_price'),
-            'data_source': 'brokerage_consensus'
         }
 
         # Add last_updated timestamp
@@ -937,7 +934,6 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                     'ev_ebitda': None,
                     'max_price': None,
                     'min_price': None,
-                    'data_source': 'annual_report',
                     'last_updated': datetime.datetime.now()
                 }
 
