@@ -445,6 +445,8 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 if date_df.empty:
                     continue
 
+                logger.debug(f"date_df: {date_df}")
+
                 # Aggregate consensus
                 result = aggregate_consensus_from_df(date_df, ts_code, current_date, fiscal_info)
                 if result:
