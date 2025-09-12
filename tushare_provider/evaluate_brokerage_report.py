@@ -857,7 +857,7 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
 
             # Filter by ann_date <= current_date for each period
             # This ensures we only use annual reports that were available on the evaluation date
-            filtered_fp_rows = []
+            filtered_fp_dict = {}
             for current_date in date_list:
                 fiscal_info = get_fiscal_period_info(current_date)
                 period = fiscal_info['current_fiscal_period']
@@ -871,14 +871,10 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                     if not available_rows.empty:
                         # Take the most recent available annual report for this period
                         latest_row = available_rows.iloc[0]
-                        filtered_fp_rows.append(latest_row)
+                        # Store the filtered row with the corresponding current_date
+                        filtered_fp_dict[current_date] = latest_row
 
-            # Create filtered dataframe
-            if filtered_fp_rows:
-                fp_df = pd.DataFrame(filtered_fp_rows)
-            else:
-                fp_df = pd.DataFrame(columns=['ann_date', 'report_period', 'eps', 'roe_waa'])
-            logger.debug(f"after filtered fp_df: {fp_df}")
+            logger.debug(f"filtered_fp_dict keys: {list(filtered_fp_dict.keys())}")
 
             # Bulk query fundamental (daily data by trade_date)
             fund_query = text("""
@@ -903,10 +899,8 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
             db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
 
             # Get financial profile data for the fiscal period (already filtered by ann_date)
-            fp_row = fp_df[fp_df['report_period'] == db_period]
-            logger.debug(f"matched fp_row: {fp_row}")
-            if not fp_row.empty:
-                row = fp_row.iloc[0]
+            row = filtered_fp_dict.get(current_date)
+            if row is not None:
                 annual_data = {
                     'eps': row['eps'],
                     'roe': row['roe_waa'],
