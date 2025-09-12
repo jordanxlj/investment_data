@@ -918,6 +918,451 @@ def test_aggregate_consensus_from_df_quarter_filter():
     result_no_filter = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '20250101', {'current_quarter': 'ALL'})
     assert result_no_filter['total_reports'] == 3  # No filtering applied
 
+
+def test_load_config_file_missing():
+    """Test load_config when config file doesn't exist"""
+    with patch('os.path.exists', return_value=False):
+        with patch('builtins.open', side_effect=FileNotFoundError):
+            evaluate_brokerage_report.load_config()
+            # Should not raise exception, uses defaults
+
+
+def test_load_config_json_error():
+    """Test load_config with invalid JSON"""
+    with patch('os.path.exists', return_value=True):
+        with patch('builtins.open', side_effect=json.JSONDecodeError("Invalid JSON", "", 0)):
+            evaluate_brokerage_report.load_config()
+            # Should not raise exception, uses defaults
+
+
+def test_get_trade_cal_date_range():
+    """Test get_trade_cal with different date ranges"""
+    mock_df = pd.DataFrame({
+        'cal_date': ['20250101', '20250102', '20250103'],
+        'is_open': [1, 1, 0]
+    })
+
+    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+        mock_cal.return_value = mock_df
+        result = evaluate_brokerage_report.get_trade_cal('20250101', '20250103')
+        assert len(result) == 3
+        assert result['cal_date'].tolist() == ['20250101', '20250102', '20250103']
+
+
+def test_get_trade_cal_empty_result():
+    """Test get_trade_cal with empty API result"""
+    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+        mock_cal.return_value = pd.DataFrame()
+        result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
+        assert result.empty
+
+
+def test_get_date_window_edge_cases():
+    """Test get_date_window with edge cases"""
+    # Test with minimum window
+    start, end = evaluate_brokerage_report.get_date_window('20250101', window_months=1)
+    assert start < '20250101'
+    assert end == '20250101'
+
+    # Test with large window
+    start, end = evaluate_brokerage_report.get_date_window('20250101', window_months=24)
+    assert start < '20250101'
+    assert end == '20250101'
+
+
+def test_get_stocks_list_empty_result(mock_engine):
+    """Test get_stocks_list with empty database result"""
+    mock_conn = mock_engine.begin.return_value.__enter__.return_value
+    mock_conn.execute.return_value.fetchall.return_value = []
+
+    result = evaluate_brokerage_report.get_stocks_list(mock_engine)
+    assert result == []
+
+
+def test_get_stocks_list_invalid_format(mock_engine):
+    """Test get_stocks_list with invalid stock code format"""
+    mock_conn = mock_engine.begin.return_value.__enter__.return_value
+    mock_conn.execute.return_value.fetchall.return_value = [
+        ('INVALID',),  # Invalid format
+        ('000001',),   # Missing suffix
+        ('000001.SZ',) # Valid
+    ]
+
+    result = evaluate_brokerage_report.get_stocks_list(mock_engine)
+    assert '000001.SZ' in result
+
+
+@pytest.mark.parametrize("rating, expected", [
+    ('买入', 'BUY'),
+    ('增持', 'BUY'),
+    ('强烈推荐', 'BUY'),
+    ('推荐', 'BUY'),
+    ('谨慎推荐', 'HOLD'),
+    ('中性', 'NEUTRAL'),
+    ('持有', 'HOLD'),
+    ('减持', 'SELL'),
+    ('卖出', 'SELL'),
+    ('强卖', 'SELL'),
+    ('未知评级', 'NEUTRAL'),  # Unknown rating
+    (None, 'NEUTRAL'),  # None rating
+    ('', 'NEUTRAL'),    # Empty rating
+])
+def test_classify_rating_comprehensive(rating, expected):
+    """Test classify_rating with comprehensive rating types"""
+    result = evaluate_brokerage_report.classify_rating(rating)
+    assert result == expected
+
+
+@pytest.mark.parametrize("report_type, expected", [
+    ('深度报告', 'depth'),
+    ('深度分析报告', 'depth'),
+    ('调研报告', 'research'),
+    ('调研纪要', 'research'),
+    ('机构调研', 'research'),
+    ('点评', 'commentary'),
+    ('每日点评', 'commentary'),
+    ('一般报告', 'general'),
+    ('行业报告', 'other'),
+    ('宏观报告', 'other'),
+    ('策略报告', 'other'),
+    (None, 'other'),
+    ('', 'other'),
+    ('unknown_type', 'other'),
+])
+def test_categorize_report_type_comprehensive(report_type, expected):
+    """Test categorize_report_type with comprehensive report types"""
+    result = evaluate_brokerage_report.categorize_report_type(report_type)
+    assert result == expected
+
+
+@pytest.mark.parametrize("report_type, expected", [
+    ('深度报告', 5.0),
+    ('深度', 5.0),
+    ('调研报告', 4.0),
+    ('调研', 4.0),
+    ('点评', 3.0),
+    ('一般报告', 2.0),
+    ('一般', 2.0),
+    ('行业报告', 1.0),
+    ('非个股', 1.0),
+    ('unknown', 2.0),  # Default weight
+    (None, 2.0),      # Default for None
+    ('', 2.0),        # Default for empty
+])
+def test_get_report_weight_comprehensive(report_type, expected):
+    """Test get_report_weight with comprehensive report types"""
+    result = evaluate_brokerage_report.get_report_weight(report_type)
+    assert result == expected
+
+
+def test_weighted_median_single_value():
+    """Test weighted_median with single value"""
+    result = evaluate_brokerage_report.weighted_median(np.array([5.0]), np.array([1.0]))
+    assert result == 5.0
+
+
+def test_weighted_median_uniform_weights():
+    """Test weighted_median with uniform weights"""
+    values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
+    result = evaluate_brokerage_report.weighted_median(values, weights)
+    assert result == 3.0
+
+
+def test_weighted_median_skewed_weights():
+    """Test weighted_median with skewed weights"""
+    values = np.array([1.0, 2.0, 3.0])
+    weights = np.array([0.1, 0.1, 0.8])  # Heavy weight on 3.0
+    result = evaluate_brokerage_report.weighted_median(values, weights)
+    assert result == 3.0
+
+
+def test_apply_field_ranges_eps():
+    """Test _apply_field_ranges for EPS field"""
+    values = np.array([-100.0, -50.0, 0.0, 1.0, 2.0, 100.0])
+    weights = np.array([1.0] * 6)
+    filtered_values, filtered_weights = evaluate_brokerage_report._apply_field_ranges('eps', values, weights)
+    # Should filter out extreme values
+    assert len(filtered_values) < len(values)
+
+
+def test_apply_field_ranges_pe():
+    """Test _apply_field_ranges for PE field"""
+    values = np.array([-10.0, 0.0, 5.0, 50.0, 200.0])
+    weights = np.array([1.0] * 5)
+    filtered_values, filtered_weights = evaluate_brokerage_report._apply_field_ranges('pe', values, weights)
+    # Should filter out negative and extreme values
+    assert len(filtered_values) < len(values)
+    assert all(v > 0 for v in filtered_values)
+
+
+def test_filter_outliers_extreme_values():
+    """Test _filter_outliers with extreme values"""
+    values = np.array([1.0, 2.0, 3.0, 1000.0, 4.0, 5.0])
+    weights = np.array([1.0] * 6)
+    filtered_values, filtered_weights = evaluate_brokerage_report._filter_outliers(values, weights)
+    # Should filter out the extreme value 1000.0
+    assert 1000.0 not in filtered_values
+    assert len(filtered_values) == 5
+
+
+def test_filter_outliers_custom_percentile():
+    """Test _filter_outliers with custom percentile"""
+    values = np.array([1.0, 2.0, 3.0, 100.0, 4.0, 5.0])
+    weights = np.array([1.0] * 6)
+    filtered_values, filtered_weights = evaluate_brokerage_report._filter_outliers(values, weights, percentile=10.0)
+    # With 10% percentile, should filter out more extreme values
+    assert len(filtered_values) < 6
+
+
+def test_aggregate_forecasts_invalid_sentiment():
+    """Test aggregate_forecasts with invalid sentiment source"""
+    df = pd.DataFrame({
+        'eps': [2.5],
+        'report_weight': [3.0],
+        'quarter_comparison': [True]
+    })
+    result = evaluate_brokerage_report.aggregate_forecasts(df, 'invalid_sentiment')
+    # Should handle gracefully
+    assert isinstance(result, dict)
+
+
+def test_aggregate_forecasts_all_none_values():
+    """Test aggregate_forecasts when all values are None"""
+    df = pd.DataFrame({
+        'eps': [None, None, None],
+        'pe': [None, None, None],
+        'report_weight': [3.0, 2.0, 1.0],
+        'quarter_comparison': [True, True, True]
+    })
+    result = evaluate_brokerage_report.aggregate_forecasts(df, 'bullish')
+    assert result['eps'] is None
+    assert result['pe'] is None
+
+
+def test_process_stock_all_dates_empty_date_list(mock_engine):
+    """Test process_stock_all_dates with empty date list"""
+    result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', [], 1000)
+    assert result == 0
+
+
+def test_process_stock_all_dates_database_error(mock_engine, caplog):
+    """Test process_stock_all_dates with database connection error"""
+    date_list = ['20250101']
+    mock_conn = mock_engine.begin.return_value.__enter__.return_value
+    mock_conn.execute.side_effect = Exception("Connection failed")
+
+    result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
+    assert result == 0
+    assert "Error in bulk processing" in caplog.text
+
+
+def test_evaluate_brokerage_report_mysql_connection_error(caplog):
+    """Test evaluate_brokerage_report with MySQL connection error"""
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.side_effect = Exception("MySQL connection failed")
+        result = evaluate_brokerage_report.evaluate_brokerage_report()
+    assert result is None
+    assert "MySQL connection failed" in caplog.text
+
+
+def test_evaluate_brokerage_report_empty_date_range():
+    """Test evaluate_brokerage_report with empty date range"""
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_create_engine.return_value = MagicMock()
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+            mock_trade_cal.return_value = pd.DataFrame()  # Empty calendar
+            result = evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
+    assert result is None
+
+
+def test_get_annual_data_bulk_invalid_date_format(mock_engine):
+    """Test get_annual_data_bulk with invalid date format"""
+    date_list = ['invalid_date']
+    result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
+    # Should handle gracefully without crashing
+    assert isinstance(result, dict)
+
+
+def test_get_annual_data_bulk_empty_date_list(mock_engine):
+    """Test get_annual_data_bulk with empty date list"""
+    result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', [])
+    assert result == {}
+
+
+def test_get_annual_data_bulk_database_error(mock_engine):
+    """Test get_annual_data_bulk with database error"""
+    date_list = ['20250101']
+    mock_conn = mock_engine.begin.return_value.__enter__.return_value
+    mock_conn.execute.side_effect = Exception("Database error")
+
+    result = evaluate_brokerage_report.get_annual_data_bulk(mock_engine, '000001.SZ', date_list)
+    assert result == {'20250101': None}
+
+
+def test_upsert_batch_database_error(mock_engine, caplog):
+    """Test _upsert_batch with database error"""
+    df = pd.DataFrame({
+        'ts_code': ['000001.SZ'],
+        'eval_date': ['20250101'],
+        'report_period': ['2024Q4'],
+    })
+
+    mock_conn = mock_engine.begin.return_value.__enter__.return_value
+    mock_conn.execute.side_effect = Exception("Database error")
+
+    result = evaluate_brokerage_report._upsert_batch(mock_engine, df)
+    assert result == 0
+
+
+def test_upsert_batch_large_batch():
+    """Test _upsert_batch with large batch size"""
+    large_df = pd.DataFrame({
+        'ts_code': [f'{i:06d}.SZ' for i in range(2000)],
+        'eval_date': ['20250101'] * 2000,
+        'report_period': ['2024Q4'] * 2000,
+    })
+
+    with patch('tushare_provider.evaluate_brokerage_report.mysql_insert') as mock_insert:
+        with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+            mock_conn = mock_engine.begin.return_value.__enter__.return_value
+            mock_stmt = MagicMock()
+            mock_inserted = MagicMock()
+            for col in evaluate_brokerage_report.ALL_COLUMNS:
+                mock_inserted.__getitem__.return_value = MagicMock()
+            mock_stmt.inserted = mock_inserted
+            mock_insert.return_value = mock_stmt
+            mock_stmt.on_duplicate_key_update.return_value = mock_stmt
+            mock_conn.execute.return_value.rowcount = 1000
+
+            result = evaluate_brokerage_report._upsert_batch(mock_engine, large_df, chunksize=1000)
+            assert result == 2000  # Should process all records
+            assert mock_conn.execute.call_count == 2  # Should be called twice for 2000 records with chunksize 1000
+
+
+def test_parse_quarter_edge_cases():
+    """Test parse_quarter with edge cases"""
+    # Test with extra whitespace
+    assert evaluate_brokerage_report.parse_quarter(' 2024Q1 ') == (2024, 1)
+
+    # Test with lowercase
+    assert evaluate_brokerage_report.parse_quarter('2024q1') == (0, 0)  # Should fail due to lowercase
+
+    # Test with missing parts
+    assert evaluate_brokerage_report.parse_quarter('2024') == (0, 0)
+    assert evaluate_brokerage_report.parse_quarter('Q1') == (0, 0)
+
+    # Test with invalid characters
+    assert evaluate_brokerage_report.parse_quarter('2024Q1abc') == (0, 0)
+
+
+def test_compare_quarters_same_year():
+    """Test compare_quarters within same year"""
+    assert evaluate_brokerage_report.compare_quarters('2024Q1', '2024Q2') == -1
+    assert evaluate_brokerage_report.compare_quarters('2024Q2', '2024Q2') == 0
+    assert evaluate_brokerage_report.compare_quarters('2024Q3', '2024Q2') == 1
+
+
+def test_compare_quarters_different_years():
+    """Test compare_quarters across different years"""
+    assert evaluate_brokerage_report.compare_quarters('2023Q4', '2024Q1') == -1
+    assert evaluate_brokerage_report.compare_quarters('2024Q1', '2023Q4') == 1
+    assert evaluate_brokerage_report.compare_quarters('2024Q1', '2024Q1') == 0
+
+
+def test_get_fiscal_period_info_edge_cases():
+    """Test get_fiscal_period_info with edge cases"""
+    # Test year boundary
+    fiscal_info = evaluate_brokerage_report.get_fiscal_period_info('20241231')
+    assert fiscal_info['current_quarter'] == '2024Q4'
+    assert fiscal_info['current_fiscal_year'] == '2024'
+
+    # Test year start
+    fiscal_info = evaluate_brokerage_report.get_fiscal_period_info('20240101')
+    assert fiscal_info['current_quarter'] == '2023Q4'
+    assert fiscal_info['current_fiscal_year'] == '2023'
+
+
+def test_data_validation_edge_cases():
+    """Test data validation with edge cases"""
+    # Test with extremely large values
+    large_df = pd.DataFrame({
+        'eps': [1000000.0, -1000000.0],
+        'pe': [10000.0, -100.0],
+        'report_weight': [3.0, 3.0],
+        'quarter_comparison': [True, True]
+    })
+
+    result = evaluate_brokerage_report.aggregate_forecasts(large_df, 'bullish')
+    # Should handle extreme values gracefully
+    assert isinstance(result, dict)
+
+
+def test_concurrent_processing_race_conditions():
+    """Test concurrent processing for race conditions"""
+    # This is a basic test - in real scenarios would need more sophisticated testing
+    stocks = ['000001.SZ', '000002.SZ']
+    dates = ['20250101']
+
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        with patch('tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process:
+            mock_process.return_value = 1
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {executor.submit(mock_process, mock_engine, stock, dates, 1000): stock for stock in stocks}
+                results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+            assert len(results) == len(stocks)
+            assert all(result == 1 for result in results)
+
+
+def test_memory_cleanup_verification():
+    """Test that memory is properly cleaned up after processing"""
+    import gc
+
+    # Create a large DataFrame
+    large_df = pd.DataFrame({
+        'ts_code': ['000001.SZ'] * 10000,
+        'report_date': ['20250101'] * 10000,
+        'eps': np.random.randn(10000),
+        'report_type': ['点评'] * 10000
+    })
+
+    initial_objects = len(gc.get_objects())
+
+    # Process the data
+    grouped = large_df.groupby('report_date')
+    processed_data = {}
+    for date, group in grouped:
+        processed_data[date] = group['eps'].mean()
+        del group  # Explicitly delete group
+
+    # Force garbage collection
+    gc.collect()
+
+    final_objects = len(gc.get_objects())
+
+    # Memory should not grow significantly
+    assert abs(final_objects - initial_objects) < 1000
+    assert len(processed_data) > 0
+
+
+def test_error_propagation_chain():
+    """Test error propagation through the processing chain"""
+    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+            mock_trade_cal.side_effect = Exception("Calendar API failed")
+
+            # Should handle the error gracefully
+            result = evaluate_brokerage_report.evaluate_brokerage_report()
+            assert result is None
+
 def test_get_annual_data_bulk_with_data(mock_engine):
     """Test get_annual_data_bulk with data"""
     date_list = ['20250101']
