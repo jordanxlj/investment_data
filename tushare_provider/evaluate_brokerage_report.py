@@ -258,13 +258,20 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
         # Apply quarter filtering first if quarter column exists
         if 'quarter' in date_df.columns and fiscal_info['current_quarter'] != 'ALL':
             min_quarter_for_comparison = f"{fiscal_info['current_quarter']}Q4" if fiscal_info['current_quarter'] and 'Q' not in fiscal_info['current_quarter'] else fiscal_info['current_quarter']
-            try:
-                date_df['quarter_comparison'] = date_df['quarter'].apply(
-                    lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
-                )
-                date_df = date_df[date_df['quarter_comparison']]
-            except Exception as e:
-                logger.warning(f"Quarter filtering failed: {e}")
+            # Filter out invalid quarter formats before comparison
+            valid_quarter_mask = date_df['quarter'].apply(
+                lambda q: q and 'Q' in str(q) and len(str(q).split('Q')) == 2 and str(q).split('Q')[1].isdigit()
+            )
+            date_df = date_df[valid_quarter_mask]
+
+            if not date_df.empty:
+                try:
+                    date_df['quarter_comparison'] = date_df['quarter'].apply(
+                        lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
+                    )
+                    date_df = date_df[date_df['quarter_comparison']]
+                except Exception as e:
+                    logger.warning(f"Quarter filtering failed: {e}")
 
         total_reports = len(date_df)
 
@@ -419,10 +426,18 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 # Filter by quarter if needed
                 if min_quarter != 'ALL':
                     min_quarter_for_comparison = f"{min_quarter}Q4" if min_quarter and 'Q' not in min_quarter else min_quarter
-                    date_df['quarter_comparison'] = date_df['quarter'].apply(
-                        lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
+
+                    # Filter out invalid quarter formats before comparison
+                    valid_quarter_mask = date_df['quarter'].apply(
+                        lambda q: q and 'Q' in str(q) and len(str(q).split('Q')) == 2 and str(q).split('Q')[1].isdigit()
                     )
-                    date_df = date_df[date_df['quarter_comparison']]
+                    date_df = date_df[valid_quarter_mask]
+
+                    if not date_df.empty:
+                        date_df['quarter_comparison'] = date_df['quarter'].apply(
+                            lambda q: compare_quarters(q, min_quarter_for_comparison) >= 0 if q else False
+                        )
+                        date_df = date_df[date_df['quarter_comparison']]
 
                 if date_df.empty:
                     continue
