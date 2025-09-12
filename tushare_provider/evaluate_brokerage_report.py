@@ -396,6 +396,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                     logger.debug(f"Using annual report data for {ts_code} on {current_date}")
                     continue
 
+                logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
                 # Get group for current date or empty df
                 date_df = grouped.get_group(current_date).copy() if current_date in grouped.groups else pd.DataFrame()
@@ -833,7 +834,6 @@ def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dic
                 db_periods_list.append(db_period)
             else:
                 db_periods_list.append(period)  # Keep as-is if not in expected format
-        logger.debug(f"db_periods_list: {db_periods_list}")
 
         # Convert date_list to datetime for fundamental table query
         date_objs = [datetime.datetime.strptime(date, "%Y%m%d") for date in date_list]
