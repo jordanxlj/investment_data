@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ev_ebitda    FLOAT NULL,
   max_price    FLOAT NULL,
   min_price    FLOAT NULL,
-  PRIMARY KEY (ts_code, report_date, org_name)
+  PRIMARY KEY (ts_code, report_date, org_name),
+  INDEX idx_ts_code (ts_code),
+  INDEX idx_report_date (report_date),
+  INDEX idx_ts_code_report_date (ts_code, report_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 

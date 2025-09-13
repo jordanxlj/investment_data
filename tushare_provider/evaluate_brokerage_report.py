@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   PRIMARY KEY (ts_code, eval_date, report_period),
   INDEX idx_eval_date (eval_date),
   INDEX idx_ts_code (ts_code),
-  INDEX idx_report_period (report_period)
+  INDEX idx_report_period (report_period),
+  INDEX idx_ts_code_eval_date (ts_code, eval_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
@@ -1107,9 +1108,9 @@ def evaluate_brokerage_report(
         logger.info("DRY RUN - No DB writes")
         return
 
-    start_index = 4549  # 0-based, so starts at 4550th (1-based)
-    stocks_list = stocks_list[start_index:]  # Slice from 4550 to end
-    
+    start_index = 0  # 0-based
+    stocks_list = stocks_list[start_index:]  # Slice from start_index to end
+
     logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers (each worker handles one stock for all {len(date_list)} dates)")
     logger.info(f"Stocks to process: {stocks_list[:10]}..." if len(stocks_list) > 10 else f"Stocks to process: {stocks_list}")
 
