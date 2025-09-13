@@ -78,18 +78,21 @@ def load_default_config():
         'SELL': ['SELL', 'Sell', '卖出', 'Underweight']
     }
     REPORT_TYPE_WEIGHTS = {
-        '深度': 5.0, 'depth': 5.0, 'comprehensive': 5.0, 'detailed': 5.0,
-        '调研': 4.0, 'research': 4.0, 'field': 4.0, 'visit': 4.0, 'survey': 4.0,
-        '点评': 3.0, 'commentary': 3.0, 'comment': 3.0, 'analysis': 3.0, 'review': 3.0,
-        '会议纪要': 3.0, '会议': 3.0,
-        '一般': 2.0, 'general': 2.0, 'regular': 2.0, 'standard': 2.0,
-        '新股': 1.5, '港股': 1.5, '非个股': 1.0, 'non-stock': 1.0, 'industry': 1.0, 'strategy': 1.0, 'sector': 1.0
+        '深度': 5.0, 
+        '调研': 4.0, 
+        '点评': 3.0, 
+        '会议纪要': 3.0,
+        '一般': 2.0, 
+        '新股': 1.5, 
+        '港股': 1.5, 
+        '非个股': 1.0, 
+        'none': 1.0
     }
 
 # Load configurations from JSON
 load_config()
 
-DEFAULT_REPORT_WEIGHT = 2.0
+DEFAULT_REPORT_WEIGHT = 1.0
 
 
 # Tushare init with validation
@@ -1104,7 +1107,9 @@ def evaluate_brokerage_report(
         logger.info("DRY RUN - No DB writes")
         return
 
-
+    start_index = 4549  # 0-based, so starts at 4550th (1-based)
+    stocks_list = stocks_list[start_index:]  # Slice from 4550 to end
+    
     logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers (each worker handles one stock for all {len(date_list)} dates)")
     logger.info(f"Stocks to process: {stocks_list[:10]}..." if len(stocks_list) > 10 else f"Stocks to process: {stocks_list}")
 
