@@ -29,7 +29,10 @@ CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    sell_lg_amount  FLOAT NULL,
    sell_elg_amount  FLOAT NULL,
    net_mf_amount  FLOAT NULL,
-  PRIMARY KEY ( ts_code , trade_date )
+  PRIMARY KEY ( ts_code , trade_date ),
+  INDEX idx_ts_code (ts_code)
+  INDEX idx_trade_date (trade_date),
+  INDEX idx_ts_code_trade_date (ts_code, trade_date),
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
