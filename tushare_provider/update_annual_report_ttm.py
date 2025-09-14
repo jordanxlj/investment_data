@@ -33,9 +33,10 @@ logger = logging.getLogger(__name__)
 class TTMCalculator:
     """TTM and CAGR Calculator for financial data"""
 
-    def __init__(self, config_path: str = 'conf/report_configs.json'):
+    def __init__(self, config_path: str = 'conf/report_configs.json', annual_config_path: str = 'conf/annual_config.json'):
         """Initialize calculator with configuration"""
         self.config = self.load_config(config_path)
+        self.annual_config = self.load_annual_config(annual_config_path)
         self.engine = self.create_db_engine()
         self.report_periods = {
             'annual': '%-12-31',
@@ -52,6 +53,17 @@ class TTMCalculator:
             return config.get('database', {})
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
+            raise
+
+    def load_annual_config(self, config_path: str) -> Dict:
+        """Load annual report CAGR configuration"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            logger.info(f"Loaded CAGR configuration for {len(config.get('cagr_metrics', {}))} metrics")
+            return config
+        except Exception as e:
+            logger.error(f"Failed to load annual config: {e}")
             raise
 
     def create_db_engine(self):
@@ -144,7 +156,7 @@ class TTMCalculator:
             raise
 
     def get_annual_data_for_cagr(self, ts_codes: List[str], target_date: str) -> pd.DataFrame:
-        """Get annual financial data for CAGR calculation (last 4 years based on report_period)"""
+        """Get financial data for CAGR calculation based on configuration"""
         if not ts_codes:
             return pd.DataFrame()
 
@@ -152,8 +164,17 @@ class TTMCalculator:
         target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
         target_year = target_date_dt.year
 
-        # Get last 4 years of annual reports
-        years_to_include = [str(target_year - i) for i in range(4)]
+        # Get CAGR configuration to determine required years
+        cagr_metrics = self.annual_config.get('cagr_metrics', {})
+
+        # Find the maximum periods needed across all metrics
+        max_periods = 0
+        for config in cagr_metrics.values():
+            periods = config.get('periods', 3)
+            max_periods = max(max_periods, periods)
+
+        # Get enough years of data: max_periods + 1 (for start and end values)
+        years_to_include = [str(target_year - i) for i in range(max_periods + 1)]
 
         ts_codes_str = ','.join([f"'{code}'" for code in ts_codes])
 
@@ -162,14 +183,31 @@ class TTMCalculator:
             f"financial.report_period = '{year}-12-31'" for year in years_to_include
         ])
 
+        # Get all required fields for CAGR calculation
+        cagr_metrics = self.annual_config.get('cagr_metrics', {})
+        required_fields = set()
+
+        for metric_config in cagr_metrics.values():
+            source_field = metric_config.get('source_field')
+            if source_field:
+                required_fields.add(source_field)
+
+        # Build SELECT clause dynamically
+        select_fields = [
+            "financial.ts_code",
+            "financial.report_period",
+            "financial.ann_date"
+        ]
+
+        # Add required financial fields
+        for field in sorted(required_fields):
+            select_fields.append(f"financial.{field}")
+
+        select_clause = ",\n            ".join(select_fields)
+
         query = f"""
         SELECT
-            financial.ts_code,
-            financial.report_period,
-            financial.ann_date,
-            financial.revenue,
-            financial.net_income,
-            financial.rd_exp
+            {select_clause}
         FROM ts_a_stock_financial_profile financial
         WHERE financial.ts_code IN ({ts_codes_str})
             AND financial.ann_date <= '{target_date}'
@@ -182,7 +220,7 @@ class TTMCalculator:
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
                 df['report_year'] = df['report_period'].str[:4].astype(int)
-            logger.info(f"Retrieved {len(df)} annual records for CAGR calculation (years: {', '.join(years_to_include)})")
+            logger.info(f"Retrieved {len(df)} records for CAGR calculation (years: {', '.join(years_to_include)}, max_periods: {max_periods})")
             return df
         except Exception as e:
             logger.error(f"Failed to get annual data for CAGR: {e}")
@@ -299,51 +337,74 @@ class TTMCalculator:
         return ttm_metrics
 
     def calculate_cagr(self, financial_df: pd.DataFrame) -> Dict[str, Optional[float]]:
-        """Calculate 3-year CAGR for revenue and net income"""
+        """Calculate CAGR for multiple financial metrics based on configuration"""
         if financial_df.empty:
-            return {'revenue_cagr_3y': None, 'net_income_cagr_3y': None}
-
-        # Get annual reports only
-        annual_data = financial_df[
-            financial_df['report_period'].str.endswith('-12-31')
-        ].sort_values('report_year', ascending=False)
-
-        if len(annual_data) < 4:
-            return {'revenue_cagr_3y': None, 'net_income_cagr_3y': None}
-
-        # For 3-year CAGR calculation, we use 4 data points (start + 3 periods)
-        # Sort by year descending, so iloc[0] is newest, iloc[-1] is oldest
+            # Return empty results for all configured metrics
+            cagr_metrics = self.annual_config.get('cagr_metrics', {})
+            return {metric_name: None for metric_name in cagr_metrics.keys()}
 
         try:
-            # For 3-year CAGR, we need 4 data points (start + 3 periods)
-            # Get the oldest and newest values from the 4 years of data
-            revenue_start = annual_data.iloc[-1]['revenue']  # Oldest year (start)
-            revenue_end = annual_data.iloc[0]['revenue']     # Newest year (end)
+            # Get CAGR metrics configuration
+            cagr_metrics_config = self.annual_config.get('cagr_metrics', {})
+            cagr_results = {}
 
-            if revenue_start and revenue_start > 0 and revenue_end and revenue_end > 0:
-                # CAGR formula: (end_value / start_value)^(1/n) - 1, where n=3 for 3-year period
-                revenue_cagr = (revenue_end / revenue_start) ** (1/3) - 1
-            else:
-                revenue_cagr = None
+            # Process each configured CAGR metric
+            for output_field, config in cagr_metrics_config.items():
+                try:
+                    source_field = config.get('source_field')
+                    periods = config.get('periods', 3)
 
-            # Net income CAGR
-            net_income_start = annual_data.iloc[-1]['net_income']
-            net_income_end = annual_data.iloc[0]['net_income']
+                    if not source_field:
+                        logger.warning(f"No source_field defined for {output_field}")
+                        cagr_results[output_field] = None
+                        continue
 
-            if net_income_start and net_income_start > 0 and net_income_end and net_income_end > 0:
-                # CAGR formula: (end_value / start_value)^(1/n) - 1, where n=3 for 3-year period
-                net_income_cagr = (net_income_end / net_income_start) ** (1/3) - 1
-            else:
-                net_income_cagr = None
+                    # Use only annual reports for all metrics (simplified approach)
+                    calculation_data = financial_df[
+                        financial_df['report_period'].str.endswith('-12-31')
+                    ].sort_values('report_year', ascending=False)
 
-            return {
-                'revenue_cagr_3y': revenue_cagr,
-                'net_income_cagr_3y': net_income_cagr
-            }
+                    # Check if we have enough data points
+                    required_data_points = periods + 1  # n-year CAGR needs n+1 data points
+                    if len(calculation_data) < required_data_points:
+                        logger.debug(f"Insufficient data for {output_field}: need {required_data_points} points, got {len(calculation_data)}")
+                        cagr_results[output_field] = None
+                        continue
+
+                    # Get start and end values
+                    start_value = calculation_data.iloc[-1][source_field]  # Oldest available data
+                    end_value = calculation_data.iloc[0][source_field]     # Newest available data
+
+                    # Validate data and calculate CAGR
+                    if (start_value is not None and start_value > 0 and
+                        end_value is not None and end_value > 0):
+
+                        # CAGR formula: (end_value / start_value)^(1/n) - 1
+                        cagr_value = (end_value / start_value) ** (1/periods) - 1
+                        cagr_results[output_field] = cagr_value
+
+                        logger.debug(f"Calculated {output_field}: {cagr_value:.4f} "
+                                   f"(start: {start_value:.0f}, end: {end_value:.0f}, periods: {periods})")
+                    else:
+                        cagr_results[output_field] = None
+                        logger.debug(f"Invalid data values for {output_field} calculation")
+
+                except KeyError as e:
+                    # Source field doesn't exist in the data
+                    cagr_results[output_field] = None
+                    logger.debug(f"Source field not found for {output_field}: {e}")
+                except Exception as e:
+                    # Handle calculation errors for individual metrics
+                    cagr_results[output_field] = None
+                    logger.warning(f"Error calculating {output_field}: {e}")
+
+            return cagr_results
 
         except Exception as e:
             logger.warning(f"CAGR calculation failed: {e}")
-            return {'revenue_cagr_3y': None, 'net_income_cagr_3y': None}
+            # Return empty results for all configured metrics
+            cagr_metrics_config = self.annual_config.get('cagr_metrics', {})
+            return {metric_name: None for metric_name in cagr_metrics_config.keys()}
 
     def _get_empty_ttm_metrics(self) -> Dict[str, float]:
         """Return empty TTM metrics dictionary"""
