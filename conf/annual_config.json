@@ -1,0 +1,72 @@
+{
+    "cagr_metrics": {
+      "revenue_cagr_3y": {
+        "source_field": "revenue",
+        "description": "营收3年复合增长率",
+        "periods": 3
+      },
+      "net_income_cagr_3y": {
+        "source_field": "net_income",
+        "description": "净利润3年复合增长率",
+        "periods": 3
+      },
+      "rd_exp_cagr_3y": {
+        "source_field": "rd_exp",
+        "description": "研发费用3年复合增长率",
+        "periods": 3
+      },
+      "eps_cagr_3y": {
+        "source_field": "eps",
+        "description": "每股收益3年复合增长率",
+        "periods": 3
+      },
+      "ebitda_cagr_3y": {
+        "source_field": "ebitda",
+        "description": "息税折旧及摊销前利润（EBITDA）3年复合增长率，用于评估运营盈利能力的稳定增长。",
+        "periods": 3
+      },
+      "operating_income_cagr_3y": {
+        "source_field": "operating_income",
+        "description": "经营收入3年复合增长率，反映公司核心运营活动的增长趋势。",
+        "periods": 3
+      },
+      "gross_profit_cagr_3y": {
+        "source_field": "gross_profit",
+        "description": "毛利润3年复合增长率，评估收入扣除直接成本后的增长效率。",
+        "periods": 3
+      },
+      "free_cash_flow_cagr_3y": {
+        "source_field": "free_cash_flow",
+        "description": "自由现金流3年复合增长率，衡量公司生成现金的能力。",
+        "periods": 3
+      },
+      "dividend_cagr_3y": {
+        "source_field": "dividend",
+        "description": "股息3年复合增长率，评估公司分红政策的增长稳定性。",
+        "periods": 3
+      },
+      "total_assets_cagr_3y": {
+        "source_field": "total_assets",
+        "description": "总资产3年复合增长率，衡量公司规模扩张的速度。",
+        "periods": 3
+      }
+    },
+    "metadata": {
+      "version": "1.2",
+      "description": "年度报告CAGR计算指标配置 - 简化版",
+      "last_updated": "2024-09-14",
+      "total_metrics": 11,
+      "calculation_notes": {
+        "periods_calculation": "对于n年期CAGR，需要n+1年的数据点",
+        "data_processing": "所有指标使用统一的年报数据处理方式"
+      },
+      "new_metrics_rationale": {
+        "ebitda": "评估运营盈利能力的稳定增长，不受税收或资本结构影响",
+        "operating_income": "反映核心运营活动的增长趋势，帮助分析成本控制",
+        "gross_profit": "评估毛利率趋势，揭示定价能力和供应链效率",
+        "free_cash_flow": "衡量现金生成能力，关键价值投资指标",
+        "dividend": "评估分红政策稳定性，适合收入型投资者",
+        "total_assets": "衡量规模扩张速度，检测资产利用效率"
+      }
+    }
+  }
