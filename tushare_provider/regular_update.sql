@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
 
 /* Set shared variables to avoid repeated subqueries */
 SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
-SET @start_date = '2018-01-01';
+SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
 SET @debug = 0;  /* Set to 1 to enable debug output */
 
 SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
@@ -347,12 +347,12 @@ INNER JOIN (
     consensus.pe AS f_pe,
     consensus.rd AS f_dv_ratio,  -- Map rd (dividend ratio) to f_dv_ratio
     consensus.roe AS f_roe,
-    consensus.min_price AS f_target_price,  -- Use min_price as target_price as requested
+    consensus.min_price AS f_target_price  -- Use min_price as target_price as requested
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
   WHERE STR_TO_DATE(consensus.eval_date, '%Y%m%d') >= @start_date
     AND STR_TO_DATE(consensus.eval_date, '%Y%m%d') > @max_tradedate
-    AND consensus.report_period LIKE '%2025%'  -- Focus on current year data
+    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR consensus.eval_date >= '20250101')  -- Match current year data in any format
     AND consensus.total_reports > 0  -- Only include records with actual reports
 ) AS consensus_updates ON final.tradedate = consensus_updates.tradedate AND final.symbol = consensus_updates.symbol
 SET
