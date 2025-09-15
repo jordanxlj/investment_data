@@ -25,6 +25,7 @@ from sqlalchemy import create_engine, text
 import logging
 from typing import Dict, List, Optional, Tuple
 import json
+import fire
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -33,27 +34,16 @@ logger = logging.getLogger(__name__)
 class TTMCalculator:
     """TTM and CAGR Calculator for financial data"""
 
-    def __init__(self, config_path: str = 'conf/report_configs.json', annual_config_path: str = 'conf/annual_config.json'):
+    def __init__(self, mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data", annual_config_path: str = 'conf/annual_config.json'):
         """Initialize calculator with configuration"""
-        self.config = self.load_config(config_path)
         self.annual_config = self.load_annual_config(annual_config_path)
-        self.engine = self.create_db_engine()
+        self.engine = self.create_db_engine(mysql_url)
         self.report_periods = {
             'annual': '%-12-31',
             'q1': '%-03-31',
             'q2': '%-06-30',
             'q3': '%-09-30'
         }
-
-    def load_config(self, config_path: str) -> Dict:
-        """Load database configuration"""
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            return config.get('database', {})
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}")
-            raise
 
     def load_annual_config(self, config_path: str) -> Dict:
         """Load annual report CAGR configuration"""
@@ -66,12 +56,11 @@ class TTMCalculator:
             logger.error(f"Failed to load annual config: {e}")
             raise
 
-    def create_db_engine(self):
+    def create_db_engine(self, mysql_url: str):
         """Create SQLAlchemy database engine"""
         db_config = self.config
         connection_string = (
-            f"mysql+pymysql://{db_config['user']}:{db_config['password']}"
-            f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
+            f"{mysql_url}"
         )
         return create_engine(
             connection_string,
@@ -553,14 +542,16 @@ class TTMCalculator:
             logger.error(f"Processing failed: {e}")
             raise
 
-def main():
+def update_annual_report_ttm(
+    mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
+):
     """Main entry point"""
     try:
-        calculator = TTMCalculator()
+        calculator = TTMCalculator(mysql_url)
         calculator.process_updates()
     except Exception as e:
         logger.error(f"Application failed: {e}")
         raise
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(update_annual_report_ttm)
