@@ -21,11 +21,12 @@ Weighting Logic:
 import pandas as pd
 import numpy as np
 from datetime import datetime, date
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, QueuePool
 import logging
 from typing import Dict, List, Optional, Tuple
 import json
 import fire
+import concurrent.futures
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,17 +58,80 @@ class TTMCalculator:
             raise
 
     def create_db_engine(self, mysql_url: str):
-        """Create SQLAlchemy database engine"""
-        db_config = self.config
-        connection_string = (
-            f"{mysql_url}"
-        )
+        """Create SQLAlchemy database engine with optimized connection pooling"""
+        # Optimize MySQL connection parameters for high concurrency
+        mysql_url_with_params = mysql_url + "?charset=utf8mb4&autocommit=true&max_allowed_packet=67108864"
+
         return create_engine(
-            connection_string,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-            echo=False
+            mysql_url_with_params,
+            poolclass=QueuePool,
+            pool_size=100,  # 增加连接池大小
+            max_overflow=100,  # 增加额外连接数
+            pool_recycle=1800,  # 减少回收时间
+            pool_pre_ping=True,  # 连接前ping
+            pool_timeout=60,  # 增加获取连接超时时间
+            echo=False,  # 不打印SQL语句
+            connect_args={
+                'connect_timeout': 10,
+                'read_timeout': 30,
+                'write_timeout': 30,
+            }
         )
+
+    def get_stocks_list(self, stocks: List[str] = None) -> List[str]:
+        """Get list of stocks to process"""
+        try:
+            if stocks:
+                # Use provided stock list
+                stocks_list = [stock.upper() for stock in stocks]
+                logger.info(f"Using provided stocks list: {len(stocks_list)} stocks")
+            else:
+                # Get all stocks from ts_link_table
+                query = """
+                SELECT DISTINCT w_symbol as symbol
+                FROM ts_link_table
+                WHERE w_symbol IS NOT NULL
+                ORDER BY w_symbol
+                """
+                stocks_df = pd.read_sql(query, self.engine)
+                stocks_list = stocks_df['symbol'].tolist()
+                logger.info(f"Retrieved {len(stocks_list)} stocks from database")
+
+            return stocks_list
+        except Exception as e:
+            logger.error(f"Failed to get stocks list: {e}")
+            return []
+
+    def get_date_list(self, start_date: str, end_date: str) -> List[str]:
+        """Get list of dates to process"""
+        try:
+            # Get trading calendar
+            query = f"""
+            SELECT cal_date
+            FROM ts_trade_cal
+            WHERE cal_date >= '{start_date}'
+              AND cal_date <= '{end_date}'
+              AND is_open = 1
+            ORDER BY cal_date
+            """
+            dates_df = pd.read_sql(query, self.engine)
+            date_list = dates_df['cal_date'].tolist()
+
+            if not date_list:
+                # Fallback: generate date range if no trading calendar
+                start_dt = pd.to_datetime(start_date, format='%Y%m%d')
+                end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+                date_list = [
+                    (start_dt + pd.Timedelta(days=i)).strftime('%Y%m%d')
+                    for i in range((end_dt - start_dt).days + 1)
+                ]
+
+            logger.info(f"Processing {len(date_list)} trading dates from {start_date} to {end_date}")
+            return date_list
+
+        except Exception as e:
+            logger.error(f"Failed to get date list: {e}")
+            return []
 
     def get_current_quarter_info(self) -> Tuple[int, int, int]:
         """Get current quarter, month, and year information"""
@@ -274,6 +338,367 @@ class TTMCalculator:
             return df
         except Exception as e:
             logger.error(f"Failed to get quarterly data for TTM: {e}")
+            raise
+
+    def get_financial_data_batch(self, ts_codes: List[str], target_dates: List[str]) -> pd.DataFrame:
+        """Get all financial data for multiple stocks and dates in one batch query"""
+        if not ts_codes or not target_dates:
+            return pd.DataFrame()
+
+        # Calculate date range for TTM (12 months) and CAGR (max periods + 1 years)
+        all_target_dates_dt = [pd.to_datetime(date, format='%Y%m%d') for date in target_dates]
+        earliest_date = min(all_target_dates_dt)
+        latest_date = max(all_target_dates_dt)
+
+        # For CAGR: find maximum periods needed
+        cagr_metrics = self.annual_config.get('cagr_metrics', {})
+        max_periods = 0
+        for config in cagr_metrics.values():
+            periods = config.get('periods', 3)
+            max_periods = max(max_periods, periods)
+
+        # Calculate start dates for both TTM and CAGR
+        start_date_ttm = earliest_date - pd.DateOffset(months=12)
+        start_date_cagr = earliest_date - pd.DateOffset(years=max_periods + 1)
+
+        # Use the earliest start date
+        start_date = min(start_date_ttm, start_date_cagr)
+
+        # Convert to string format
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = latest_date.strftime('%Y-%m-%d')
+
+        ts_codes_str = ','.join([f"'{code}'" for code in ts_codes])
+
+        # Get all required fields for both CAGR and TTM calculations
+        required_fields = set()
+
+        # Add CAGR fields
+        for metric_config in cagr_metrics.values():
+            source_field = metric_config.get('source_field')
+            if source_field:
+                required_fields.add(source_field)
+
+        # Add TTM fields
+        ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
+        for metric_config in ttm_metrics_config.values():
+            source_field = metric_config.get('source_field')
+            if source_field:
+                required_fields.add(source_field)
+
+        # Build SELECT clause dynamically
+        select_fields = [
+            "financial.ts_code",
+            "financial.report_period",
+            "financial.ann_date"
+        ]
+
+        # Add required financial fields
+        for field in sorted(required_fields):
+            select_fields.append(f"financial.{field}")
+
+        select_clause = ",\n            ".join(select_fields)
+
+        query = f"""
+        SELECT
+            {select_clause}
+        FROM ts_a_stock_financial_profile financial
+        WHERE financial.ts_code IN ({ts_codes_str})
+            AND financial.ann_date >= '{start_date_str}'
+            AND financial.ann_date <= '{end_date_str}'
+            AND (
+                financial.report_period LIKE '%-12-31' OR
+                financial.report_period LIKE '%-03-31' OR
+                financial.report_period LIKE '%-06-30' OR
+                financial.report_period LIKE '%-09-30'
+            )
+        ORDER BY financial.ts_code, financial.ann_date DESC
+        """
+
+        try:
+            df = pd.read_sql(query, self.engine)
+            if not df.empty:
+                df['ann_date'] = pd.to_datetime(df['ann_date'])
+                df['report_year'] = df['report_period'].str[:4].astype(int)
+                df['report_quarter'] = df['report_period'].str[-5:-3]
+            logger.info(f"Retrieved {len(df)} total records in batch for {len(ts_codes)} stocks")
+            return df
+        except Exception as e:
+            logger.error(f"Failed to get batch financial data: {e}")
+            raise
+
+    def get_financial_data_for_single_stock(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Get all financial data for a single stock within date range"""
+        try:
+            # Calculate date range for TTM (12 months) and CAGR (max periods + 1 years)
+            start_dt = pd.to_datetime(start_date, format='%Y%m%d')
+            end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+
+            # For CAGR: find maximum periods needed
+            cagr_metrics = self.annual_config.get('cagr_metrics', {})
+            max_periods = 0
+            for config in cagr_metrics.values():
+                periods = config.get('periods', 3)
+                max_periods = max(max_periods, periods)
+
+            # Calculate start dates for both TTM and CAGR
+            start_date_ttm = start_dt - pd.DateOffset(months=12)
+            start_date_cagr = start_dt - pd.DateOffset(years=max_periods + 1)
+
+            # Use the earliest start date
+            query_start_date = min(start_date_ttm, start_date_cagr)
+            query_start_str = query_start_date.strftime('%Y-%m-%d')
+            query_end_str = end_dt.strftime('%Y-%m-%d')
+
+            # Get all required fields for both CAGR and TTM calculations
+            required_fields = set()
+
+            # Add CAGR fields
+            for metric_config in cagr_metrics.values():
+                source_field = metric_config.get('source_field')
+                if source_field:
+                    required_fields.add(source_field)
+
+            # Add TTM fields
+            ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
+            for metric_config in ttm_metrics_config.values():
+                source_field = metric_config.get('source_field')
+                if source_field:
+                    required_fields.add(source_field)
+
+            # Build SELECT clause dynamically
+            select_fields = [
+                "financial.ts_code",
+                "financial.report_period",
+                "financial.ann_date"
+            ]
+
+            # Add required financial fields
+            for field in sorted(required_fields):
+                select_fields.append(f"financial.{field}")
+
+            select_clause = ",\n            ".join(select_fields)
+
+            query = f"""
+            SELECT
+                {select_clause}
+            FROM ts_a_stock_financial_profile financial
+            WHERE financial.ts_code = '{ts_code}'
+                AND financial.ann_date >= '{query_start_str}'
+                AND financial.ann_date <= '{query_end_str}'
+                AND (
+                    financial.report_period LIKE '%-12-31' OR
+                    financial.report_period LIKE '%-03-31' OR
+                    financial.report_period LIKE '%-06-30' OR
+                    financial.report_period LIKE '%-09-30'
+                )
+            ORDER BY financial.ann_date DESC
+            """
+
+            df = pd.read_sql(query, self.engine)
+            if not df.empty:
+                df['ann_date'] = pd.to_datetime(df['ann_date'])
+                df['report_year'] = df['report_period'].str[:4].astype(int)
+                df['report_quarter'] = df['report_period'].str[-5:-3]
+
+            logger.debug(f"Retrieved {len(df)} financial records for {ts_code}")
+            return df
+
+        except Exception as e:
+            logger.error(f"Failed to get financial data for {ts_code}: {e}")
+            raise
+
+    def get_annual_data_for_cagr(self, stock_df: pd.DataFrame, ts_codes: List[str], target_date: str) -> pd.DataFrame:
+        """Filter annual data from stock data for CAGR calculation"""
+        if stock_df.empty:
+            return pd.DataFrame()
+
+        # Calculate the target year from target_date
+        target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        target_year = target_date_dt.year
+
+        # Get CAGR configuration to determine required years
+        cagr_metrics = self.annual_config.get('cagr_metrics', {})
+
+        # Find the maximum periods needed across all metrics
+        max_periods = 0
+        for config in cagr_metrics.values():
+            periods = config.get('periods', 3)
+            max_periods = max(max_periods, periods)
+
+        # Get enough years of data: max_periods + 1 (for start and end values)
+        years_to_include = [str(target_year - i) for i in range(max_periods + 1)]
+
+        # Filter for required stocks, date range, and annual reports
+        filtered_df = stock_df[
+            (stock_df['ts_code'].isin(ts_codes)) &
+            (stock_df['ann_date'] <= target_date_dt) &
+            (stock_df['report_period'].isin([f"{year}-12-31" for year in years_to_include]))
+        ].copy()
+
+        logger.debug(f"Filtered {len(filtered_df)} annual records for CAGR calculation (years: {', '.join(years_to_include)})")
+        return filtered_df
+
+    def get_quarterly_data_for_ttm(self, stock_df: pd.DataFrame, ts_codes: List[str], target_date: str) -> pd.DataFrame:
+        """Filter quarterly and annual data from stock data for TTM calculation"""
+        if stock_df.empty:
+            return pd.DataFrame()
+
+        # Convert target_date to proper format and calculate date range
+        target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        start_date = target_date_dt - pd.DateOffset(months=12)
+
+        # Filter for required stocks and date range
+        filtered_df = stock_df[
+            (stock_df['ts_code'].isin(ts_codes)) &
+            (stock_df['ann_date'] <= target_date_dt) &
+            (stock_df['ann_date'] >= start_date) &
+            (stock_df['report_period'].str.endswith(('-12-31', '-03-31', '-06-30', '-09-30')))
+        ].copy()
+
+        logger.debug(f"Filtered {len(filtered_df)} quarterly/annual records for TTM calculation")
+        return filtered_df
+
+    def process_single_stock_from_batch(self, ts_code: str, start_date: str, end_date: str, weights: Dict[str, float]) -> List[Dict]:
+        """Process a single stock for date range by querying its data individually"""
+        try:
+            updates = []
+
+            # Query financial data for this specific stock in the date range
+            stock_financial_df = self.get_financial_data_for_single_stock(ts_code, start_date, end_date)
+
+            if stock_financial_df.empty:
+                logger.warning(f"No financial data found for {ts_code} in date range {start_date}-{end_date}")
+                return updates
+
+            # Get the actual trading dates for this stock within the date range
+            # Since we already filtered by date range in the query, we process all dates in our range
+            stock_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+            date_list = [d.strftime('%Y%m%d') for d in stock_dates]
+
+            # Process each date for this stock
+            for target_date in date_list:
+                try:
+                    # Filter data for this specific date - annual data for CAGR
+                    annual_df = self.get_annual_data_for_cagr(stock_financial_df, [ts_code], target_date)
+
+                    # Filter data for this specific date - quarterly data for TTM
+                    quarterly_df = self.get_quarterly_data_for_ttm(stock_financial_df, [ts_code], target_date)
+
+                    # Calculate TTM metrics using quarterly data
+                    ttm_metrics = self.calculate_ttm_metrics(quarterly_df, weights)
+
+                    # Calculate CAGR using annual data
+                    cagr_metrics = self.calculate_cagr(annual_df)
+
+                    # Combine all metrics
+                    update_data = {
+                        'tradedate': target_date,
+                        'symbol': ts_code,
+                        **ttm_metrics,
+                        **cagr_metrics
+                    }
+
+                    updates.append(update_data)
+
+                except Exception as e:
+                    logger.error(f"Failed to process {ts_code} for date {target_date}: {e}")
+                    continue
+
+            logger.debug(f"Processed {ts_code}: {len(updates)} updates generated")
+            return updates
+
+        except Exception as e:
+            logger.error(f"Failed to process stock {ts_code}: {e}")
+            return []
+
+    def process_updates_by_stock(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        stocks: List[str] = None,
+        batch_size: int = 50,
+        max_workers: int = 8
+    ) -> None:
+        """Process updates by stock (similar to evaluate_brokerage_report)"""
+        try:
+            # Set default dates
+            if start_date is None or end_date is None:
+                today = datetime.now().strftime('%Y%m%d')
+                start_date = start_date or today
+                end_date = end_date or today
+
+            # Validate dates
+            try:
+                start_dt = pd.to_datetime(start_date, format='%Y%m%d')
+                end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+                if start_dt > end_dt:
+                    raise ValueError("start_date cannot be after end_date")
+            except ValueError as e:
+                logger.error(f"Invalid date: {e}")
+                return
+
+            # Get date list
+            date_list = self.get_date_list(start_date, end_date)
+            if not date_list:
+                logger.info("No dates to process")
+                return
+
+            # Get current quarter info and weights
+            current_quarter, current_month, current_year = self.get_current_quarter_info()
+            weights = self.get_weight_matrix(current_quarter, current_month)
+
+            logger.info(f"Current quarter: {current_quarter}, weights: {weights}")
+
+            # Get stocks list
+            stocks_list = self.get_stocks_list(stocks)
+            if not stocks_list:
+                logger.info("No stocks to process")
+                return
+
+            logger.info(f"Processing {len(stocks_list)} stocks with {max_workers} workers")
+            logger.info(f"Each worker queries its own stock data and processes all dates")
+
+            # Process stocks in parallel (similar to evaluate_brokerage_report)
+            # Each worker will query its own stock data to avoid memory issues
+            all_updates = []
+            total_processed = 0
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit one task per stock - each worker queries its own data
+                futures = {
+                    executor.submit(self.process_single_stock_from_batch, ts_code, start_date, end_date, weights): ts_code
+                    for ts_code in stocks_list
+                }
+
+                # Process completed tasks
+                for future in concurrent.futures.as_completed(futures):
+                    ts_code = futures[future]
+                    try:
+                        updates = future.result()
+                        all_updates.extend(updates)
+                        total_processed += 1
+
+                        if total_processed % 100 == 0:
+                            logger.info(f"Completed {total_processed}/{len(stocks_list)} stocks")
+
+                    except Exception as e:
+                        logger.error(f"Failed to process {ts_code}: {e}")
+
+            # Update database in batches
+            logger.info(f"Generated {len(all_updates)} total updates")
+
+            if all_updates:
+                batch_size_db = 1000
+                for i in range(0, len(all_updates), batch_size_db):
+                    batch_updates = all_updates[i:i + batch_size_db]
+                    self.update_final_table(batch_updates)
+                    logger.info(f"Updated batch {i//batch_size_db + 1}: {len(batch_updates)} records")
+
+            logger.info("TTM and CAGR update completed successfully")
+
+        except Exception as e:
+            logger.error(f"Processing failed: {e}")
             raise
 
     def calculate_ttm_metrics(self, financial_df: pd.DataFrame, weights: Dict[str, float]) -> Dict[str, float]:
@@ -544,11 +969,32 @@ class TTMCalculator:
 
 def update_annual_report_ttm(
     mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
+    start_date: str = None,
+    end_date: str = None,
+    stocks: List[str] = None,
+    batch_size: int = 50,
+    max_workers: int = 8,
 ):
-    """Main entry point"""
+    """
+    Update annual report TTM and CAGR metrics
+
+    Args:
+        mysql_url: MySQL connection URL
+        start_date: Start date in YYYYMMDD format (default: current date)
+        end_date: End date in YYYYMMDD format (default: current date)
+        stocks: Optional list of specific stocks to process
+        batch_size: Number of stocks to process in each batch
+        max_workers: Maximum number of parallel workers
+    """
     try:
         calculator = TTMCalculator(mysql_url)
-        calculator.process_updates()
+        calculator.process_updates_by_stock(
+            start_date=start_date,
+            end_date=end_date,
+            stocks=stocks,
+            batch_size=batch_size,
+            max_workers=max_workers
+        )
     except Exception as e:
         logger.error(f"Application failed: {e}")
         raise
