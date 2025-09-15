@@ -237,22 +237,31 @@ class TTMCalculator:
 
         ts_codes_str = ','.join([f"'{code}'" for code in ts_codes])
 
+        # Get all required fields for TTM calculation from configuration
+        ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
+        required_fields = set()
+
+        for metric_config in ttm_metrics_config.values():
+            source_field = metric_config.get('source_field')
+            if source_field:
+                required_fields.add(source_field)
+
+        # Build SELECT clause dynamically
+        select_fields = [
+            "financial.ts_code",
+            "financial.report_period",
+            "financial.ann_date"
+        ]
+
+        # Add required financial fields
+        for field in sorted(required_fields):
+            select_fields.append(f"financial.{field}")
+
+        select_clause = ",\n            ".join(select_fields)
+
         query = f"""
         SELECT
-            financial.ts_code,
-            financial.report_period,
-            financial.ann_date,
-            financial.gross_profit_margin,
-            financial.operating_profit_margin,
-            financial.net_profit_margin,
-            financial.roe_waa,
-            financial.roa,
-            financial.roic,
-            financial.debt_to_equity,
-            financial.debt_to_assets,
-            financial.current_ratio,
-            financial.quick_ratio,
-            financial.revenue_growth
+            {select_clause}
         FROM ts_a_stock_financial_profile financial
         WHERE financial.ts_code IN ({ts_codes_str})
             AND financial.ann_date <= '{target_date}'
@@ -279,25 +288,21 @@ class TTMCalculator:
             raise
 
     def calculate_ttm_metrics(self, financial_df: pd.DataFrame, weights: Dict[str, float]) -> Dict[str, float]:
-        """Calculate TTM metrics using weighted approach"""
+        """Calculate TTM metrics using weighted approach with configuration"""
         if financial_df.empty:
             return self._get_empty_ttm_metrics()
 
-        # Initialize result dictionary
-        ttm_metrics = {
-            'gross_margin_ttm': 0.0,
-            'operating_margin_ttm': 0.0,
-            'net_margin_ttm': 0.0,
-            'roe_ttm': 0.0,
-            'roa_ttm': 0.0,
-            'roic_ttm': 0.0,
-            'debt_to_equity_ttm': 0.0,
-            'debt_to_assets_ttm': 0.0,
-            'current_ratio_ttm': 0.0,
-            'quick_ratio_ttm': 0.0
-        }
+        # Get TTM metrics configuration
+        ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
 
-        # Calculate weighted values for each metric
+        # Initialize result dictionary with all configured metrics
+        # Use metric_name as output_field if not specified
+        ttm_metrics = {}
+        for metric_name, config in ttm_metrics_config.items():
+            output_field = config.get('output_field', metric_name)  # Default to metric_name
+            ttm_metrics[output_field] = 0.0
+
+        # Calculate weighted values for each configured metric
         for weight_key, weight_value in weights.items():
             period_type, period_year = weight_key.split('_')
             period_year = int(period_year)
@@ -322,17 +327,18 @@ class TTMCalculator:
             # Use the most recent data for this period
             latest_data = period_data.iloc[0]
 
-            # Add weighted values to TTM metrics
-            ttm_metrics['gross_margin_ttm'] += latest_data.get('gross_profit_margin', 0) * weight_value
-            ttm_metrics['operating_margin_ttm'] += latest_data.get('operating_profit_margin', 0) * weight_value
-            ttm_metrics['net_margin_ttm'] += latest_data.get('net_profit_margin', 0) * weight_value
-            ttm_metrics['roe_ttm'] += latest_data.get('roe_waa', 0) * weight_value
-            ttm_metrics['roa_ttm'] += latest_data.get('roa', 0) * weight_value
-            ttm_metrics['roic_ttm'] += latest_data.get('roic', 0) * weight_value
-            ttm_metrics['debt_to_equity_ttm'] += latest_data.get('debt_to_equity', 0) * weight_value
-            ttm_metrics['debt_to_assets_ttm'] += latest_data.get('debt_to_assets', 0) * weight_value
-            ttm_metrics['current_ratio_ttm'] += latest_data.get('current_ratio', 0) * weight_value
-            ttm_metrics['quick_ratio_ttm'] += latest_data.get('quick_ratio', 0) * weight_value
+            # Add weighted values for each configured TTM metric
+            for metric_name, config in ttm_metrics_config.items():
+                source_field = config.get('source_field')
+                output_field = config.get('output_field', metric_name)
+
+                if source_field and output_field in ttm_metrics:
+                    value = latest_data.get(source_field, 0)
+                    if value is not None:
+                        ttm_metrics[output_field] += value * weight_value
+
+                        logger.debug(f"Added {value:.4f} * {weight_value:.2f} = {value * weight_value:.4f} "
+                                   f"to {output_field} for period {weight_key}")
 
         return ttm_metrics
 
@@ -407,19 +413,15 @@ class TTMCalculator:
             return {metric_name: None for metric_name in cagr_metrics_config.keys()}
 
     def _get_empty_ttm_metrics(self) -> Dict[str, float]:
-        """Return empty TTM metrics dictionary"""
-        return {
-            'gross_margin_ttm': 0.0,
-            'operating_margin_ttm': 0.0,
-            'net_margin_ttm': 0.0,
-            'roe_ttm': 0.0,
-            'roa_ttm': 0.0,
-            'roic_ttm': 0.0,
-            'debt_to_equity_ttm': 0.0,
-            'debt_to_assets_ttm': 0.0,
-            'current_ratio_ttm': 0.0,
-            'quick_ratio_ttm': 0.0
-        }
+        """Return empty TTM metrics dictionary based on configuration"""
+        ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
+        empty_metrics = {}
+
+        for metric_name, config in ttm_metrics_config.items():
+            output_field = config.get('output_field', metric_name)  # Default to metric_name
+            empty_metrics[output_field] = 0.0
+
+        return empty_metrics
 
     def update_final_table(self, updates: List[Dict]) -> None:
         """Update final_a_stock_comb_info table with calculated metrics"""

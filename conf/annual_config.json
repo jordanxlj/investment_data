@@ -51,6 +51,48 @@
         "periods": 3
       }
     },
+    "ttm_metrics": {
+      "gross_margin_ttm": {
+        "source_field": "gross_profit_margin",
+        "description": "毛利率滚动12个月"
+      },
+      "operating_margin_ttm": {
+        "source_field": "operating_profit_margin",
+        "description": "营业利润率滚动12个月"
+      },
+      "net_margin_ttm": {
+        "source_field": "net_profit_margin",
+        "description": "净利润率滚动12个月"
+      },
+      "roe_ttm": {
+        "source_field": "roe_waa",
+        "description": "净资产收益率滚动12个月"
+      },
+      "roa_ttm": {
+        "source_field": "roa",
+        "description": "总资产收益率滚动12个月"
+      },
+      "roic_ttm": {
+        "source_field": "roic",
+        "description": "资本回报率滚动12个月"
+      },
+      "debt_to_equity_ttm": {
+        "source_field": "debt_to_equity",
+        "description": "负债权益比滚动12个月"
+      },
+      "debt_to_assets_ttm": {
+        "source_field": "debt_to_assets",
+        "description": "资产负债率滚动12个月"
+      },
+      "current_ratio_ttm": {
+        "source_field": "current_ratio",
+        "description": "流动比率滚动12个月"
+      },
+      "quick_ratio_ttm": {
+        "source_field": "quick_ratio",
+        "description": "速动比率滚动12个月"
+      }
+    },
     "metadata": {
       "version": "1.2",
       "description": "年度报告CAGR计算指标配置 - 简化版",
