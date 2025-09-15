@@ -6,10 +6,13 @@ and updates final_a_stock_comb_info table.
 
 USAGE:
     # Run TTM/CAGR calculation
-    python update_annual_report_ttm.py --start_date 20240101 --end_date 20241231
+    python update_annual_report_ttm.py --start_date 2024-01-01 --end_date 2024-12-31
 
     # Create essential indexes for ts_a_stock_financial_profile
     python update_annual_report_ttm.py create_indexes
+
+    # Test date format conversion
+    python update_annual_report_ttm.py test_dates
 
 CRITICAL INDEXES REQUIRED FOR ts_a_stock_financial_profile:
 ===============================================================================
@@ -121,16 +124,16 @@ class TTMCalculator:
     ) -> None:
         """Process updates by stock (similar to evaluate_brokerage_report)"""
         try:
-            # Set default dates
+                    # Set default dates (YYYY-MM-DD format for consistency with DATE type columns)
             if start_date is None or end_date is None:
-                today = datetime.now().strftime('%Y%m%d')
+                today = datetime.now().strftime('%Y-%m-%d')
                 start_date = start_date or today
                 end_date = end_date or today
 
             # Validate dates
             try:
-                start_dt = pd.to_datetime(start_date, format='%Y%m%d')
-                end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+                start_dt = pd.to_datetime(start_date, format='%Y-%m-%d')
+                end_dt = pd.to_datetime(end_date, format='%Y-%m-%d')
                 if start_dt > end_dt:
                     raise ValueError("start_date cannot be after end_date")
             except ValueError as e:
@@ -205,8 +208,8 @@ class TTMCalculator:
             query = f"""
             SELECT cal_date
             FROM ts_trade_cal
-            WHERE cal_date >= '{start_date}'
-              AND cal_date <= '{end_date}'
+            WHERE cal_date >= DATE('{start_date}')
+              AND cal_date <= DATE('{end_date}')
               AND is_open = 1
             ORDER BY cal_date
             """
@@ -215,10 +218,10 @@ class TTMCalculator:
 
             if not date_list:
                 # Fallback: generate date range if no trading calendar
-                start_dt = pd.to_datetime(start_date, format='%Y%m%d')
-                end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+                start_dt = pd.to_datetime(start_date, format='%Y-%m-%d')
+                end_dt = pd.to_datetime(end_date, format='%Y-%m-%d')
                 date_list = [
-                    (start_dt + pd.Timedelta(days=i)).strftime('%Y%m%d')
+                    (start_dt + pd.Timedelta(days=i)).strftime('%Y-%m-%d')
                     for i in range((end_dt - start_dt).days + 1)
                 ]
 
@@ -279,7 +282,7 @@ class TTMCalculator:
 
             # Get the actual trading dates for this stock within the date range
             stock_dates = pd.date_range(start=start_date, end=end_date, freq='D')
-            date_list = [d.strftime('%Y%m%d') for d in stock_dates]
+            date_list = [d.strftime('%Y-%m-%d') for d in stock_dates]
 
             # Smart calculation: skip dates where no new financial data was released
             last_calculation_date = None
@@ -288,7 +291,7 @@ class TTMCalculator:
 
             for target_date in date_list:
                 try:
-                    target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+                    target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
 
                     # Find the most recent announcement date before or on target_date
                     recent_announcement_dates = [d for d in announcement_dates if d < target_date_dt]
@@ -361,8 +364,8 @@ class TTMCalculator:
         """Get all financial data for a single stock within date range"""
         try:
             # Calculate date range for TTM (12 months) and CAGR (max periods + 1 years)
-            start_dt = pd.to_datetime(start_date, format='%Y%m%d')
-            end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+            start_dt = pd.to_datetime(start_date, format='%Y-%m-%d')
+            end_dt = pd.to_datetime(end_date, format='%Y-%m-%d')
 
             # For CAGR: find maximum periods needed
             cagr_metrics = self.annual_config.get('cagr_metrics', {})
@@ -375,7 +378,7 @@ class TTMCalculator:
             start_date_ttm = start_dt - pd.DateOffset(months=12)
             start_date_cagr = start_dt - pd.DateOffset(years=max_periods + 1)
 
-            # Use the earliest start date
+            # Use the earliest start date (DATE type format)
             query_start_date = min(start_date_ttm, start_date_cagr)
             query_start_str = query_start_date.strftime('%Y-%m-%d')
             query_end_str = end_dt.strftime('%Y-%m-%d')
@@ -414,13 +417,10 @@ class TTMCalculator:
                 {select_clause}
             FROM ts_a_stock_financial_profile financial
             WHERE financial.ts_code = '{ts_code}'
-                AND financial.ann_date >= '{query_start_str}'
-                AND financial.ann_date <= '{query_end_str}'
+                AND financial.ann_date >= DATE('{query_start_str}')
+                AND financial.ann_date <= DATE('{query_end_str}')
                 AND (
-                    financial.report_period LIKE '%-12-31' OR
-                    financial.report_period LIKE '%-03-31' OR
-                    financial.report_period LIKE '%-06-30' OR
-                    financial.report_period LIKE '%-09-30'
+                    DATE_FORMAT(financial.report_period, '%m-%d') IN ('12-31', '03-31', '06-30', '09-30')
                 )
             ORDER BY financial.ann_date DESC
             """
@@ -464,7 +464,7 @@ class TTMCalculator:
             return pd.DataFrame()
 
         # Calculate the target year from target_date
-        target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
         target_year = target_date_dt.year
 
         # Get CAGR configuration to determine required years
@@ -495,7 +495,7 @@ class TTMCalculator:
             return pd.DataFrame()
 
         # Convert target_date to proper format and calculate date range
-        target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
         start_date = target_date_dt - pd.DateOffset(months=12)
 
         # Filter for required stocks and date range
@@ -517,7 +517,7 @@ class TTMCalculator:
 
         Args:
             financial_df: Financial data DataFrame
-            target_date: Target date for calculation (YYYYMMDD format)
+            target_date: Target date for calculation (YYYY-MM-DD format)
 
         Returns:
             Dictionary of TTM metrics
@@ -801,8 +801,8 @@ def update_annual_report_ttm(
 
     Args:
         mysql_url: MySQL connection URL
-        start_date: Start date in YYYYMMDD format (default: current date)
-        end_date: End date in YYYYMMDD format (default: current date)
+        start_date: Start date in YYYY-MM-DD format (default: current date)
+        end_date: End date in YYYY-MM-DD format (default: current date)
         stocks: Optional list of specific stocks to process
         batch_size: Number of stocks to process in each batch
         max_workers: Maximum number of parallel workers
