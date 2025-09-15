@@ -80,10 +80,10 @@ TABLE_NAME = "ts_a_stock_financial_profile"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code                   VARCHAR(16)  NOT NULL,
-  report_period             VARCHAR(10)  NOT NULL,
+  report_period             DATE         NOT NULL,
   period                    VARCHAR(8)   NOT NULL,
   currency                  VARCHAR(3)   NOT NULL,
-  ann_date                  VARCHAR(10)  NULL,
+  ann_date                  DATE         NULL,
 
   -- Income statement fields (based on actual Tushare field names)
   total_revenue             DECIMAL(16,4) NULL,
@@ -454,14 +454,26 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
 
     # Normalize types
     if not out.empty:
-        # String columns
-        string_cols = ["ts_code", "report_period", "period", "currency", "ann_date"]
+        # String columns (excluding date columns that will be converted to DATE type)
+        string_cols = ["ts_code", "period", "currency"]
         for col in string_cols:
             if col in out.columns:
                 out[col] = out[col].astype(str).replace('nan', None).replace('None', None)
 
+        # Convert date columns from string to DATE objects for efficient storage and queries
+        # This avoids SQL-level date conversion and improves insertion performance
+        # Convert report_period from '2024-03-31' format to DATE object
+        if 'report_period' in out.columns:
+            out['report_period'] = pd.to_datetime(out['report_period'], format='%Y-%m-%d', errors='coerce').dt.date
+
+        # Convert ann_date from '20240331' format to DATE object
+        if 'ann_date' in out.columns:
+            out['ann_date'] = pd.to_datetime(out['ann_date'], format='%Y%m%d', errors='coerce').dt.date
+
         # Numeric columns - convert to float first, then handle None values
-        numeric_cols = [col for col in ALL_COLUMNS if col not in string_cols]
+        # Exclude string columns and date columns (report_period, ann_date)
+        date_cols = ["report_period", "ann_date"]
+        numeric_cols = [col for col in ALL_COLUMNS if col not in string_cols and col not in date_cols]
         for col in numeric_cols:
             if col in out.columns:
                 out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -658,7 +670,9 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
                 sample_end_date = merged_df['end_date'].iloc[0]
                 print(f"Using API ann_date: {sample_ann_date} (end_date: {sample_end_date}) for period {report_period}")
 
-            merged_df['report_period'] = merged_df['end_date'].astype(str).str[:4] + '-' + merged_df['end_date'].astype(str).str[4:6] + '-' + merged_df['end_date'].astype(str).str[6:8]
+            # Convert report_period to DATE object directly from end_date
+            # This creates a proper DATE object for the reporting period end date
+            merged_df['report_period'] = pd.to_datetime(merged_df['end_date'], format='%Y%m%d').dt.date
             merged_df['period'] = 'annual' if report_period.endswith('1231') else 'quarter'
             merged_df['currency'] = 'CNY'  # A-share default currency is CNY
 
@@ -791,7 +805,7 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
             update_map: Dict[str, Any] = {
                 c: getattr(stmt.inserted, c)
                 for c in ALL_COLUMNS
-                if c not in ("ts_code", "report_period")
+                if c not in ("ts_code", "report_period", "ann_date")  # Exclude primary key and date fields from updates
             }
             ondup = stmt.on_duplicate_key_update(**update_map)
             result = conn.execute(ondup)
@@ -842,6 +856,7 @@ def update_a_stock_financial_profile(
     Data type optimization:
     - Ratios and per-share earnings: FLOAT type (precise to 6 decimal places)
     - Absolute amounts: DECIMAL(16,4) type (precise to cent)
+    - Date fields: DATE type (report_period, ann_date) for efficient date operations and storage
 
     Field configuration optimization:
     - Field names identical to Tushare API, no mapping table needed
