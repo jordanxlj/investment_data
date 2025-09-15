@@ -173,7 +173,7 @@ LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol;
 
 /* First, identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info */
 SELECT
-  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing fundamental record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_fundamental ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
@@ -227,7 +227,7 @@ SET
 
 /* First, identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
 SELECT 
-  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing moneyflow record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_moneyflow ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
@@ -269,7 +269,7 @@ SET
 
 /* First, identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info */
 SELECT
-  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing cost record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_cost_pct ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
@@ -307,7 +307,7 @@ SET
 
 /* First, identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info */
 SELECT
-  CONCAT('Missing record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing suspend record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_suspend_info ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
