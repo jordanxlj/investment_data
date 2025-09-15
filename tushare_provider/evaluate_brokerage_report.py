@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 def load_config():
     """Load configuration from JSON file"""
-    CONFIG_FILE = 'conf/report_configs.json'
+    CONFIG_FILE = 'conf/report_config.json'
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             configs = json.load(f)
