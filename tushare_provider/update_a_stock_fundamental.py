@@ -175,4 +175,3 @@ def update_astock_fundamental_to_latest(
 if __name__ == "__main__":
     fire.Fire(update_astock_fundamental_to_latest)
 
-

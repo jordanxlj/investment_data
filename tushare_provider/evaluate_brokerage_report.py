@@ -161,8 +161,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
   PRIMARY KEY (ts_code, eval_date, report_period),
   INDEX idx_eval_date (eval_date),
-  INDEX idx_ts_code (ts_code),
-  INDEX idx_report_period (report_period),
   INDEX idx_ts_code_eval_date (ts_code, eval_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """

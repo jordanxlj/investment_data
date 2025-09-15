@@ -23,8 +23,6 @@ CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    suspend_timing  varchar(8) NOT NULL,
    suspend_type  varchar(1) NOT NULL,
   PRIMARY KEY ( ts_code , trade_date ),
-  INDEX idx_ts_code (ts_code),
-  INDEX idx_trade_date (trade_date),
   INDEX idx_ts_code_trade_date (ts_code, trade_date),
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
