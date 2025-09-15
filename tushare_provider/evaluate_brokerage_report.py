@@ -4,6 +4,11 @@ Tushare Brokerage Report Consensus Evaluation Script
 This script analyzes brokerage reports and generates consensus predictions
 by aggregating ratings and forecasts from multiple analysts.
 
+Optimized for DATE type storage:
+- Converts eval_date from string to Python date objects before insertion
+- Uses proper MySQL DATE type for efficient storage and queries
+- Avoids SQL-level date conversion for better performance
+
 Features:
 - Align brokerage report dates with financial profile periods
 - Generate consensus predictions for current and next year
@@ -15,6 +20,7 @@ Usage:
     python evaluate_brokerage_report.py --eval-date 20250101
     python evaluate_brokerage_report.py --eval-date 20250101 --force-update
     python evaluate_brokerage_report.py --eval-date 20250101 --stocks "000001.SZ,000002.SZ"
+    python evaluate_brokerage_report.py test  # Test date conversion
 """
 
 import os
@@ -32,6 +38,7 @@ import fire
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine, text, and_, or_, func, MetaData, Table
+from sqlalchemy import Column, String, Integer, Float, DateTime, Date
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 import tushare as ts
@@ -110,7 +117,7 @@ TABLE_NAME = "ts_a_stock_consensus_report"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code              VARCHAR(16)  NOT NULL,
-  eval_date            VARCHAR(8)   NOT NULL,  -- 评估日期
+  eval_date            DATE         NOT NULL,  -- 评估日期 (DATE类型)
   report_period        VARCHAR(10)  NOT NULL,  -- 报告期 (2024Q4, 2025, etc.)
 
   -- 券商报告统计信息
@@ -298,9 +305,13 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
         # Aggregate forecasts (no additional quarter filtering needed since we did it above)
         forecasts = aggregate_forecasts(sentiment_df, sentiment, fiscal_info['current_fiscal_year'])
 
+        # Convert eval_date from string to DATE object for efficient storage and queries
+        # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
+        eval_date_obj = pd.to_datetime(eval_date, format='%Y%m%d').date()
+
         result = {
             'ts_code': ts_code,
-            'eval_date': eval_date,
+            'eval_date': eval_date_obj,
             'report_period': fiscal_info['current_fiscal_year'],
             'total_reports': total_reports,
             'sentiment_pos': sentiment_pos,
@@ -385,7 +396,9 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                     # Use annual data directly
                     result = annual_data.copy()
                     result['ts_code'] = ts_code
-                    result['eval_date'] = current_date
+                    # Convert eval_date from string to DATE object for efficient storage and queries
+                    # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
+                    result['eval_date'] = pd.to_datetime(current_date, format='%Y%m%d').date()
                     result['report_period'] = fiscal_infos[current_date]['current_fiscal_period']
                     stock_results.append(result)
                     logger.debug(f"Using annual report data for {ts_code} on {current_date}")
@@ -974,10 +987,9 @@ def _upsert_batch(engine: Any, df: pd.DataFrame, chunksize: int = 1000) -> int:
     # Check if engine is a mock (for testing)
     if hasattr(engine, '_mock_name') or str(type(engine)).startswith("<class 'unittest.mock."):
         # For testing, create table without autoload
-        from sqlalchemy import Column, String, Integer, Float, DateTime
         table = Table(TABLE_NAME, meta,
                      Column('ts_code', String(16)),
-                     Column('eval_date', String(8)),
+                     Column('eval_date', Date),  # DATE type for eval_date
                      Column('report_period', String(10)),
                      # Add other columns as needed for testing
                      extend_existing=True)

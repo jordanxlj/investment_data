@@ -19,7 +19,7 @@ TABLE_NAME = "ts_a_stock_moneyflow"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    ts_code  varchar(16) NOT NULL,
-   trade_date  varchar(8) NOT NULL,
+   trade_date  DATE NOT NULL,
    buy_sm_amount  FLOAT NULL,
    buy_md_amount  FLOAT NULL,
    buy_lg_amount  FLOAT NULL,
@@ -76,7 +76,7 @@ def _flush_batch(
     # enforce dtypes for performance/stability
     dtype = {
         "ts_code": String(16),
-        "trade_date": String(8),
+        # "trade_date": handled as date object separately
         "buy_sm_amount": Float(),
         "buy_md_amount": Float(),
         "buy_lg_amount": Float(),
@@ -163,6 +163,10 @@ def update_astock_moneyflow_to_latest(
         data = get_moneyflow(trade_date)
         if data is None or data.empty:
             continue
+
+        # Convert trade_date from string to date object for better performance
+        if 'trade_date' in data.columns:
+            data['trade_date'] = pandas.to_datetime(data['trade_date'], format='%Y%m%d').dt.date
 
         pending_frames.append(data)
         pending_rows += len(data)

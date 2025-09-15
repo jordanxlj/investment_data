@@ -23,7 +23,7 @@ TABLE_NAME = "ts_a_stock_brokerage_report"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code      VARCHAR(16)  NOT NULL,
-  report_date  VARCHAR(8)   NOT NULL,
+  report_date  DATE         NOT NULL,
   report_title VARCHAR(128) NULL,
   report_type  VARCHAR(16)  NULL,
   classify     VARCHAR(16)  NULL,
@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   max_price    FLOAT NULL,
   min_price    FLOAT NULL,
   PRIMARY KEY (ts_code, report_date, org_name),
-  INDEX idx_ts_code (ts_code),
   INDEX idx_report_date (report_date),
+  INDEX idx_ts_code (ts_code),
   INDEX idx_ts_code_report_date (ts_code, report_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
@@ -71,8 +71,9 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         # Ensure numeric columns coerced
         for c in ["op_rt","op_pr","tp","np","eps","pe","rd","roe","ev_ebitda","max_price","min_price"]:
             out[c] = pd.to_numeric(out[c], errors="coerce")
-        # report_date keep as YYYYMMDD string
-        out["report_date"] = out["report_date"].astype(str).str.replace("-", "").str.slice(0, 8)
+        # Convert report_date from string to DATE object for efficient storage and queries
+        # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
+        out["report_date"] = pd.to_datetime(out["report_date"], format='%Y%m%d', errors='coerce').dt.date
         # Trim long strings
         out["report_title"] = out["report_title"].astype(str).str.slice(0, 512)
         out["org_name"] = out["org_name"].astype(str).str.slice(0, 128)
@@ -143,9 +144,15 @@ def update_a_stock_brokerage_report(
     """
     Incrementally ingest Tushare report_rc (brokerage earnings forecast) into MySQL.
 
-    - Auto-creates table with a composite primary key.
-    - Starts from max(report_date) present unless start_date_override provided.
-    - Fetches per day with pagination; upserts into MySQL.
+    Optimized for DATE type storage:
+    - Converts report_date from string to Python date objects before insertion
+    - Uses proper MySQL DATE type for efficient storage and queries
+    - Avoids SQL-level date conversion for better performance
+
+    Process:
+    - Auto-creates table with a composite primary key (includes DATE field)
+    - Starts from max(report_date) present unless start_date_override provided
+    - Fetches per day with pagination; upserts into MySQL with date object conversion
     """
 
     engine = create_engine(mysql_url, pool_recycle=3600)
@@ -161,7 +168,7 @@ def update_a_stock_brokerage_report(
         start_date = start_date_override
     else:
         with engine.begin() as conn:
-            res = conn.execute(text(f"SELECT MAX(report_date) FROM {TABLE_NAME}"))
+            res = conn.execute(text(f"SELECT DATE_FORMAT(MAX(report_date), '%Y%m%d') FROM {TABLE_NAME}"))
             row = res.fetchone()
             if row and row[0]:
                 start_date = str(row[0])

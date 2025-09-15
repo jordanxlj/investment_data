@@ -19,7 +19,7 @@ TABLE_NAME = "ts_a_stock_suspend_info"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    ts_code  varchar(16) NOT NULL,
-   trade_date  varchar(8) NOT NULL,
+   trade_date  DATE NOT NULL,
    suspend_timing  varchar(8) NOT NULL,
    suspend_type  varchar(1) NOT NULL,
   PRIMARY KEY ( ts_code , trade_date ),
@@ -65,9 +65,11 @@ def _flush_batch(
         return 0
     # Persist with multi-row insert for performance
     # enforce dtypes for performance/stability
+    # Note: trade_date is converted to date object in data processing
+    # and stored as DATE type in MySQL, so we don't specify dtype for it
     dtype = {
         "ts_code": String(16),
-        "trade_date": String(8),
+        # "trade_date": not specified - handled as date object separately
         "suspend_timing": String(8),
         "suspend_type": String(1),
     }
@@ -77,7 +79,7 @@ def _flush_batch(
         data = [dict(zip(keys, row)) for row in data_iter]
         if not data:
             return
-        # Build INSERT IGNORE statement
+        # Build INSERT IGNORE statement - trade_date is already a proper date object
         columns = ', '.join(f'`{k}`' for k in keys)
         values_placeholders = ', '.join(f':{k}' for k in keys)
         insert_stmt = f"INSERT IGNORE INTO `{table.table.name}` ({columns}) VALUES ({values_placeholders})"
@@ -110,11 +112,12 @@ def update_astock_suspend_to_latest(
     max_rows_per_batch: int = 50000,
     chunksize: int = 2000,
 ) -> None:
-    """Append missing ts_a_stock_fundamental rows to MySQL from Tushare daily_basic.
-
+    """Append missing ts_a_stock_suspend_info rows to MySQL from Tushare suspend data.
+    Process:
     - Finds latest trade_date present in table
     - Iterates subsequent open days up to today
-    - Fetches daily_basic and appends to table
+    - Fetches suspend data and converts trade_date to date objects
+    - Inserts data with optimized batch processing
     """
 
     sql_engine = create_engine(mysql_url, pool_recycle=3600)
@@ -128,7 +131,7 @@ def update_astock_suspend_to_latest(
     try:
         with sql_engine.begin() as econn:
             latest_df = pandas.read_sql_query(
-                "SELECT MAX(trade_date) AS trade_date FROM ts_a_stock_suspend_info",
+                "SELECT DATE_FORMAT(MAX(trade_date), '%Y%m%d') AS trade_date FROM ts_a_stock_suspend_info",
                 econn,
             )
             val = latest_df["trade_date"].iloc[0] if not latest_df.empty else None
@@ -157,6 +160,10 @@ def update_astock_suspend_to_latest(
         data = get_suspend(trade_date)
         if data is None or data.empty:
             continue
+
+        # Convert trade_date from string to date object for better performance
+        if 'trade_date' in data.columns:
+            data['trade_date'] = pandas.to_datetime(data['trade_date'], format='%Y%m%d').dt.date
 
         pending_frames.append(data)
         pending_rows += len(data)

@@ -405,6 +405,7 @@ SET
   final.suspend = updates.suspend;
 
 /* Update final_a_stock_comb_info with consensus report data - use min_price as target_price */
+SELECT "Update final_a_stock_comb_info with consensus report data - use min_price as target_price" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -422,7 +423,7 @@ INNER JOIN (
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
   WHERE consensus.eval_date >= @start_date
     AND consensus.eval_date > @max_tradedate
-    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR consensus.eval_date >= '20250101')  -- Match current year data in any format
+    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR YEAR(consensus.eval_date) >= 2025)  -- Match current year data using DATE functions
     AND consensus.total_reports > 0  -- Only include records with actual reports
 ) AS consensus_updates ON final.tradedate = consensus_updates.tradedate AND final.symbol = consensus_updates.symbol
 SET

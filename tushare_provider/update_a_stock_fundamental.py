@@ -53,9 +53,11 @@ def _flush_batch(
         return 0
     # Persist with multi-row insert for performance
     # enforce dtypes for performance/stability
+    # Note: trade_date is converted to date object in data processing
+    # and stored as DATE type in MySQL, so we don't specify dtype for it
     dtype = {
         "ts_code": String(16),
-        "trade_date": DATE(),
+        # "trade_date": handled as date object separately
         "turnover_rate": Float(),
         "turnover_rate_f": Float(),
         "volume_ratio": Float(),
@@ -147,6 +149,10 @@ def update_astock_fundamental_to_latest(
         data = get_daily_basic(trade_date)
         if data is None or data.empty:
             continue
+
+        # Convert trade_date from string to date object for better performance
+        if 'trade_date' in data.columns:
+            data['trade_date'] = pandas.to_datetime(data['trade_date'], format='%Y%m%d').dt.date
 
         pending_frames.append(data)
         pending_rows += len(data)

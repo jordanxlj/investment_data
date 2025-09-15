@@ -22,7 +22,7 @@ TABLE_NAME = "ts_a_stock_cost_pct"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code     VARCHAR(16) NOT NULL,
-  trade_date  VARCHAR(8)  NOT NULL,
+  trade_date  DATE NOT NULL,
   cost_5pct   FLOAT NULL,
   cost_15pct  FLOAT NULL,
   cost_50pct  FLOAT NULL,
@@ -170,6 +170,10 @@ def update_a_stock_cost_pct(
         if raw is None or raw.empty:
             continue
         df = _coerce_schema(raw)
+        # Convert trade_date from string to date object for better performance
+        if 'trade_date' in df.columns:
+            df['trade_date'] = pandas.to_datetime(df['trade_date'], format='%Y%m%d').dt.date
+
         df = df.drop_duplicates(subset=["ts_code", "trade_date"])  # safety
         written = _upsert_batch(engine, df, chunksize=chunksize)
         total_written += written
