@@ -15,6 +15,13 @@
    - Debug output can be enabled/disabled as needed
    ============================================================================ */
 
+/* Set shared variables to avoid repeated subqueries */
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
+SET @debug = 0;  /* Set to 1 to enable debug output */
+
+SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
+
 /* Create final table for combined info if it does not exist
    - percentages/ratios stored as FLOAT (already divided by 100 in SELECT)
    - shares/market cap stored in base units (×10000), as BIGINT UNSIGNED */
@@ -81,26 +88,17 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   INDEX idx_comb_symbol_tradedate (symbol, tradedate)
 ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 
-/* ============================================================================
-   PERFORMANCE OPTIMIZATION: Pre-compute shared values to reduce subqueries
-   ============================================================================ */
-
-/* Set shared variables to avoid repeated subqueries */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
-SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
-SET @debug = 1;  /* Set to 1 to enable debug output */
-
-SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
-
 
 /* Add new stock to ts_link_table */
+SELECT "Add new stock to ts_link_table" as info;
 INSERT IGNORE INTO ts_link_table (w_symbol, link_symbol, link_date)
 select concat(substr(symbol, 8, 2), substr(symbol, 1, 6)) as w_symbol, symbol as link_symbol, max(tradedate) as link_date 
 from ts_a_stock_eod_price 
 where tradedate = (select max(tradedate) from ts_a_stock_eod_price) group by symbol;
 
-/* Fill in new stock price */
-/* Fill in stock where w stock does not exists */
+/* Fill in new stock price - Initial population for empty table */
+/* This query handles the initial population when final_a_stock_comb_info is empty */
+SELECT "Fill in new stock price - Initial population for empty table" as info;
 INSERT IGNORE INTO final_a_stock_comb_info (tradedate, symbol, high, low, open, close, volume, adjclose, amount)
 SELECT ts_a_stock_eod_price.tradedate,
        ts_link_table.w_symbol as symbol,
@@ -122,6 +120,7 @@ WHERE existing.symbol IS NULL  -- Only insert records that don't exist
 UPDATE ts_link_table  SET adj_ratio=1 WHERE adj_ratio is NULL;
 
 /* Fill in index price from ts */
+SELECT "Fill in index price from ts" as info;
 INSERT IGNORE INTO final_a_stock_comb_info (tradedate, symbol, high, low, open, close, volume, adjclose, amount)
 select ts_raw_table.tradedate,
 			ts_link_table.w_symbol as symbol,
@@ -144,7 +143,8 @@ WHERE tradedate >= @start_date
 ) ts_raw_table
 LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol;
 
-/* Fill in stock price from ts */
+/* Fill in stock price from ts - only for incremental updates when table is not empty */
+SELECT "Fill in stock price from ts - only for incremental updates when table is not empty" as info;
 INSERT IGNORE INTO final_a_stock_comb_info (tradedate, symbol, high, low, open, close, volume, adjclose, amount)
 select ts_raw_table.tradedate,
 			ts_link_table.w_symbol as symbol,
@@ -158,7 +158,7 @@ select ts_raw_table.tradedate,
 FROM (
 SELECT * FROM ts_a_stock_eod_price
 WHERE tradedate >= @start_date
-  AND tradedate > (
+  AND tradedate > COALESCE((
 	select max(tradedate) as tradedate
 	FROM
 		(select tradedate, count(tradedate) as symbol_count
@@ -166,11 +166,15 @@ WHERE tradedate >= @start_date
 		where tradedate >= @start_date
 		group by tradedate) tradedate_record
 	WHERE symbol_count > 1000
-  )
+  ), '1900-01-01')  -- If table is empty, this will prevent any inserts
 ) ts_raw_table
-LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol;
+LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol
+LEFT JOIN final_a_stock_comb_info existing ON existing.symbol = ts_link_table.w_symbol
+  AND existing.tradedate = ts_raw_table.tradedate
+WHERE existing.symbol IS NULL;  -- Double-check to prevent duplicates
 
 /* First, identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info */
+SELECT "Identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info" as info;
 SELECT
   CONCAT('Missing fundamental record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_fundamental ts_raw
@@ -183,6 +187,7 @@ AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental */
 /* Updated logic: Use TTM values for pe, ps, dv_ratio when available and valid */
+SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -224,7 +229,8 @@ SET
   final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
   final.circ_mv = updates.circ_mv;
 
-/* First, identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
+/* Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
+SELECT "Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info" as info;
 SELECT 
   CONCAT('Missing moneyflow record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_moneyflow ts_raw
@@ -236,6 +242,7 @@ WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_moneyflow */
+SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_moneyflow" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -278,6 +285,7 @@ WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_cost_pct */
+SELECT "Identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -316,6 +324,7 @@ WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_suspend_info */
+SELECT "Identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
