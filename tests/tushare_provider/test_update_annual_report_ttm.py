@@ -244,6 +244,237 @@ class TestTTMCalculation(TestTTMCalculator):
 
         assert result == 1100.0, f"Expected 1100 for Q3, got {result}"
 
+    def test_get_quarterly_data_for_ttm_past_12_months(self, calculator):
+        """数据过滤+TTM - 过去12月季度数据
+
+        输入: DF with ann_date in range, report_period混合；target_date='20250914'。
+        预期: get_quarterly_data_for_ttm返回过去12月记录；然后TTM计算正常。
+        """
+        # Create test data spanning more than 12 months
+        # Note: All dates should be <= target_date for realistic TTM calculation
+        dates = [
+            datetime(2024, 9, 30),  # 12 months ago from 2025-09-14
+            datetime(2024, 12, 31), # Within 12 months
+            datetime(2025, 3, 31),  # Within 12 months
+            datetime(2025, 6, 30),  # Within 12 months
+            datetime(2025, 9, 10),  # Before target date (realistic scenario)
+            datetime(2024, 6, 30),  # 15 months ago - should be excluded
+        ]
+
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 6,
+            'report_period': ['2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-10', '2024-06-30'],
+            'report_year': [2024, 2024, 2025, 2025, 2025, 2024],
+            'ann_date': dates,
+            'revenue': [400, 500, 600, 700, 750, 350]
+        })
+
+        target_date = "20250914"
+        ts_codes = ['000001.SZ']
+
+        # Test quarterly data filtering
+        filtered_df = calculator.get_quarterly_data_for_ttm(df, ts_codes, target_date)
+
+        # Should include records from 2024-09-30 to 2025-09-14 (within 12 months)
+        # Exclude 2024-06-30 (15 months ago)
+        expected_count = 5
+        assert len(filtered_df) == expected_count, f"Expected {expected_count} records, got {len(filtered_df)}"
+
+        # Verify date range
+        min_date = filtered_df['ann_date'].min()
+        max_date = filtered_df['ann_date'].max()
+        expected_min = datetime(2024, 9, 30)
+        expected_max = datetime(2025, 9, 10)
+
+        assert min_date >= expected_min, f"Min date should be >= {expected_min}, got {min_date}"
+        assert max_date <= expected_max, f"Max date should be <= {expected_max}, got {max_date}"
+
+        # Test TTM calculation with filtered data
+        ttm_result = calculator.calculate_ttm_metrics(filtered_df, target_date)
+
+        # Should have calculated TTM for Q3 2025
+        assert 'revenue_ttm' in ttm_result, "Should contain revenue_ttm"
+        assert ttm_result['revenue_ttm'] != 0.0, "TTM should be calculated"
+
+    def test_get_annual_data_for_cagr_insufficient_data(self, calculator):
+        """数据过滤+CAGR - 年度数据不足
+
+        输入: DF with only 2年年度；periods=3。
+        预期: get_annual_data_for_cagr返回DF；CAGR=None。
+        """
+        # Create test data with only 2 years of annual data
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 2,
+            'report_period': ['2023-12-31', '2022-12-31'],
+            'report_year': [2023, 2022],
+            'ann_date': [datetime(2023, 12, 31), datetime(2022, 12, 31)],
+            'revenue': [1000, 800]
+        })
+
+        target_date = "20241231"
+        ts_codes = ['000001.SZ']
+
+        # Test annual data filtering
+        filtered_df = calculator.get_annual_data_for_cagr(df, ts_codes, target_date)
+
+        # Should return the available data (2 records)
+        assert len(filtered_df) == 2, f"Expected 2 records, got {len(filtered_df)}"
+
+        # Test CAGR calculation with insufficient data
+        cagr_result = calculator.calculate_cagr(filtered_df)
+
+        # Should return None for revenue_cagr_3y due to insufficient data
+        assert cagr_result['revenue_cagr_3y'] is None, f"Expected None for insufficient data, got {cagr_result['revenue_cagr_3y']}"
+
+    def test_process_single_stock_no_new_data_skip_calculation(self, calculator):
+        """process_single_stock - 无新数据跳过计算
+
+        输入: 模拟date_list，announcement_dates无新；last_ttm_metrics存在。
+        预期: 重用last_metrics，无新计算。
+        """
+        # Mock the required methods and data
+        with patch.object(calculator, 'get_financial_data_for_single_stock') as mock_get_data, \
+             patch('tushare_provider.update_annual_report_ttm.logger') as mock_logger:
+
+            # Setup mock data
+            df = pd.DataFrame({
+                'ts_code': ['000001.SZ'] * 2,
+                'report_period': ['2025-06-30', '2024-12-31'],
+                'report_year': [2025, 2024],
+                'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31)],
+                'revenue': [300, 1000]
+            })
+            mock_get_data.return_value = df
+
+            # Mock date range to return a few dates
+            with patch('pandas.date_range') as mock_date_range:
+                dates = [datetime(2025, 9, 10), datetime(2025, 9, 11), datetime(2025, 9, 12)]
+                mock_date_range.return_value = dates
+
+                # Mock calculate methods to return some results
+                with patch.object(calculator, 'calculate_ttm_metrics') as mock_ttm, \
+                     patch.object(calculator, 'calculate_cagr') as mock_cagr:
+
+                    mock_ttm.return_value = {'revenue_ttm': 1300.0}
+                    mock_cagr.return_value = {'revenue_cagr_3y': 0.15}
+
+                    # Call the method
+                    result = calculator.process_single_stock_from_batch(
+                        '000001.SZ', '20250901', '20250915'
+                    )
+
+                    # Should have processed all dates
+                    assert len(result) == 3, f"Expected 3 updates, got {len(result)}"
+
+                    # Verify logger was called for reusing calculations
+                    mock_logger.debug.assert_any_call("Reusing previous calculation for 000001.SZ on 20250911")
+
+    def test_process_single_stock_invalid_date_handling(self, calculator):
+        """process_single_stock - 异常日期处理
+
+        输入: 无效target_date。
+        预期: 跳过，继续其他日期。
+        """
+        with patch.object(calculator, 'get_financial_data_for_single_stock') as mock_get_data:
+            # Setup mock data
+            df = pd.DataFrame({
+                'ts_code': ['000001.SZ'] * 2,
+                'report_period': ['2025-06-30', '2024-12-31'],
+                'report_year': [2025, 2024],
+                'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31)],
+                'revenue': [300, 1000]
+            })
+            mock_get_data.return_value = df
+
+            # Mock date range to include invalid dates
+            with patch('pandas.date_range') as mock_date_range:
+                dates = [datetime(2025, 9, 10), datetime(2025, 9, 11)]
+                mock_date_range.return_value = dates
+
+                # Mock to_datetime to raise exception for one date
+                with patch('pandas.to_datetime') as mock_to_datetime:
+                    def side_effect(target_date, format=None):
+                        if target_date == '20250911':  # Simulate invalid date
+                            raise ValueError("Invalid date format")
+                        return datetime.strptime(target_date, '%Y%m%d')
+
+                    mock_to_datetime.side_effect = side_effect
+
+                    # Mock calculate methods
+                    with patch.object(calculator, 'calculate_ttm_metrics') as mock_ttm, \
+                         patch.object(calculator, 'calculate_cagr') as mock_cagr:
+
+                        mock_ttm.return_value = {'revenue_ttm': 1300.0}
+                        mock_cagr.return_value = {'revenue_cagr_3y': 0.15}
+
+                        # Call the method - should not crash
+                        result = calculator.process_single_stock_from_batch(
+                            '000001.SZ', '20250901', '20250915'
+                        )
+
+                        # Should have processed valid dates, skipped invalid ones
+                        # At least one update should be generated for valid dates
+                        assert len(result) >= 1, f"Expected at least 1 update for valid dates, got {len(result)}"
+
+    def test_get_financial_data_for_single_stock_date_range(self, calculator):
+        """Test get_financial_data_for_single_stock with proper date range calculation"""
+        # Mock the database engine and query result
+        mock_engine = MagicMock()
+        calculator.engine = mock_engine
+
+        # Mock pd.read_sql to return test data
+        expected_df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 3,
+            'report_period': ['2024-12-31', '2025-03-31', '2025-06-30'],
+            'report_year': [2024, 2025, 2025],
+            'ann_date': [datetime(2024, 12, 31), datetime(2025, 3, 31), datetime(2025, 6, 30)],
+            'revenue': [1000, 1200, 1400]
+        })
+
+        with patch('pandas.read_sql', return_value=expected_df) as mock_read_sql:
+            result = calculator.get_financial_data_for_single_stock(
+                '000001.SZ', '20250101', '20251231'
+            )
+
+            # Verify the query was called
+            mock_read_sql.assert_called_once()
+
+            # Verify date processing
+            assert not result.empty, "Should return data"
+            assert 'ann_date' in result.columns, "Should have ann_date column"
+            assert 'report_year' in result.columns, "Should have report_year column"
+
+    def test_calculate_ttm_metrics_with_different_quarters(self, calculator):
+        """Test TTM calculation across different quarters"""
+        quarters_to_test = [
+            (1, '2025-03-31', [300, 1000, 250]),  # Q1: 300 + 1000 - 250 = 1050
+            (2, '2025-06-30', [600, 1000, 450]),  # Q2: 600 + 1000 - 450 = 1150
+            (3, '2025-09-30', [900, 1000, 650]),  # Q3: 900 + 1000 - 650 = 1250
+            (4, '2025-12-31', [1200, 1000, 1000])  # Q4: 1200 + 1000 - 1000 = 1200 (特殊情况)
+        ]
+
+        for quarter, report_date, revenues in quarters_to_test:
+            df = pd.DataFrame({
+                'ts_code': ['000001.SZ'] * 3,
+                'report_period': [report_date, '2024-12-31', report_date.replace('2025', '2024')],
+                'report_year': [2025, 2024, 2024],
+                'ann_date': [datetime.strptime(report_date, '%Y-%m-%d'),
+                           datetime(2024, 12, 31),
+                           datetime.strptime(report_date.replace('2025', '2024'), '%Y-%m-%d')],
+                'revenue': revenues
+            })
+
+            result = calculator.calculate_ttm_metrics(df, report_date.replace('-', ''))
+
+            # For Q4, the calculation is special: current + prev_annual - prev_annual = current
+            if quarter == 4:
+                expected_ttm = revenues[0]  # Q4 TTM equals the annual value
+            else:
+                expected_ttm = revenues[0] + revenues[1] - revenues[2]
+
+            assert result['revenue_ttm'] == expected_ttm, \
+                f"Q{quarter} TTM calculation failed: expected {expected_ttm}, got {result['revenue_ttm']}"
+
 
 class TestCAGRCalculation(TestTTMCalculator):
     """Test CAGR calculation functions"""
