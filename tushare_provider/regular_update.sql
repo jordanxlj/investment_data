@@ -34,35 +34,6 @@
 
    ============================================================================
 
-   POTENTIAL REDUNDANT INDEXES TO REVIEW:
-   ============================================================================
-
-   ⚠️ 可能不需要的索引（需要进一步分析）：
-
-   1. ts_a_stock_eod_price.idx_tradedate
-      - 原因：已有复合索引 idx_symbol_tradedate，如果主要查询都是基于 (symbol, tradedate)
-      - 替代：使用现有的复合索引
-
-   2. final_a_stock_comb_info.idx_symbol
-      - 原因：已有主键 (tradedate, symbol)，复合索引已覆盖 symbol 列
-      - 替代：使用主键或 idx_comb_symbol_tradedate
-
-   3. final_a_stock_comb_info.idx_tradedate
-      - 原因：已有主键 (tradedate, symbol) 和 idx_tradedate_desc
-      - 替代：使用主键或专门的倒序索引
-
-   4. 低基数列的索引
-      - 布尔型字段如 suspend
-      - 枚举型字段
-      - 这些字段的索引通常不必要，除非经常用于过滤
-
-   删除建议：
-   - 先通过 performance_schema 监控索引使用情况
-   - 在低峰期删除可疑索引
-   - 监控删除后的性能影响
-
-   ============================================================================
-
    OPTIMIZATIONS IMPLEMENTED:
    1. Added start_date restriction (default: 2018-01-01)
    2. Pre-computed shared values using MySQL variables
@@ -144,9 +115,7 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   total_assets_cagr_3y FLOAT,
   suspend BOOL,
   PRIMARY KEY (tradedate, symbol),
-  INDEX idx_tradedate (tradedate),
   INDEX idx_tradedate_desc (tradedate DESC),
-  INDEX idx_symbol (symbol),
   INDEX idx_comb_symbol_tradedate (symbol, tradedate)
 ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 
@@ -336,6 +305,7 @@ SET
   final.net_inflow_ratio = updates.net_inflow_ratio;
 
 /* First, identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info */
+SELECT "Identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info" as info;
 SELECT
   CONCAT('Missing cost record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_cost_pct ts_raw
@@ -347,7 +317,6 @@ WHERE ts_raw.trade_date >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_cost_pct */
-SELECT "Identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -375,6 +344,7 @@ SET
   final.winner_rate = updates.winner_rate;
 
 /* First, identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info */
+SELECT "Identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info" as info;
 SELECT
   CONCAT('Missing suspend record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_suspend_info ts_raw
@@ -386,7 +356,6 @@ WHERE ts_raw.trade_date >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_suspend_info */
-SELECT "Identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info" as info;
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
@@ -440,4 +409,3 @@ SET
   final.f_dv_ratio = consensus_updates.f_dv_ratio,
   final.f_roe = consensus_updates.f_roe,
   final.f_target_price = consensus_updates.f_target_price;
-
