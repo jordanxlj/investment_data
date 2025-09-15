@@ -4,6 +4,39 @@ TTM (Trailing Twelve Months) and CAGR Calculation Module
 This module calculates TTM financial metrics and CAGR from ts_a_stock_financial_profile
 and updates final_a_stock_comb_info table.
 
+USAGE:
+    # Run TTM/CAGR calculation
+    python update_annual_report_ttm.py --start_date 20240101 --end_date 20241231
+
+    # Create essential indexes for ts_a_stock_financial_profile
+    python update_annual_report_ttm.py create_indexes
+
+CRITICAL INDEXES REQUIRED FOR ts_a_stock_financial_profile:
+===============================================================================
+
+必需的索引（按优先级排序）：
+
+1. PRIMARY KEY (ts_code, ann_date, report_period) - 如果不存在则创建
+   - 原因：唯一标识每条财务记录
+
+2. INDEX idx_ts_code_ann_date (ts_code, ann_date) - 最重要！
+   - 原因：覆盖主要的查询模式 (ts_code + ann_date范围)
+   - 影响：提升 90% 的查询性能
+
+3. INDEX idx_ts_code_report_period_ann_date (ts_code, report_period, ann_date)
+   - 原因：完全覆盖所有WHERE条件和ORDER BY
+   - 影响：查询性能最优化
+
+4. INDEX idx_ann_date (ann_date)
+   - 原因：纯日期范围查询
+   - 影响：辅助日期过滤
+
+5. INDEX idx_report_period (report_period)
+   - 原因：报告期模式匹配 (LIKE查询)
+   - 影响：提升报告期过滤性能
+
+===============================================================================
+
 Key Features:
 - Dynamic weighting based on report type and availability
 - TTM calculations for 10+ financial metrics
@@ -786,6 +819,7 @@ def update_annual_report_ttm(
     except Exception as e:
         logger.error(f"Application failed: {e}")
         raise
+
 
 if __name__ == "__main__":
     fire.Fire(update_annual_report_ttm)

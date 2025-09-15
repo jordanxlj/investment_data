@@ -326,9 +326,10 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   lmv                       DECIMAL(16,4) NULL,
 
   PRIMARY KEY (ts_code, report_period),
+  INDEX idx_ann_date (ann_date),
   INDEX idx_report_period (report_period),
-  INDEX idx_period (period),
-  INDEX idx_ts_code (ts_code)
+  INDEX idx_ts_code_ann_date (ts_code, ann_date),
+  INDEX idx_ts_code_report_period_ann_date (ts_code, report_period, ann_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
