@@ -560,7 +560,7 @@ class TTMCalculator:
         return filtered_df
 
     def process_single_stock_from_batch(self, ts_code: str, start_date: str, end_date: str, weights: Dict[str, float]) -> List[Dict]:
-        """Process a single stock for date range by querying its data individually"""
+        """Process a single stock for date range by querying its data individually with smart calculation skipping"""
         try:
             updates = []
 
@@ -571,14 +571,52 @@ class TTMCalculator:
                 logger.warning(f"No financial data found for {ts_code} in date range {start_date}-{end_date}")
                 return updates
 
+            # Get all unique announcement dates for this stock (sorted)
+            announcement_dates = sorted(stock_financial_df['ann_date'].unique())
+            logger.debug(f"{ts_code} has {len(announcement_dates)} financial reports in date range")
+
             # Get the actual trading dates for this stock within the date range
-            # Since we already filtered by date range in the query, we process all dates in our range
             stock_dates = pd.date_range(start=start_date, end=end_date, freq='D')
             date_list = [d.strftime('%Y%m%d') for d in stock_dates]
 
-            # Process each date for this stock
+            # Smart calculation: skip dates where no new financial data was released
+            last_calculation_date = None
+            last_ttm_metrics = None
+            last_cagr_metrics = None
+
             for target_date in date_list:
                 try:
+                    target_date_dt = pd.to_datetime(target_date, format='%Y%m%d')
+
+                    # Find the most recent announcement date before or on target_date
+                    recent_announcement_dates = [d for d in announcement_dates if d < target_date_dt]
+
+                    if not recent_announcement_dates:
+                        # No financial data available yet for this target_date
+                        logger.debug(f"Skipping {ts_code} on {target_date}: no financial data available")
+                        continue
+
+                    most_recent_announcement = max(recent_announcement_dates)
+
+                    # Check if we have new financial data since last calculation
+                    has_new_data = (last_calculation_date is None or
+                                  most_recent_announcement > last_calculation_date)
+
+                    if not has_new_data and last_ttm_metrics is not None and last_cagr_metrics is not None:
+                        # No new financial data, use previous calculation results
+                        logger.debug(f"Reusing previous calculation for {ts_code} on {target_date}")
+                        update_data = {
+                            'tradedate': target_date,
+                            'symbol': ts_code,
+                            **last_ttm_metrics,
+                            **last_cagr_metrics
+                        }
+                        updates.append(update_data)
+                        continue
+
+                    # New financial data available, perform calculation
+                    logger.debug(f"Calculating new metrics for {ts_code} on {target_date} (new data: {most_recent_announcement.strftime('%Y-%m-%d')})")
+
                     # Filter data for this specific date - annual data for CAGR
                     annual_df = self.get_annual_data_for_cagr(stock_financial_df, [ts_code], target_date)
 
@@ -590,6 +628,11 @@ class TTMCalculator:
 
                     # Calculate CAGR using annual data
                     cagr_metrics = self.calculate_cagr(annual_df)
+
+                    # Store results for potential reuse
+                    last_calculation_date = most_recent_announcement
+                    last_ttm_metrics = ttm_metrics.copy()
+                    last_cagr_metrics = cagr_metrics.copy()
 
                     # Combine all metrics
                     update_data = {
@@ -605,7 +648,7 @@ class TTMCalculator:
                     logger.error(f"Failed to process {ts_code} for date {target_date}: {e}")
                     continue
 
-            logger.debug(f"Processed {ts_code}: {len(updates)} updates generated")
+            logger.info(f"Processed {ts_code}: {len(updates)} updates generated (optimized calculation)")
             return updates
 
         except Exception as e:
