@@ -559,7 +559,7 @@ class TTMCalculator:
         logger.debug(f"Filtered {len(filtered_df)} quarterly/annual records for TTM calculation")
         return filtered_df
 
-    def process_single_stock_from_batch(self, ts_code: str, start_date: str, end_date: str, weights: Dict[str, float]) -> List[Dict]:
+    def process_single_stock_from_batch(self, ts_code: str, start_date: str, end_date: str) -> List[Dict]:
         """Process a single stock for date range by querying its data individually with smart calculation skipping"""
         try:
             updates = []
@@ -624,7 +624,7 @@ class TTMCalculator:
                     quarterly_df = self.get_quarterly_data_for_ttm(stock_financial_df, [ts_code], target_date)
 
                     # Calculate TTM metrics using quarterly data
-                    ttm_metrics = self.calculate_ttm_metrics(quarterly_df, weights)
+                    ttm_metrics = self.calculate_ttm_metrics(quarterly_df, target_date)
 
                     # Calculate CAGR using annual data
                     cagr_metrics = self.calculate_cagr(annual_df)
@@ -689,9 +689,7 @@ class TTMCalculator:
 
             # Get current quarter info and weights
             current_quarter, current_month, current_year = self.get_current_quarter_info()
-            weights = self.get_weight_matrix(current_quarter, current_month)
-
-            logger.info(f"Current quarter: {current_quarter}, weights: {weights}")
+            logger.info(f"Current quarter: {current_quarter}")
 
             # Get stocks list
             stocks_list = self.get_stocks_list(stocks)
@@ -710,7 +708,7 @@ class TTMCalculator:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit one task per stock - each worker queries its own data
                 futures = {
-                    executor.submit(self.process_single_stock_from_batch, ts_code, start_date, end_date, weights): ts_code
+                    executor.submit(self.process_single_stock_from_batch, ts_code, start_date, end_date): ts_code
                     for ts_code in stocks_list
                 }
 
@@ -744,60 +742,150 @@ class TTMCalculator:
             logger.error(f"Processing failed: {e}")
             raise
 
-    def calculate_ttm_metrics(self, financial_df: pd.DataFrame, weights: Dict[str, float]) -> Dict[str, float]:
-        """Calculate TTM metrics using weighted approach with configuration"""
+    def calculate_ttm_metrics(self, financial_df: pd.DataFrame, target_date: str) -> Dict[str, float]:
+        """
+        Calculate TTM metrics using correct YTD formula to avoid double counting
+
+        TTM Formula: Current YTD + Previous Year Annual - Previous Year Same Quarter YTD
+
+        Args:
+            financial_df: Financial data DataFrame
+            target_date: Target date for calculation (YYYYMMDD format)
+
+        Returns:
+            Dictionary of TTM metrics
+        """
         if financial_df.empty:
             return self._get_empty_ttm_metrics()
+
+        # Parse target date
+        target_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        current_year = target_dt.year
+        current_month = target_dt.month
+
+        # Determine current quarter based on month
+        if current_month <= 3:
+            current_quarter = 1
+        elif current_month <= 6:
+            current_quarter = 2
+        elif current_month <= 9:
+            current_quarter = 3
+        else:
+            current_quarter = 4
 
         # Get TTM metrics configuration
         ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
 
         # Initialize result dictionary with all configured metrics
-        # Use metric_name as output_field if not specified
         ttm_metrics = {}
         for metric_name, config in ttm_metrics_config.items():
-            output_field = config.get('output_field', metric_name)  # Default to metric_name
+            output_field = config.get('output_field', metric_name)
             ttm_metrics[output_field] = 0.0
 
-        # Calculate weighted values for each configured metric
-        for weight_key, weight_value in weights.items():
-            period_type, period_year = weight_key.split('_')
-            period_year = int(period_year)
+        # Calculate TTM for each metric using YTD formula
+        for metric_name, config in ttm_metrics_config.items():
+            source_field = config.get('source_field')
+            output_field = config.get('output_field', metric_name)
 
-            # Filter data for this period
-            if period_type == 'annual':
-                period_mask = (
-                    (financial_df['report_period'].str.endswith('-12-31')) &
-                    (financial_df['report_year'] == period_year)
-                )
-            else:
-                quarter_map = {'q1': '-03-31', 'q2': '-06-30', 'q3': '-09-30'}
-                period_mask = (
-                    (financial_df['report_period'].str.endswith(quarter_map[period_type])) &
-                    (financial_df['report_year'] == period_year)
-                )
-
-            period_data = financial_df[period_mask]
-            if period_data.empty:
+            if not source_field:
                 continue
 
-            # Use the most recent data for this period
-            latest_data = period_data.iloc[0]
+            ttm_value = self._calculate_single_ttm_metric(
+                financial_df, source_field, current_year, current_quarter
+            )
 
-            # Add weighted values for each configured TTM metric
-            for metric_name, config in ttm_metrics_config.items():
-                source_field = config.get('source_field')
-                output_field = config.get('output_field', metric_name)
-
-                if source_field and output_field in ttm_metrics:
-                    value = latest_data.get(source_field, 0)
-                    if value is not None:
-                        ttm_metrics[output_field] += value * weight_value
-
-                        logger.debug(f"Added {value:.4f} * {weight_value:.2f} = {value * weight_value:.4f} "
-                                   f"to {output_field} for period {weight_key}")
+            if ttm_value is not None:
+                ttm_metrics[output_field] = ttm_value
+                logger.debug(".4f"
+                           f"for {metric_name} (quarter {current_quarter})")
 
         return ttm_metrics
+
+    def _calculate_single_ttm_metric(self, financial_df: pd.DataFrame, source_field: str,
+                                   current_year: int, current_quarter: int) -> Optional[float]:
+        """
+        Calculate TTM for a single metric using YTD formula
+
+        TTM = Current YTD + Previous Year Annual - Previous Year Same Quarter YTD
+
+        Args:
+            financial_df: Financial data DataFrame
+            source_field: Field name to calculate TTM for
+            current_year: Current year
+            current_quarter: Current quarter (1-4)
+
+        Returns:
+            TTM value or None if calculation not possible
+        """
+        try:
+            # Define quarter end dates
+            quarter_ends = {
+                1: '-03-31',
+                2: '-06-30',
+                3: '-09-30',
+                4: '-12-31'
+            }
+
+            # 1. Get current year YTD value (most recent report for current quarter)
+            current_ytd_value = None
+            if current_quarter in quarter_ends:
+                current_mask = (
+                    (financial_df['report_period'].str.endswith(quarter_ends[current_quarter])) &
+                    (financial_df['report_year'] == current_year)
+                )
+                current_data = financial_df[current_mask]
+                if not current_data.empty:
+                    current_ytd_value = current_data.iloc[0].get(source_field)
+                    logger.debug(f"Current YTD {source_field}: {current_ytd_value} "
+                               f"(Q{current_quarter} {current_year})")
+
+            # 2. Get previous year annual value
+            prev_year_annual_value = None
+            prev_year = current_year - 1
+            annual_mask = (
+                (financial_df['report_period'].str.endswith('-12-31')) &
+                (financial_df['report_year'] == prev_year)
+            )
+            annual_data = financial_df[annual_mask]
+            if not annual_data.empty:
+                prev_year_annual_value = annual_data.iloc[0].get(source_field)
+                logger.debug(f"Previous year annual {source_field}: {prev_year_annual_value} "
+                           f"(FY {prev_year})")
+
+            # 3. Get previous year same quarter YTD value
+            prev_year_quarter_value = None
+            if current_quarter in quarter_ends:
+                prev_quarter_mask = (
+                    (financial_df['report_period'].str.endswith(quarter_ends[current_quarter])) &
+                    (financial_df['report_year'] == prev_year)
+                )
+                prev_quarter_data = financial_df[prev_quarter_mask]
+                if not prev_quarter_data.empty:
+                    prev_year_quarter_value = prev_quarter_data.iloc[0].get(source_field)
+                    logger.debug(f"Previous year Q{current_quarter} {source_field}: {prev_year_quarter_value} "
+                               f"(Q{current_quarter} {prev_year})")
+
+            # Calculate TTM using the formula: Current YTD + Prev Year Annual - Prev Year Same Quarter YTD
+            if (current_ytd_value is not None and
+                prev_year_annual_value is not None and
+                prev_year_quarter_value is not None):
+
+                ttm_value = current_ytd_value + prev_year_annual_value - prev_year_quarter_value
+
+                logger.debug(f"TTM calculation for {source_field}: "
+                           f"{current_ytd_value} + {prev_year_annual_value} - {prev_year_quarter_value} = {ttm_value}")
+
+                return ttm_value
+            else:
+                logger.debug(f"Insufficient data for TTM calculation of {source_field}: "
+                           f"Current YTD: {current_ytd_value}, "
+                           f"Prev Annual: {prev_year_annual_value}, "
+                           f"Prev Quarter: {prev_year_quarter_value}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error calculating TTM for {source_field}: {e}")
+            return None
 
     def calculate_cagr(self, financial_df: pd.DataFrame) -> Dict[str, Optional[float]]:
         """Calculate CAGR for multiple financial metrics based on configuration"""
