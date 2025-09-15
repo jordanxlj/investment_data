@@ -22,7 +22,7 @@ TABLE_NAME = "ts_a_stock_cost_pct"
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code     VARCHAR(16) NOT NULL,
-  trade_date  DATE NOT NULL,
+  trade_date  DATE        NOT NULL,
   cost_5pct   FLOAT NULL,
   cost_15pct  FLOAT NULL,
   cost_50pct  FLOAT NULL,
@@ -65,10 +65,9 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = None
     out = df[ALL_COLUMNS].copy()
     if not out.empty:
-        # Normalize trade_date to YYYYMMDD string
-        out["trade_date"] = (
-            out["trade_date"].astype(str).str.replace("-", "").str.slice(0, 8)
-        )
+        # Convert trade_date from string to DATE object for efficient storage and queries
+        # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
+        out["trade_date"] = pd.to_datetime(out["trade_date"], format='%Y%m%d', errors='coerce').dt.date
         # Numeric coercion
         for c in [
             "cost_5pct",
@@ -132,7 +131,8 @@ def update_a_stock_cost_pct(
     """
     Ingest Tushare cyq_perf (daily chip cost percentiles & win rate) into MySQL.
 
-    - Auto-creates table if missing with PK (ts_code, trade_date)
+    Process:
+    - Auto-creates table with DATE type trade_date field
     - Incremental by max(trade_date) unless start_date_override provided
     - Uses paginated range fetch for efficiency and upsert for idempotency
     """
@@ -150,7 +150,7 @@ def update_a_stock_cost_pct(
         start_date = start_date_override
     else:
         with engine.begin() as conn:
-            res = conn.execute(text(f"SELECT MAX(trade_date) FROM {TABLE_NAME}"))
+            res = conn.execute(text(f"SELECT DATE_FORMAT(MAX(trade_date), '%Y%m%d') FROM {TABLE_NAME}"))
             row = res.fetchone()
             if row and row[0]:
                 # next day after max
@@ -170,10 +170,6 @@ def update_a_stock_cost_pct(
         if raw is None or raw.empty:
             continue
         df = _coerce_schema(raw)
-        # Convert trade_date from string to date object for better performance
-        if 'trade_date' in df.columns:
-            df['trade_date'] = pandas.to_datetime(df['trade_date'], format='%Y%m%d').dt.date
-
         df = df.drop_duplicates(subset=["ts_code", "trade_date"])  # safety
         written = _upsert_batch(engine, df, chunksize=chunksize)
         total_written += written
@@ -183,5 +179,3 @@ def update_a_stock_cost_pct(
 
 if __name__ == "__main__":
     fire.Fire(update_a_stock_cost_pct)
-
-
