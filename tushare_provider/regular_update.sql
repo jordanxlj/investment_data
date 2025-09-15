@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
 /* Set shared variables to avoid repeated subqueries */
 SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
-SET @debug = 0;  /* Set to 1 to enable debug output */
+SET @debug = 1;  /* Set to 1 to enable debug output */
 
 SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
 
@@ -102,22 +102,21 @@ where tradedate = (select max(tradedate) from ts_a_stock_eod_price) group by sym
 /* Fill in new stock price */
 /* Fill in stock where w stock does not exists */
 INSERT IGNORE INTO final_a_stock_comb_info (tradedate, symbol, high, low, open, close, volume, adjclose, amount)
-select ts_a_stock_eod_price.tradedate,
-			missing_table.w_symbol as symbol,
-			ts_a_stock_eod_price.high,
-			ts_a_stock_eod_price.low,
-			ts_a_stock_eod_price.open,
-			ts_a_stock_eod_price.close,
-			ts_a_stock_eod_price.volume,
-			ROUND(ts_a_stock_eod_price.adjclose, 2),
-			ts_a_stock_eod_price.amount
-FROM ts_a_stock_eod_price,
-	(
-		select distinct(link_symbol) as w_missing_symbol, w_symbol from ts_link_table
-		WHERE adj_ratio is NULL
-	) missing_table
-WHERE ts_a_stock_eod_price.symbol = missing_table.w_missing_symbol
-  AND ts_a_stock_eod_price.tradedate >= '2018-01-01';
+SELECT ts_a_stock_eod_price.tradedate,
+       ts_link_table.w_symbol as symbol,
+       ts_a_stock_eod_price.high,
+       ts_a_stock_eod_price.low,
+       ts_a_stock_eod_price.open,
+       ts_a_stock_eod_price.close,
+       ts_a_stock_eod_price.volume,
+       ROUND(ts_a_stock_eod_price.adjclose, 2),
+       ts_a_stock_eod_price.amount
+FROM ts_a_stock_eod_price
+INNER JOIN ts_link_table ON ts_a_stock_eod_price.symbol = ts_link_table.link_symbol
+LEFT JOIN final_a_stock_comb_info existing ON existing.symbol = ts_link_table.w_symbol
+  AND existing.tradedate = ts_a_stock_eod_price.tradedate
+WHERE existing.symbol IS NULL  -- Only insert records that don't exist
+  AND ts_a_stock_eod_price.tradedate >= @start_date;
 
 /* Set new stock adj ratio to 1 */
 UPDATE ts_link_table  SET adj_ratio=1 WHERE adj_ratio is NULL;
@@ -135,7 +134,7 @@ select ts_raw_table.tradedate,
 			ts_raw_table.amount
 FROM (
 SELECT * FROM ts_a_stock_eod_price
-WHERE tradedate >= '2018-01-01'
+WHERE tradedate >= @start_date
   AND tradedate >
 		(
 			select max(tradedate) as tradedate
@@ -158,13 +157,13 @@ select ts_raw_table.tradedate,
 			ts_raw_table.amount
 FROM (
 SELECT * FROM ts_a_stock_eod_price
-WHERE tradedate >= '2018-01-01'
+WHERE tradedate >= @start_date
   AND tradedate > (
 	select max(tradedate) as tradedate
 	FROM
 		(select tradedate, count(tradedate) as symbol_count
 		FROM final_a_stock_comb_info
-		where tradedate >= '2018-01-01'
+		where tradedate >= @start_date
 		group by tradedate) tradedate_record
 	WHERE symbol_count > 1000
   )
