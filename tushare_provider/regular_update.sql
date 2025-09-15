@@ -1,6 +1,68 @@
 /* ============================================================================
    Regular Update Script for final_a_stock_comb_info table
 
+   CRITICAL INDEXES REQUIRED FOR PERFORMANCE:
+   ============================================================================
+
+   必需的索引（按优先级排序）：
+
+   1. ts_link_table 表（最重要！）：
+      - INDEX idx_link_symbol (link_symbol) - 用于 JOIN ts_code
+      - INDEX idx_w_symbol (w_symbol) - 用于 JOIN symbol
+      - UNIQUE INDEX uk_w_symbol_link_symbol (w_symbol, link_symbol)
+
+   2. ts_a_stock_eod_price 表：
+      - INDEX idx_symbol_tradedate (symbol, tradedate) - 用于 JOIN 和 WHERE
+      - INDEX idx_tradedate (tradedate) - 用于日期范围查询
+
+   3. ts_a_stock_fundamental 表：
+      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
+      - INDEX idx_trade_date (trade_date) - 用于日期过滤
+
+   4. ts_a_stock_moneyflow 表：
+      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
+
+   5. ts_a_stock_cost_pct 表：
+      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
+
+   6. ts_a_stock_suspend_info 表：
+      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
+
+   7. ts_a_stock_consensus_report 表：
+      - INDEX idx_ts_code_eval_date (ts_code, eval_date) - 用于 JOIN 和 WHERE
+      - INDEX idx_eval_date (eval_date) - 用于日期过滤
+
+   ============================================================================
+
+   POTENTIAL REDUNDANT INDEXES TO REVIEW:
+   ============================================================================
+
+   ⚠️ 可能不需要的索引（需要进一步分析）：
+
+   1. ts_a_stock_eod_price.idx_tradedate
+      - 原因：已有复合索引 idx_symbol_tradedate，如果主要查询都是基于 (symbol, tradedate)
+      - 替代：使用现有的复合索引
+
+   2. final_a_stock_comb_info.idx_symbol
+      - 原因：已有主键 (tradedate, symbol)，复合索引已覆盖 symbol 列
+      - 替代：使用主键或 idx_comb_symbol_tradedate
+
+   3. final_a_stock_comb_info.idx_tradedate
+      - 原因：已有主键 (tradedate, symbol) 和 idx_tradedate_desc
+      - 替代：使用主键或专门的倒序索引
+
+   4. 低基数列的索引
+      - 布尔型字段如 suspend
+      - 枚举型字段
+      - 这些字段的索引通常不必要，除非经常用于过滤
+
+   删除建议：
+   - 先通过 performance_schema 监控索引使用情况
+   - 在低峰期删除可疑索引
+   - 监控删除后的性能影响
+
+   ============================================================================
+
    OPTIMIZATIONS IMPLEMENTED:
    1. Added start_date restriction (default: 2018-01-01)
    2. Pre-computed shared values using MySQL variables
@@ -176,12 +238,12 @@ WHERE existing.symbol IS NULL;  -- Double-check to prevent duplicates
 /* First, identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info */
 SELECT "Identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info" as info;
 SELECT
-  CONCAT('Missing fundamental record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing fundamental record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_fundamental ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-  AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE ts_raw.trade_date >= @start_date
+  AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
@@ -191,7 +253,7 @@ SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_s
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
-    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_raw.trade_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
     ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
     ts_raw.volume_ratio AS volume_ratio,
@@ -217,8 +279,8 @@ INNER JOIN (
     ts_raw.circ_mv * 10000.0 AS circ_mv
   FROM ts_a_stock_fundamental ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-    AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+  WHERE ts_raw.trade_date >= @start_date
+    AND ts_raw.trade_date > @max_tradedate
 ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
 SET
   final.turnover_rate = updates.turnover_rate,
@@ -232,12 +294,12 @@ SET
 /* Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
 SELECT "Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info" as info;
 SELECT 
-  CONCAT('Missing moneyflow record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing moneyflow record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_moneyflow ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-  AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE ts_raw.trade_date >= @start_date
+  AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
@@ -246,7 +308,7 @@ SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_s
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
-    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_raw.trade_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
     CASE
       WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
@@ -265,8 +327,8 @@ INNER JOIN (
     END AS net_inflow_ratio
   FROM ts_a_stock_moneyflow ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-    AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+  WHERE ts_raw.trade_date >= @start_date
+    AND ts_raw.trade_date > @max_tradedate
 ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
 SET
   final.main_inflow_ratio = updates.main_inflow_ratio,
@@ -275,12 +337,12 @@ SET
 
 /* First, identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info */
 SELECT
-  CONCAT('Missing cost record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing cost record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_cost_pct ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-  AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE ts_raw.trade_date >= @start_date
+  AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
@@ -289,7 +351,7 @@ SELECT "Identify and print records from ts_a_stock_cost_pct that do not exist in
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
-    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_raw.trade_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
     ts_raw.cost_5pct AS cost_5pct,
     ts_raw.cost_15pct AS cost_15pct,
@@ -300,8 +362,8 @@ INNER JOIN (
     ts_raw.winner_rate AS winner_rate
   FROM ts_a_stock_cost_pct ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-    AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+  WHERE ts_raw.trade_date >= @start_date
+    AND ts_raw.trade_date > @max_tradedate
 ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
 SET
   final.cost_5pct = updates.cost_5pct,
@@ -314,12 +376,12 @@ SET
 
 /* First, identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info */
 SELECT
-  CONCAT('Missing suspend record: tradedate=', STR_TO_DATE(ts_raw.trade_date, '%Y%m%d'), ', symbol=', ts_link_table.w_symbol) AS missing_info
+  CONCAT('Missing suspend record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
 FROM ts_a_stock_suspend_info ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-  AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
+WHERE ts_raw.trade_date >= @start_date
+  AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
@@ -328,7 +390,7 @@ SELECT "Identify and print records from ts_a_stock_suspend_info that do not exis
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
-    STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') AS tradedate,
+    ts_raw.trade_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
     CASE
       WHEN ts_raw.suspend_type = 'S' THEN TRUE
@@ -336,8 +398,8 @@ INNER JOIN (
     END AS suspend
   FROM ts_a_stock_suspend_info ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') >= @start_date
-    AND STR_TO_DATE(ts_raw.trade_date, '%Y%m%d') > @max_tradedate
+  WHERE ts_raw.trade_date >= @start_date
+    AND ts_raw.trade_date > @max_tradedate
 ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
 SET
   final.suspend = updates.suspend;
@@ -346,7 +408,7 @@ SET
 UPDATE final_a_stock_comb_info final
 INNER JOIN (
   SELECT
-    STR_TO_DATE(consensus.eval_date, '%Y%m%d') AS tradedate,
+    consensus.eval_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
     consensus.total_reports,
     consensus.sentiment_pos,
@@ -358,8 +420,8 @@ INNER JOIN (
     consensus.min_price AS f_target_price  -- Use min_price as target_price as requested
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
-  WHERE STR_TO_DATE(consensus.eval_date, '%Y%m%d') >= @start_date
-    AND STR_TO_DATE(consensus.eval_date, '%Y%m%d') > @max_tradedate
+  WHERE consensus.eval_date >= @start_date
+    AND consensus.eval_date > @max_tradedate
     AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR consensus.eval_date >= '20250101')  -- Match current year data in any format
     AND consensus.total_reports > 0  -- Only include records with actual reports
 ) AS consensus_updates ON final.tradedate = consensus_updates.tradedate AND final.symbol = consensus_updates.symbol

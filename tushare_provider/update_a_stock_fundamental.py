@@ -55,7 +55,7 @@ def _flush_batch(
     # enforce dtypes for performance/stability
     dtype = {
         "ts_code": String(16),
-        "trade_date": String(8),
+        "trade_date": DATE(),
         "turnover_rate": Float(),
         "turnover_rate_f": Float(),
         "volume_ratio": Float(),
