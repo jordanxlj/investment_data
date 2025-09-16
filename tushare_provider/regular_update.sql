@@ -47,14 +47,6 @@
    - Memory usage reduced by avoiding repeated calculations
    - Debug output can be enabled/disabled as needed
    ============================================================================ */
-
-/* Set shared variables to avoid repeated subqueries */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
-SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
-SET @debug = 0;  /* Set to 1 to enable debug output */
-
-SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
-
 /* Create final table for combined info if it does not exist
    - percentages/ratios stored as FLOAT (already divided by 100 in SELECT)
    - shares/market cap stored in base units (×10000), as BIGINT UNSIGNED */
@@ -118,6 +110,14 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   INDEX idx_tradedate_desc (tradedate DESC),
   INDEX idx_comb_symbol_tradedate (symbol, tradedate)
 ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
+
+
+/* Set shared variables to avoid repeated subqueries */
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date = '2025-09-01';  /* Start date for data processing - matches consensus data */
+SET @debug = 0;  /* Set to 1 to enable debug output */
+
+SELECT CONCAT('Optimization: Using max_tradedate = ', @max_tradedate, ', start_date = ', @start_date, ', debug = ', @debug) AS optimization_info;
 
 
 /* Add new stock to ts_link_table */
