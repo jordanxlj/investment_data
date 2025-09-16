@@ -217,48 +217,84 @@ WHERE ts_raw.trade_date >= @start_date
 AND final.tradedate IS NULL;
 
 /* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental */
-/* Updated logic: Use TTM values for pe, ps, dv_ratio when available and valid */
-SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental" as info;
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
-  SELECT
-    ts_raw.trade_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
-    ts_raw.volume_ratio AS volume_ratio,
-    -- Use pe_ttm if available and valid, otherwise use pe
-    CASE
-      WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
-      ELSE ts_raw.pe
-    END AS pe_final,
-    ts_raw.pe_ttm AS pe_ttm,
-    ts_raw.pb AS pb,
-    -- Use ps_ttm if available and valid, otherwise use ps
-    CASE
-      WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
-      ELSE ts_raw.ps
-    END AS ps_final,
-    ts_raw.ps_ttm AS ps_ttm,
-    -- Use dv_ttm if available and valid, otherwise use dv_ratio
-    CASE
-      WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
-      ELSE ts_raw.dv_ratio / 100.0
-    END AS dv_ratio_final,
-    ts_raw.dv_ttm / 100.0 AS dv_ttm,
-    ts_raw.circ_mv * 10000.0 AS circ_mv
-  FROM ts_a_stock_fundamental ts_raw
-  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
-    AND ts_raw.trade_date > @max_tradedate
-) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
-SET
-  final.turnover_rate = updates.turnover_rate,
-  final.volume_ratio = updates.volume_ratio,
-  final.pe = updates.pe_final,  -- Use TTM value when available
-  final.pb = updates.pb,
-  final.ps = updates.ps_final,  -- Use TTM value when available
-  final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
-  final.circ_mv = updates.circ_mv;
+/* Updated logic: Use TTM values for pe, ps, dv_ratio when available and valid - Process day by day for better performance */
+SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental (day by day)" as info;
+
+/* Create a temporary table to store dates to process */
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
+CREATE TEMPORARY TABLE temp_dates_to_process AS
+SELECT DISTINCT trade_date
+FROM ts_a_stock_fundamental
+WHERE trade_date >= @start_date
+  AND trade_date > @max_tradedate
+ORDER BY trade_date;
+
+/* Process each date individually */
+SET @current_date = NULL;
+SET @done = FALSE;
+
+REPEAT
+  /* Get next date to process */
+  SELECT trade_date INTO @current_date
+  FROM temp_dates_to_process
+  WHERE trade_date > COALESCE(@current_date, '1900-01-01')
+  ORDER BY trade_date
+  LIMIT 1;
+
+  IF @current_date IS NOT NULL THEN
+    SELECT CONCAT('Processing date: ', @current_date) as processing_info;
+
+    /* Update records for this specific date */
+    UPDATE final_a_stock_comb_info final
+    INNER JOIN (
+      SELECT
+        ts_raw.trade_date AS tradedate,
+        ts_link_table.w_symbol AS symbol,
+        ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
+        ts_raw.volume_ratio AS volume_ratio,
+        -- Use pe_ttm if available and valid, otherwise use pe
+        CASE
+          WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
+          ELSE ts_raw.pe
+        END AS pe_final,
+        ts_raw.pe_ttm AS pe_ttm,
+        ts_raw.pb AS pb,
+        -- Use ps_ttm if available and valid, otherwise use ps
+        CASE
+          WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
+          ELSE ts_raw.ps
+        END AS ps_final,
+        ts_raw.ps_ttm AS ps_ttm,
+        -- Use dv_ttm if available and valid, otherwise use dv_ratio
+        CASE
+          WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
+          ELSE ts_raw.dv_ratio / 100.0
+        END AS dv_ratio_final,
+        ts_raw.dv_ttm / 100.0 AS dv_ttm,
+        ts_raw.circ_mv * 10000.0 AS circ_mv
+      FROM ts_a_stock_fundamental ts_raw
+      LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+      WHERE ts_raw.trade_date = @current_date
+    ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
+    SET
+      final.turnover_rate = updates.turnover_rate,
+      final.volume_ratio = updates.volume_ratio,
+      final.pe = updates.pe_final,  -- Use TTM value when available
+      final.pb = updates.pb,
+      final.ps = updates.ps_final,  -- Use TTM value when available
+      final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
+      final.circ_mv = updates.circ_mv;
+
+    /* Remove processed date from temp table */
+    DELETE FROM temp_dates_to_process WHERE trade_date = @current_date;
+  ELSE
+    SET @done = TRUE;
+  END IF;
+
+UNTIL @done END REPEAT;
+
+/* Clean up temporary table */
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 
 /* Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
 SELECT "Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info" as info;
