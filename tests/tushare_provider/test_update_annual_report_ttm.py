@@ -247,7 +247,7 @@ class TestTTMCalculation(TestTTMCalculator):
     def test_get_quarterly_data_for_ttm_past_12_months(self, calculator):
         """数据过滤+TTM - 过去12月季度数据
 
-        输入: DF with ann_date in range, report_period混合；target_date='20250914'。
+        输入: DF with ann_date in range, report_period混合；target_date='2025-09-14'。
         预期: get_quarterly_data_for_ttm返回过去12月记录；然后TTM计算正常。
         """
         # Create test data spanning more than 12 months
@@ -263,7 +263,7 @@ class TestTTMCalculation(TestTTMCalculator):
 
         df = pd.DataFrame({
             'ts_code': ['000001.SZ'] * 6,
-            'report_period': ['2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-10', '2024-06-30'],
+            'report_period': ['2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30', '2024-06-30'],
             'report_year': [2024, 2024, 2025, 2025, 2025, 2024],
             'ann_date': dates,
             'revenue': [400, 500, 600, 700, 750, 350]
@@ -284,7 +284,7 @@ class TestTTMCalculation(TestTTMCalculator):
         min_date = filtered_df['ann_date'].min()
         max_date = filtered_df['ann_date'].max()
         expected_min = datetime(2024, 9, 30)
-        expected_max = datetime(2025, 9, 10)
+        expected_max = datetime(2025, 9, 10)  # ann_date is 2025-09-10, which is before target_date 2025-09-14
 
         assert min_date >= expected_min, f"Min date should be >= {expected_min}, got {min_date}"
         assert max_date <= expected_max, f"Max date should be <= {expected_max}, got {max_date}"

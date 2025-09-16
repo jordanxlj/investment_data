@@ -56,6 +56,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def parse_date_flexible(date_str: str, target_format: str = "%Y%m%d") -> str:
+    """
+    Parse date string supporting multiple formats and return in target format
+
+    Args:
+        date_str: Date string to parse
+        target_format: Target format for output (default: "%Y%m%d")
+
+    Returns:
+        Date string in target format
+
+    Raises:
+        ValueError: If unable to parse date with any supported format
+    """
+    supported_formats = ["%Y-%m-%d", "%Y%m%d"]
+
+    for fmt in supported_formats:
+        try:
+            dt = datetime.datetime.strptime(date_str, fmt)
+            return dt.strftime(target_format)
+        except ValueError:
+            continue
+
+    raise ValueError(f"Unable to parse date: {date_str}. Supported formats: {supported_formats}")
+
+
 def load_config():
     """Load configuration from JSON file"""
     CONFIG_FILE = 'conf/report_config.json'
@@ -345,18 +371,15 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], batch_size: int) -> int:
     """Optimized: Process all dates for a single stock and upsert results immediately"""
     # Calculate date range for bulk query (start_date - 6 months to end_date)
-    start_dt = datetime.datetime.strptime(min(date_list), "%Y%m%d")
-    end_dt = datetime.datetime.strptime(max(date_list), "%Y%m%d")
+    # Support both YYYY-MM-DD and YYYYMMDD formats
+    start_dt = datetime.datetime.strptime(parse_date_flexible(min(date_list), "%Y-%m-%d"), "%Y-%m-%d")
+    end_dt = datetime.datetime.strptime(parse_date_flexible(max(date_list), "%Y-%m-%d"), "%Y-%m-%d")
     bulk_start_dt = start_dt - datetime.timedelta(days=180)  # 6 months back
 
     bulk_start_date = bulk_start_dt.strftime("%Y%m%d")
     bulk_end_date = end_dt.strftime("%Y%m%d")
-    annual_cache = {}
 
     try:
-        # Bulk fetch annual data first (higher priority)
-        #annual_cache = get_annual_data_bulk(engine, ts_code, date_list)
-
         # Bulk query all brokerage data for this stock in the date range
         with engine.begin() as conn:
             query = text("""
@@ -386,22 +409,6 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
 
         for current_date in date_list:
             try:
-                # First check annual data (higher priority)
-                #logger.debug(f"annual_cache: {annual_cache.keys()}")
-                annual_data = annual_cache.get(current_date)
-                if annual_data:
-                    logger.debug(f"annual report {annual_data}")
-                    # Use annual data directly
-                    result = annual_data.copy()
-                    result['ts_code'] = ts_code
-                    # Convert eval_date from string to DATE object for efficient storage and queries
-                    # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
-                    result['eval_date'] = pd.to_datetime(current_date, format='%Y%m%d').date()
-                    result['report_period'] = fiscal_infos[current_date]['current_fiscal_period']
-                    stock_results.append(result)
-                    logger.debug(f"Using annual report data for {ts_code} on {current_date}")
-                    continue
-
                 logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
                 # Get all reports available up to current_date
@@ -499,16 +506,16 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
     Get date window for brokerage report filtering
 
     Args:
-        eval_date: Evaluation date in YYYYMMDD format
+        eval_date: Evaluation date (supports YYYY-MM-DD or YYYYMMDD)
         window_months: Number of months to look back
 
     Returns:
         Tuple of (start_date, end_date) in YYYYMMDD format
     """
     try:
-        eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
+        eval_dt = datetime.datetime.strptime(parse_date_flexible(eval_date, "%Y-%m-%d"), "%Y-%m-%d")
     except ValueError:
-        raise ValueError(f"Invalid eval_date format: {eval_date}. Expected YYYYMMDD.")
+        raise ValueError(f"Invalid eval_date format: {eval_date}. Supported formats: YYYY-MM-DD, YYYYMMDD")
 
     end_dt = eval_dt
 
@@ -530,12 +537,12 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     Based on China Securities Regulatory Commission requirements for periodic reports
 
     Args:
-        eval_date: Evaluation date in YYYYMMDD format
+        eval_date: Evaluation date in YYYY-MM-DD format
 
     Returns:
         Dictionary with fiscal period information
     """
-    eval_dt = datetime.datetime.strptime(eval_date, "%Y%m%d")
+    eval_dt = datetime.datetime.strptime(parse_date_flexible(eval_date, "%Y-%m-%d"), "%Y-%m-%d")
     year = eval_dt.year
     month = eval_dt.month
 
@@ -545,35 +552,35 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     if month <= 4:
         # 1-4月：上年年报发布期，代表上一个会计年度
         current_quarter = f"{year - 1}Q4"
-        current_fiscal_year = f"{year - 1}Q4"
+        current_fiscal_year = f"{year - 1}"
         current_fiscal_period = f"{year - 1}1231"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 5:
         # 5月：Q1季报发布期，代表当前会计年度第一季度
         current_quarter = f"{year}Q1"
-        current_fiscal_year = f"{year}Q4"
+        current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0331"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 8:
         # 7-8月：半年报发布期，代表当前会计年度上半年
         current_quarter = f"{year}Q2"
-        current_fiscal_year = f"{year}Q4"
+        current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0630"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 11:
         # 10-11月：Q3季报发布期，代表当前会计年度第三季度
         current_quarter = f"{year}Q3"
-        current_fiscal_year = f"{year}Q4"
+        current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     else:
         # 12月：Q4季报发布期，代表当前会计年度第四季度
         current_quarter = f"{year}Q4"
-        current_fiscal_year = f"{year}Q4"
+        current_fiscal_year = f"{year}"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year + 1}"
         next_fiscal_period = f"{year + 1}1231"
@@ -783,10 +790,15 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
             result[field] = None
 
     logger.debug(f"aggregate_forecasts, before filtering, df lens: {len(df)}")
-    df['quarter_comparison'] = df['quarter'].apply(
-        lambda q: compare_quarters(q, min_quarter) == 0 if q else False
-    )
-    df = df[df['quarter_comparison']]
+
+    # Handle quarter filtering - if min_quarter is 'ALL', skip filtering
+    if min_quarter == 'ALL':
+        df['quarter_comparison'] = True
+    else:
+        df['quarter_comparison'] = df['quarter'].apply(
+            lambda q: compare_quarters(q, min_quarter) == 0 if q else False
+        )
+        df = df[df['quarter_comparison']]
 
     logger.debug(f"aggregate_forecasts, after filtering, df lens: {len(df)}")
     # Process quarter-specific fields
@@ -833,136 +845,6 @@ def aggregate_forecasts(df: pd.DataFrame, sentiment_source: str, min_quarter: st
 
     return result
 
-
-def get_annual_data_bulk(engine: Any, ts_code: str, date_list: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Bulk fetch annual report data for all dates for a stock"""
-    annual_data_cache = {}
-
-    try:
-        # Get unique report periods from date_list
-        periods = set()
-        for date in date_list:
-            fiscal_info = get_fiscal_period_info(date)
-            periods.add(fiscal_info['current_fiscal_period'])
-
-        periods_list = list(periods)
-        if not periods_list:
-            return annual_data_cache
-
-        # Convert periods to database format (YYYY-MM-DD)
-        db_periods_list = []
-        for period in periods_list:
-            if len(period) == 8:  # Format: YYYYMMDD
-                db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}"
-                db_periods_list.append(db_period)
-            else:
-                db_periods_list.append(period)  # Keep as-is if not in expected format
-
-        # Convert date_list to datetime for fundamental table query
-        date_objs = [datetime.datetime.strptime(date, "%Y%m%d") for date in date_list]
-        min_date = min(date_objs).strftime("%Y%m%d")
-        max_date = max(date_objs).strftime("%Y%m%d")
-
-        # Bulk query financial_profile (annual data by period)
-        with engine.begin() as conn:
-            fp_query = text("""
-                SELECT ann_date, report_period, eps, roe_waa
-                FROM ts_a_stock_financial_profile
-                WHERE ts_code = :ts_code
-                AND report_period IN :periods
-                ORDER BY report_period DESC, ann_date DESC
-            """)
-            fp_df = pd.read_sql(fp_query, conn, params={
-                'ts_code': ts_code,
-                'periods': tuple(db_periods_list)
-            })
-
-            # Filter by ann_date <= current_date for each period
-            # This ensures we only use annual reports that were available on the evaluation date
-            filtered_fp_dict = {}
-            for current_date in date_list:
-                fiscal_info = get_fiscal_period_info(current_date)
-                period = fiscal_info['current_fiscal_period']
-                db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
-
-                period_rows = fp_df[fp_df['report_period'] == db_period]
-                if not period_rows.empty:
-                    # Filter by ann_date < current_date
-                    available_rows = period_rows[period_rows['ann_date'] < current_date]
-                    if not available_rows.empty:
-                        # Take the most recent available annual report for this period
-                        latest_row = available_rows.iloc[0]
-                        # Store the filtered row with the corresponding current_date
-                        filtered_fp_dict[current_date] = latest_row
-
-            # Bulk query fundamental (daily data by trade_date)
-            fund_query = text("""
-                SELECT trade_date, pe, dv_ratio
-                FROM ts_a_stock_fundamental
-                WHERE ts_code = :ts_code
-                AND trade_date BETWEEN :start_date AND :end_date
-                ORDER BY trade_date DESC
-            """)
-            fund_df = pd.read_sql(fund_query, conn, params={
-                'ts_code': ts_code,
-                'start_date': min_date,
-                'end_date': max_date
-            })
-
-        # Process and cache per date
-        for current_date in date_list:
-            fiscal_info = get_fiscal_period_info(current_date)
-            period = fiscal_info['current_fiscal_period']
-
-            # Convert to database format for matching
-            db_period = f"{period[:4]}-{period[4:6]}-{period[6:]}" if len(period) == 8 else period
-
-            # Get financial profile data for the fiscal period (already filtered by ann_date)
-            row = filtered_fp_dict.get(current_date)
-            if row is not None:
-                annual_data = {
-                    'eps': row['eps'],
-                    'roe': row['roe_waa'],
-                    'total_reports': 0,
-                    'sentiment_pos': 0,
-                    'sentiment_neg': 0,
-                    'buy_count': 0,
-                    'hold_count': 0,
-                    'neutral_count': 0,
-                    'sell_count': 0,
-                    'depth_reports': 0,
-                    'research_reports': 0,
-                    'commentary_reports': 0,
-                    'general_reports': 0,
-                    'other_reports': 0,
-                    'avg_report_weight': None,
-                    'pe': None,
-                    'rd': None,
-                    'ev_ebitda': None,
-                    'max_price': None,
-                    'min_price': None,
-                    'last_updated': datetime.datetime.now()
-                }
-
-                # Get fundamental data for the exact current date
-                # Convert current_date to datetime for proper comparison with database datetime
-                current_date_dt = datetime.datetime.strptime(current_date, "%Y%m%d").date()
-                fund_exact = fund_df[fund_df['trade_date'] == current_date_dt]
-                if not fund_exact.empty:
-                    f_row = fund_exact.iloc[0]
-                    annual_data['pe'] = f_row['pe']
-                    annual_data['rd'] = f_row['dv_ratio']  # Use dv_ratio as rd
-
-                annual_data_cache[current_date] = annual_data
-            else:
-                annual_data_cache[current_date] = None
-
-        logger.debug(f"Bulk loaded annual data for {ts_code} with {len(annual_data_cache)} entries")
-        return annual_data_cache
-
-    except Exception as e:
-        logger.error(f"Error bulk loading annual data for {ts_code}: {e}")
-        return {date: None for date in date_list}
 
 
 def _upsert_batch(engine: Any, df: pd.DataFrame, chunksize: int = 1000) -> int:
