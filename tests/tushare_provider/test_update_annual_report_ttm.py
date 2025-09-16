@@ -82,7 +82,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [300, 1000, 250]
         })
 
-        target_date = "20250630"  # Q2 2025
+        target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -103,7 +103,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [300, 1000]
         })
 
-        target_date = "20250630"  # Q2 2025
+        target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -123,7 +123,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [150, 1000, 100]
         })
 
-        target_date = "20250331"  # Q1 2025
+        target_date = "2025-03-31"  # Q1 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -143,7 +143,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [1200, 1000]
         })
 
-        target_date = "20251231"  # Q4 2025
+        target_date = "2025-12-31"  # Q4 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -163,7 +163,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [-50, -200, -100]
         })
 
-        target_date = "20250630"  # Q2 2025
+        target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -183,7 +183,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [300, 1000, 0]
         })
 
-        target_date = "20250630"  # Q2 2025
+        target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -197,7 +197,7 @@ class TestTTMCalculation(TestTTMCalculator):
         """
         df = pd.DataFrame()
 
-        target_date = "20250630"
+        target_date = "2025-06-30"
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -218,7 +218,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [300, 1000, 250]
         })
 
-        target_date = "20250630"  # Valid date
+        target_date = "2025-06-30"  # Valid date
 
         # Mock the _calculate_single_ttm_metric to simulate invalid quarter
         with patch.object(calculator, '_calculate_single_ttm_metric') as mock_calc:
@@ -269,7 +269,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [400, 500, 600, 700, 750, 350]
         })
 
-        target_date = "20250914"
+        target_date = "2025-09-14"
         ts_codes = ['000001.SZ']
 
         # Test quarterly data filtering
@@ -311,7 +311,7 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [1000, 800]
         })
 
-        target_date = "20241231"
+        target_date = "2024-12-31"
         ts_codes = ['000001.SZ']
 
         # Test annual data filtering
@@ -360,14 +360,14 @@ class TestTTMCalculation(TestTTMCalculator):
 
                     # Call the method
                     result = calculator.process_single_stock_from_batch(
-                        '000001.SZ', '20250901', '20250915'
+                        '000001.SZ', '2025-09-01', '2025-09-15'
                     )
 
                     # Should have processed all dates
                     assert len(result) == 3, f"Expected 3 updates, got {len(result)}"
 
                     # Verify logger was called for reusing calculations
-                    mock_logger.debug.assert_any_call("Reusing previous calculation for 000001.SZ on 20250911")
+                    mock_logger.debug.assert_any_call("Reusing previous calculation for 000001.SZ on 2025-09-11")
 
     def test_process_single_stock_invalid_date_handling(self, calculator):
         """process_single_stock - 异常日期处理
@@ -394,9 +394,9 @@ class TestTTMCalculation(TestTTMCalculator):
                 # Mock to_datetime to raise exception for one date
                 with patch('pandas.to_datetime') as mock_to_datetime:
                     def side_effect(target_date, format=None):
-                        if target_date == '20250911':  # Simulate invalid date
+                        if target_date == '2025-09-11':  # Simulate invalid date
                             raise ValueError("Invalid date format")
-                        return datetime.strptime(target_date, '%Y%m%d')
+                        return datetime.strptime(target_date, '%Y-%m-%d')
 
                     mock_to_datetime.side_effect = side_effect
 
@@ -409,7 +409,7 @@ class TestTTMCalculation(TestTTMCalculator):
 
                         # Call the method - should not crash
                         result = calculator.process_single_stock_from_batch(
-                            '000001.SZ', '20250901', '20250915'
+                            '000001.SZ', '2025-09-01', '2025-09-15'
                         )
 
                         # Should have processed valid dates, skipped invalid ones
@@ -433,7 +433,7 @@ class TestTTMCalculation(TestTTMCalculator):
 
         with patch('pandas.read_sql', return_value=expected_df) as mock_read_sql:
             result = calculator.get_financial_data_for_single_stock(
-                '000001.SZ', '20250101', '20251231'
+                '000001.SZ', '2025-01-01', '2025-12-31'
             )
 
             # Verify the query was called
@@ -464,7 +464,7 @@ class TestTTMCalculation(TestTTMCalculator):
                 'revenue': revenues
             })
 
-            result = calculator.calculate_ttm_metrics(df, report_date.replace('-', ''))
+            result = calculator.calculate_ttm_metrics(df, report_date)
 
             # For Q4, the calculation is special: current + prev_annual - prev_annual = current
             if quarter == 4:
@@ -705,7 +705,7 @@ class TestIntegration(TestTTMCalculator):
             'operating_profit_margin': [0.15, 0.18, 0.12]
         })
 
-        target_date = "20250630"  # Q2 2025
+        target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
@@ -718,6 +718,77 @@ class TestIntegration(TestTTMCalculator):
 
         # operating_margin: 0.15 + 0.18 - 0.12 = 0.21
         assert result['operating_margin_ttm'] == pytest.approx(0.21, abs=1e-10)
+
+
+class TestDateFormatHandling(TestTTMCalculator):
+    """Test YYYY-MM-DD date format handling"""
+
+    def test_yyyy_mm_dd_date_format_parsing(self, calculator):
+        """Test that YYYY-MM-DD date format is correctly parsed"""
+        test_dates = ['2024-01-01', '2024-06-30', '2024-12-31']
+
+        for date_str in test_dates:
+            dt = pd.to_datetime(date_str, format='%Y-%m-%d')
+            formatted = dt.strftime('%Y-%m-%d')
+            assert formatted == date_str, f"Date formatting should be consistent: {formatted} != {date_str}"
+
+    def test_date_range_generation_with_yyyy_mm_dd(self, calculator):
+        """Test date range generation with YYYY-MM-DD format"""
+        start_date = '2024-01-01'
+        end_date = '2024-01-05'
+
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        formatted_dates = [d.strftime('%Y-%m-%d') for d in date_range]
+        expected_dates = ['2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05']
+
+        assert formatted_dates == expected_dates, "Date range generation should work correctly with YYYY-MM-DD format"
+
+    def test_sql_date_function_formatting(self, calculator):
+        """Test SQL DATE function formatting"""
+        start_date = '2024-01-01'
+        end_date = '2024-12-31'
+
+        sql_query = f"WHERE ann_date >= DATE('{start_date}') AND ann_date <= DATE('{end_date}')"
+        assert 'DATE(' in sql_query, "SQL query should use DATE() function"
+        assert start_date in sql_query, "Start date should be in SQL query"
+        assert end_date in sql_query, "End date should be in SQL query"
+
+    def test_ttm_calculation_with_yyyy_mm_dd_target_date(self, calculator):
+        """Test TTM calculation with YYYY-MM-DD target date format"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 3,
+            'report_period': ['2025-06-30', '2024-12-31', '2024-06-30'],
+            'report_year': [2025, 2024, 2024],
+            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 6, 30)],
+            'revenue': [300, 1000, 250]
+        })
+
+        target_date = "2025-06-30"  # Q2 2025 in YYYY-MM-DD format
+
+        result = calculator.calculate_ttm_metrics(df, target_date)
+
+        # Should calculate TTM: 300 + 1000 - 250 = 1050
+        assert result['revenue_ttm'] == 1050.0, f"Expected 1050, got {result['revenue_ttm']}"
+
+    def test_quarterly_data_filtering_with_yyyy_mm_dd(self, calculator):
+        """Test quarterly data filtering with YYYY-MM-DD target date"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 4,
+            'report_period': ['2025-03-31', '2024-12-31', '2024-09-30', '2024-06-30'],
+            'report_year': [2025, 2024, 2024, 2024],
+            'ann_date': [datetime(2025, 3, 31), datetime(2024, 12, 31),
+                        datetime(2024, 9, 30), datetime(2024, 6, 30)],
+            'revenue': [200, 1000, 800, 600]
+        })
+
+        target_date = "2025-06-30"  # Should include data from 2024-06-30 to 2025-06-30
+        ts_codes = ['000001.SZ']
+
+        filtered_df = calculator.get_quarterly_data_for_ttm(df, ts_codes, target_date)
+
+        # Should include records within 12 months of target date
+        assert len(filtered_df) >= 3, f"Expected at least 3 records, got {len(filtered_df)}"
+        assert filtered_df['ann_date'].min() >= datetime(2024, 6, 30), "Should start from 12 months ago"
 
 
 if __name__ == "__main__":

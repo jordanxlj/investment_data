@@ -526,7 +526,7 @@ class TTMCalculator:
             return self._get_empty_ttm_metrics()
 
         # Parse target date
-        target_dt = pd.to_datetime(target_date, format='%Y%m%d')
+        target_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
         current_year = target_dt.year
         current_month = target_dt.month
 
