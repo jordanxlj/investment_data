@@ -229,11 +229,13 @@ WHERE trade_date >= @start_date
   AND trade_date > @max_tradedate
 ORDER BY trade_date;
 
+DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_to_process;
+
 /* Process each date individually using a stored procedure */
 -- Change delimiter to handle multi-statement procedure
 DELIMITER //
 
--- Create a stored procedure to encapsulate the loop
+-- Create a stored procedure to encapsulate the loop with optimized join
 DROP PROCEDURE IF EXISTS process_fundamentals_batch;
 CREATE PROCEDURE process_fundamentals_batch()
 BEGIN
@@ -246,6 +248,42 @@ BEGIN
     ORDER BY trade_date;
   DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
+  -- Create temporary table with pre-joined data for better performance
+  DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_joined;
+  CREATE TEMPORARY TABLE temp_fundamentals_joined AS
+  SELECT
+    ts_raw.trade_date AS tradedate,
+    ts_link_table.w_symbol AS symbol,
+    ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
+    ts_raw.volume_ratio AS volume_ratio,
+    -- Use pe_ttm if available and valid, otherwise use pe
+    CASE
+      WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
+      ELSE ts_raw.pe
+    END AS pe_final,
+    ts_raw.pe_ttm AS pe_ttm,
+    ts_raw.pb AS pb,
+    -- Use ps_ttm if available and valid, otherwise use ps
+    CASE
+      WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
+      ELSE ts_raw.ps
+    END AS ps_final,
+    ts_raw.ps_ttm AS ps_ttm,
+    -- Use dv_ttm if available and valid, otherwise use dv_ratio
+    CASE
+      WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
+      ELSE ts_raw.dv_ratio / 100.0
+    END AS dv_ratio_final,
+    ts_raw.dv_ttm / 100.0 AS dv_ttm,
+    ts_raw.circ_mv * 10000.0 AS circ_mv
+  FROM ts_a_stock_fundamental ts_raw
+  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+  WHERE ts_raw.trade_date >= @start_date
+    AND ts_raw.trade_date > @max_tradedate;
+
+  -- Create index on the temporary table for better performance
+  CREATE INDEX idx_temp_fundamentals_date ON temp_fundamentals_joined (tradedate);
+
   -- Open the cursor
   OPEN date_cursor;
 
@@ -257,38 +295,10 @@ BEGIN
 
     SELECT CONCAT('Update Fundamental, Processing date: ', v_current_date) as processing_info;
 
-    /* Update records for this specific date */
+    /* Update records for this specific date using pre-joined temp table */
     UPDATE final_a_stock_comb_info final
-    INNER JOIN (
-      SELECT
-        ts_raw.trade_date AS tradedate,
-        ts_link_table.w_symbol AS symbol,
-        ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
-        ts_raw.volume_ratio AS volume_ratio,
-        -- Use pe_ttm if available and valid, otherwise use pe
-        CASE
-          WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
-          ELSE ts_raw.pe
-        END AS pe_final,
-        ts_raw.pe_ttm AS pe_ttm,
-        ts_raw.pb AS pb,
-        -- Use ps_ttm if available and valid, otherwise use ps
-        CASE
-          WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
-          ELSE ts_raw.ps
-        END AS ps_final,
-        ts_raw.ps_ttm AS ps_ttm,
-        -- Use dv_ttm if available and valid, otherwise use dv_ratio
-        CASE
-          WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
-          ELSE ts_raw.dv_ratio / 100.0
-        END AS dv_ratio_final,
-        ts_raw.dv_ttm / 100.0 AS dv_ttm,
-        ts_raw.circ_mv * 10000.0 AS circ_mv
-      FROM ts_a_stock_fundamental ts_raw
-      LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-      WHERE ts_raw.trade_date = v_current_date
-    ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
+    INNER JOIN temp_fundamentals_joined updates ON final.tradedate = updates.tradedate
+                                                 AND final.symbol = updates.symbol
     SET
       final.turnover_rate = updates.turnover_rate,
       final.volume_ratio = updates.volume_ratio,
@@ -296,7 +306,8 @@ BEGIN
       final.pb = updates.pb,
       final.ps = updates.ps_final,  -- Use TTM value when available
       final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
-      final.circ_mv = updates.circ_mv;
+      final.circ_mv = updates.circ_mv
+    WHERE updates.tradedate = v_current_date;
 
     /* Remove processed date from temp table */
     DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
@@ -312,6 +323,9 @@ BEGIN
   END LOOP read_loop;
 
   CLOSE date_cursor;
+
+  -- Clean up the temporary table
+  DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_joined;
 END //
 
 -- Reset delimiter
