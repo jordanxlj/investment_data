@@ -237,25 +237,25 @@ DELIMITER //
 DROP PROCEDURE IF EXISTS process_fundamentals_batch;
 CREATE PROCEDURE process_fundamentals_batch()
 BEGIN
-  DECLARE current_date DATE;
+  DECLARE v_current_date DATE;
   DECLARE processed_count INT DEFAULT 0;
-
-  -- Assume temp_dates_to_process is already created and populated elsewhere
-  -- (e.g., with dates from @start_date to current)
-
-  date_loop: LOOP
-    /* Get next date to process */
-    SELECT trade_date INTO current_date
+  DECLARE done INT DEFAULT FALSE;
+  DECLARE date_cursor CURSOR FOR
+    SELECT trade_date
     FROM temp_dates_to_process
-    ORDER BY trade_date
-    LIMIT 1;
+    ORDER BY trade_date;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
-    /* Exit if no more dates to process */
-    IF current_date IS NULL THEN
-      LEAVE date_loop;
+  -- Open the cursor
+  OPEN date_cursor;
+
+  read_loop: LOOP
+    FETCH date_cursor INTO v_current_date;
+    IF done THEN
+      LEAVE read_loop;
     END IF;
 
-    SELECT CONCAT('Processing date: ', current_date) as processing_info;
+    SELECT CONCAT('Update Fundamental, Processing date: ', v_current_date) as processing_info;
 
     /* Update records for this specific date */
     UPDATE final_a_stock_comb_info final
@@ -287,7 +287,7 @@ BEGIN
         ts_raw.circ_mv * 10000.0 AS circ_mv
       FROM ts_a_stock_fundamental ts_raw
       LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-      WHERE ts_raw.trade_date = current_date
+      WHERE ts_raw.trade_date = v_current_date
     ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
     SET
       final.turnover_rate = updates.turnover_rate,
@@ -299,7 +299,7 @@ BEGIN
       final.circ_mv = updates.circ_mv;
 
     /* Remove processed date from temp table */
-    DELETE FROM temp_dates_to_process WHERE trade_date = current_date;
+    DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
 
     /* Increment counter */
     SET processed_count = processed_count + 1;
@@ -309,7 +309,9 @@ BEGIN
       DO SLEEP(0.1);
     END IF;
 
-  END LOOP date_loop;
+  END LOOP read_loop;
+
+  CLOSE date_cursor;
 END //
 
 -- Reset delimiter
@@ -320,7 +322,6 @@ CALL process_fundamentals_batch();
 
 -- Clean up the procedure after use
 DROP PROCEDURE IF EXISTS process_fundamentals_batch;
-
 /* Clean up temporary table */
 DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 
