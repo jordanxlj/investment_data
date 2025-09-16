@@ -1,8 +1,51 @@
-/* Module 12: Update Consensus Report Data */
+/* Module 12: Update Consensus Report Data (Day by Day) */
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date = '2025-09-01';
+SET @debug = 0;
 
-SELECT "Update final_a_stock_comb_info with consensus report data - use min_price as target_price" as info;
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
+SELECT "Update final_a_stock_comb_info with consensus report data - use min_price as target_price (day by day)" as info;
+
+/* Debug: Check source data availability */
+SELECT MAX(eval_date) AS max_source_date, COUNT(*) AS source_rows
+FROM ts_a_stock_consensus_report
+WHERE eval_date > @max_tradedate
+  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
+  AND total_reports > 0;
+
+/* Create a temporary table to store dates to process */
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
+CREATE TEMPORARY TABLE temp_dates_to_process AS
+SELECT DISTINCT eval_date AS trade_date
+FROM ts_a_stock_consensus_report
+WHERE eval_date >= @start_date
+  AND eval_date > @max_tradedate
+  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
+  AND total_reports > 0
+ORDER BY eval_date;
+
+/* Debug: Check if temp table has rows (reason for loop not entering) */
+SELECT COUNT(*) AS dates_to_process FROM temp_dates_to_process;
+
+/* Process each date individually using a stored procedure */
+-- Change delimiter to handle multi-statement procedure
+DELIMITER //
+
+-- Create a stored procedure to encapsulate the loop with optimized join
+DROP PROCEDURE IF EXISTS process_consensus_batch;
+CREATE PROCEDURE process_consensus_batch()
+BEGIN
+  DECLARE v_current_date DATE;
+  DECLARE processed_count INT DEFAULT 0;
+  DECLARE done INT DEFAULT FALSE;
+  DECLARE date_cursor CURSOR FOR
+    SELECT trade_date
+    FROM temp_dates_to_process
+    ORDER BY trade_date;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+  -- Create temporary table with pre-joined data for better performance
+  DROP TEMPORARY TABLE IF EXISTS temp_consensus_joined;
+  CREATE TEMPORARY TABLE temp_consensus_joined AS
   SELECT
     consensus.eval_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
@@ -13,31 +56,86 @@ INNER JOIN (
     consensus.pe AS f_pe,
     consensus.rd AS f_dv_ratio,  -- Map rd (dividend ratio) to f_dv_ratio
     consensus.roe AS f_roe,
-    consensus.min_price AS f_target_price  -- Use min_price as target_price as requested
+    consensus.min_price AS f_target_price,  -- Use min_price as target_price as requested
+    -- Pre-calculate ratios to avoid division in UPDATE
+    CASE
+      WHEN consensus.total_reports > 0 THEN consensus.sentiment_pos / consensus.total_reports
+      ELSE 0
+    END AS f_pos_ratio,
+    CASE
+      WHEN consensus.total_reports > 0 THEN consensus.sentiment_neg / consensus.total_reports
+      ELSE 0
+    END AS f_neg_ratio
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
   WHERE consensus.eval_date >= @start_date
     AND consensus.eval_date > @max_tradedate
-    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR YEAR(consensus.eval_date) >= 2025)  -- Match current year data using DATE functions
-    AND consensus.total_reports > 0  -- Only include records with actual reports
-) AS consensus_updates ON final.tradedate = consensus_updates.tradedate AND final.symbol = consensus_updates.symbol
-SET
-  final.f_pos_ratio = CASE
-    WHEN consensus_updates.total_reports > 0 THEN consensus_updates.sentiment_pos / consensus_updates.total_reports
-    ELSE 0
-  END,
-  final.f_neg_ratio = CASE
-    WHEN consensus_updates.total_reports > 0 THEN consensus_updates.sentiment_neg / consensus_updates.total_reports
-    ELSE 0
-  END,
-  final.f_eps = consensus_updates.f_eps,
-  final.f_pe = consensus_updates.f_pe,
-  final.f_dv_ratio = consensus_updates.f_dv_ratio,
-  final.f_roe = consensus_updates.f_roe,
-  final.f_target_price = consensus_updates.f_target_price;
+    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR YEAR(consensus.eval_date) >= 2025)
+    AND consensus.total_reports > 0;
 
-/* Debug: Count updated rows */
-SELECT ROW_COUNT() AS updated_count;
-IF @debug = 1 THEN
-    SELECT AVG(f_target_price) AS sample_avg FROM final_a_stock_comb_info WHERE f_target_price IS NOT NULL LIMIT 1;
-END IF;
+  -- Create index on the temporary table for better performance
+  CREATE INDEX idx_temp_consensus_date ON temp_consensus_joined (tradedate);
+
+  /* Debug: Check joined temp table rows */
+  SELECT COUNT(*) AS joined_rows FROM temp_consensus_joined;
+
+  -- Open the cursor
+  OPEN date_cursor;
+
+  read_loop: LOOP
+    FETCH date_cursor INTO v_current_date;
+    IF done THEN
+      LEAVE read_loop;
+    END IF;
+
+    SELECT CONCAT('Update Consensus, Processing date: ', v_current_date) as processing_info;
+
+    /* Update records for this specific date using pre-joined temp table */
+    UPDATE final_a_stock_comb_info final
+    INNER JOIN temp_consensus_joined updates ON final.tradedate = updates.tradedate
+                                           AND final.symbol = updates.symbol
+    SET
+      final.f_pos_ratio = updates.f_pos_ratio,
+      final.f_neg_ratio = updates.f_neg_ratio,
+      final.f_eps = updates.f_eps,
+      final.f_pe = updates.f_pe,
+      final.f_dv_ratio = updates.f_dv_ratio,
+      final.f_roe = updates.f_roe,
+      final.f_target_price = updates.f_target_price
+    WHERE updates.tradedate = v_current_date;
+
+    /* Debug: Rows updated for this date */
+    SELECT ROW_COUNT() AS updated_for_date;
+
+    /* Remove processed date from temp table */
+    DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
+
+    /* Increment counter */
+    SET processed_count = processed_count + 1;
+
+    /* Add a small delay every 10 dates to prevent overwhelming the server */
+    IF processed_count % 10 = 0 THEN
+      DO SLEEP(0.1);
+    END IF;
+
+  END LOOP read_loop;
+
+  CLOSE date_cursor;
+
+  -- Clean up the temporary table
+  DROP TEMPORARY TABLE IF EXISTS temp_consensus_joined;
+END //
+
+-- Reset delimiter
+DELIMITER ;
+
+-- Call the procedure to execute
+CALL process_consensus_batch();
+
+/* Debug: Total processed after call */
+SELECT 'Debug: Procedure completed' AS status;
+
+-- Clean up the procedure after use
+DROP PROCEDURE IF EXISTS process_consensus_batch;
+/* Clean up temporary table */
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;

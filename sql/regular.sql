@@ -204,287 +204,144 @@ LEFT JOIN final_a_stock_comb_info existing ON existing.symbol = ts_link_table.w_
   AND existing.tradedate = ts_raw_table.tradedate
 WHERE existing.symbol IS NULL;  -- Double-check to prevent duplicates
 
-/* First, identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info */
-SELECT "Identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info" as info;
-SELECT
-  CONCAT('Missing fundamental record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
-FROM ts_a_stock_fundamental ts_raw
-LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @start_date
-  AND ts_raw.trade_date > @max_tradedate
-  AND @debug = 1  /* Only show debug info when debug is enabled */
-AND final.tradedate IS NULL;
+/* ============================================================================
+   INTEGRATED UPDATE PROCESS - Call all individual module procedures
+   ============================================================================ */
 
-/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental */
-/* Updated logic: Use TTM values for pe, ps, dv_ratio when available and valid - Process day by day for better performance */
-SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental (day by day)" as info;
+SELECT "Starting integrated update process - calling all module procedures" as info;
 
-/* Create a temporary table to store dates to process */
-DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
-CREATE TEMPORARY TABLE temp_dates_to_process AS
+/* Module 1-4: Price data updates (handled above) */
+
+/* Module 5: Fundamental data update */
+SELECT "Module 5: Calling fundamental data update procedure" as module_info;
+-- Include fundamental.sql logic here
+SET @max_tradedate_fund = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date_fund = '2025-09-01';
+SET @debug_fund = 0;
+
+-- Debug: Check source data availability for fundamentals
+SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_fundamental WHERE trade_date > @max_tradedate_fund;
+
+-- Create temp table for fundamental dates
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_fund;
+CREATE TEMPORARY TABLE temp_dates_to_process_fund AS
 SELECT DISTINCT trade_date
 FROM ts_a_stock_fundamental
-WHERE trade_date >= @start_date
-  AND trade_date > @max_tradedate
+WHERE trade_date >= @start_date_fund
+  AND trade_date > @max_tradedate_fund
 ORDER BY trade_date;
 
-DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_to_process;
+-- Call fundamental procedure (defined in fundamental.sql)
+SOURCE sql/fundamental.sql;
 
-/* Process each date individually using a stored procedure */
--- Change delimiter to handle multi-statement procedure
-DELIMITER //
+-- Clean up
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_fund;
 
--- Create a stored procedure to encapsulate the loop with optimized join
-DROP PROCEDURE IF EXISTS process_fundamentals_batch;
-CREATE PROCEDURE process_fundamentals_batch()
-BEGIN
-  DECLARE v_current_date DATE;
-  DECLARE processed_count INT DEFAULT 0;
-  DECLARE done INT DEFAULT FALSE;
-  DECLARE date_cursor CURSOR FOR
-    SELECT trade_date
-    FROM temp_dates_to_process
-    ORDER BY trade_date;
-  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+/* Module 6: Moneyflow data update */
+SELECT "Module 6: Calling moneyflow data update procedure" as module_info;
+-- Include moneyflow.sql logic here
+SET @max_tradedate_mf = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date_mf = '2025-09-01';
+SET @debug_mf = 0;
 
-  -- Create temporary table with pre-joined data for better performance
-  DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_joined;
-  CREATE TEMPORARY TABLE temp_fundamentals_joined AS
-  SELECT
-    ts_raw.trade_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
-    ts_raw.volume_ratio AS volume_ratio,
-    -- Use pe_ttm if available and valid, otherwise use pe
-    CASE
-      WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
-      ELSE ts_raw.pe
-    END AS pe_final,
-    ts_raw.pe_ttm AS pe_ttm,
-    ts_raw.pb AS pb,
-    -- Use ps_ttm if available and valid, otherwise use ps
-    CASE
-      WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
-      ELSE ts_raw.ps
-    END AS ps_final,
-    ts_raw.ps_ttm AS ps_ttm,
-    -- Use dv_ttm if available and valid, otherwise use dv_ratio
-    CASE
-      WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
-      ELSE ts_raw.dv_ratio / 100.0
-    END AS dv_ratio_final,
-    ts_raw.dv_ttm / 100.0 AS dv_ttm,
-    ts_raw.circ_mv * 10000.0 AS circ_mv
-  FROM ts_a_stock_fundamental ts_raw
-  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
-    AND ts_raw.trade_date > @max_tradedate;
+-- Debug: Check source data availability for moneyflow
+SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_moneyflow WHERE trade_date > @max_tradedate_mf;
 
-  -- Create index on the temporary table for better performance
-  CREATE INDEX idx_temp_fundamentals_date ON temp_fundamentals_joined (tradedate);
+-- Create temp table for moneyflow dates
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_mf;
+CREATE TEMPORARY TABLE temp_dates_to_process_mf AS
+SELECT DISTINCT trade_date
+FROM ts_a_stock_moneyflow
+WHERE trade_date >= @start_date_mf
+  AND trade_date > @max_tradedate_mf
+ORDER BY trade_date;
 
-  -- Open the cursor
-  OPEN date_cursor;
+-- Call moneyflow procedure (defined in moneyflow.sql)
+SOURCE sql/moneyflow.sql;
 
-  read_loop: LOOP
-    FETCH date_cursor INTO v_current_date;
-    IF done THEN
-      LEAVE read_loop;
-    END IF;
+-- Clean up
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_mf;
 
-    SELECT CONCAT('Update Fundamental, Processing date: ', v_current_date) as processing_info;
+/* Module 7: Cost data update */
+SELECT "Module 7: Calling cost data update procedure" as module_info;
+-- Include cost.sql logic here
+SET @max_tradedate_cost = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date_cost = '2025-09-01';
+SET @debug_cost = 0;
 
-    /* Update records for this specific date using pre-joined temp table */
-    UPDATE final_a_stock_comb_info final
-    INNER JOIN temp_fundamentals_joined updates ON final.tradedate = updates.tradedate
-                                                 AND final.symbol = updates.symbol
-    SET
-      final.turnover_rate = updates.turnover_rate,
-      final.volume_ratio = updates.volume_ratio,
-      final.pe = updates.pe_final,  -- Use TTM value when available
-      final.pb = updates.pb,
-      final.ps = updates.ps_final,  -- Use TTM value when available
-      final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
-      final.circ_mv = updates.circ_mv
-    WHERE updates.tradedate = v_current_date;
+-- Debug: Check source data availability for cost
+SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_cost_pct WHERE trade_date > @max_tradedate_cost;
 
-    /* Remove processed date from temp table */
-    DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
+-- Create temp table for cost dates
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_cost;
+CREATE TEMPORARY TABLE temp_dates_to_process_cost AS
+SELECT DISTINCT trade_date
+FROM ts_a_stock_cost_pct
+WHERE trade_date >= @start_date_cost
+  AND trade_date > @max_tradedate_cost
+ORDER BY trade_date;
 
-    /* Increment counter */
-    SET processed_count = processed_count + 1;
+-- Call cost procedure (defined in cost.sql)
+SOURCE sql/cost.sql;
 
-    /* Add a small delay every 10 dates to prevent overwhelming the server */
-    IF processed_count % 10 = 0 THEN
-      DO SLEEP(0.1);
-    END IF;
+-- Clean up
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_cost;
 
-  END LOOP read_loop;
+/* Module 8: Suspend info update */
+SELECT "Module 8: Calling suspend info update procedure" as module_info;
+-- Include suspend.sql logic here
+SET @max_tradedate_suspend = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date_suspend = '2025-09-01';
+SET @debug_suspend = 0;
 
-  CLOSE date_cursor;
+-- Debug: Check source data availability for suspend
+SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_suspend_info WHERE trade_date > @max_tradedate_suspend;
 
-  -- Clean up the temporary table
-  DROP TEMPORARY TABLE IF EXISTS temp_fundamentals_joined;
-END //
+-- Create temp table for suspend dates
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_suspend;
+CREATE TEMPORARY TABLE temp_dates_to_process_suspend AS
+SELECT DISTINCT trade_date
+FROM ts_a_stock_suspend_info
+WHERE trade_date >= @start_date_suspend
+  AND trade_date > @max_tradedate_suspend
+ORDER BY trade_date;
 
--- Reset delimiter
-DELIMITER ;
+-- Call suspend procedure (defined in suspend.sql)
+SOURCE sql/suspend.sql;
 
--- Call the procedure to execute
-CALL process_fundamentals_batch();
+-- Clean up
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_suspend;
 
--- Clean up the procedure after use
-DROP PROCEDURE IF EXISTS process_fundamentals_batch;
-/* Clean up temporary table */
-DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
+/* Module 9: Brokerage report data update */
+SELECT "Module 9: Calling brokerage report data update procedure" as module_info;
+-- Include brokerage_report.sql logic here
+SET @max_tradedate_br = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @start_date_br = '2025-09-01';
+SET @debug_br = 0;
 
-/* Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info */
-SELECT "Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info" as info;
-SELECT 
-  CONCAT('Missing moneyflow record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
-FROM ts_a_stock_moneyflow ts_raw
-LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @start_date
-  AND ts_raw.trade_date > @max_tradedate
-  AND @debug = 1  /* Only show debug info when debug is enabled */
-AND final.tradedate IS NULL;
+-- Debug: Check source data availability for brokerage reports
+SELECT MAX(eval_date) AS max_source_date, COUNT(*) AS source_rows
+FROM ts_a_stock_consensus_report
+WHERE eval_date > @max_tradedate_br
+  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
+  AND total_reports > 0;
 
-/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_moneyflow */
-SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_moneyflow" as info;
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
-  SELECT
-    ts_raw.trade_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    CASE
-      WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ((ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) - (ts_raw.sell_lg_amount + ts_raw.sell_elg_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
-      ELSE 0
-    END AS main_inflow_ratio,
-    CASE
-      WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ((ts_raw.buy_sm_amount + ts_raw.buy_md_amount) - (ts_raw.sell_sm_amount + ts_raw.sell_md_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
-      ELSE 0
-    END AS small_inflow_ratio,
-    CASE
-      WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ts_raw.net_mf_amount / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
-      ELSE 0
-    END AS net_inflow_ratio
-  FROM ts_a_stock_moneyflow ts_raw
-  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
-    AND ts_raw.trade_date > @max_tradedate
-) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
-SET
-  final.main_inflow_ratio = updates.main_inflow_ratio,
-  final.small_inflow_ratio = updates.small_inflow_ratio,
-  final.net_inflow_ratio = updates.net_inflow_ratio;
+-- Create temp table for brokerage report dates
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_br;
+CREATE TEMPORARY TABLE temp_dates_to_process_br AS
+SELECT DISTINCT eval_date AS trade_date
+FROM ts_a_stock_consensus_report
+WHERE eval_date >= @start_date_br
+  AND eval_date > @max_tradedate_br
+  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
+  AND total_reports > 0
+ORDER BY eval_date;
 
-/* First, identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info */
-SELECT "Identify and print records from ts_a_stock_cost_pct that do not exist in final_a_stock_comb_info" as info;
-SELECT
-  CONCAT('Missing cost record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
-FROM ts_a_stock_cost_pct ts_raw
-LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @start_date
-  AND ts_raw.trade_date > @max_tradedate
-  AND @debug = 1  /* Only show debug info when debug is enabled */
-AND final.tradedate IS NULL;
+-- Call brokerage report procedure (defined in brokerage_report.sql)
+SOURCE sql/brokerage_report.sql;
 
-/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_cost_pct */
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
-  SELECT
-    ts_raw.trade_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    ts_raw.cost_5pct AS cost_5pct,
-    ts_raw.cost_15pct AS cost_15pct,
-    ts_raw.cost_50pct AS cost_50pct,
-    ts_raw.cost_85pct AS cost_85pct,
-    ts_raw.cost_95pct AS cost_95pct,
-    ts_raw.weight_avg AS weight_avg,
-    ts_raw.winner_rate AS winner_rate
-  FROM ts_a_stock_cost_pct ts_raw
-  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
-    AND ts_raw.trade_date > @max_tradedate
-) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
-SET
-  final.cost_5pct = updates.cost_5pct,
-  final.cost_15pct = updates.cost_15pct,
-  final.cost_50pct = updates.cost_50pct,
-  final.cost_85pct = updates.cost_85pct,
-  final.cost_95pct = updates.cost_95pct,
-  final.weight_avg = updates.weight_avg,
-  final.winner_rate = updates.winner_rate;
+-- Clean up
+DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process_br;
 
-/* First, identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info */
-SELECT "Identify and print records from ts_a_stock_suspend_info that do not exist in final_a_stock_comb_info" as info;
-SELECT
-  CONCAT('Missing suspend record: tradedate=', ts_raw.trade_date, ', symbol=', ts_link_table.w_symbol) AS missing_info
-FROM ts_a_stock_suspend_info ts_raw
-LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @start_date
-  AND ts_raw.trade_date > @max_tradedate
-  AND @debug = 1  /* Only show debug info when debug is enabled */
-AND final.tradedate IS NULL;
+SELECT "Integrated update process completed successfully" as completion_info;
 
-/* Then, update existing records in final_a_stock_comb_info with data from ts_a_stock_suspend_info */
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
-  SELECT
-    ts_raw.trade_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    CASE
-      WHEN ts_raw.suspend_type = 'S' THEN TRUE
-      ELSE FALSE
-    END AS suspend
-  FROM ts_a_stock_suspend_info ts_raw
-  LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
-    AND ts_raw.trade_date > @max_tradedate
-) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
-SET
-  final.suspend = updates.suspend;
-
-/* Update final_a_stock_comb_info with consensus report data - use min_price as target_price */
-SELECT "Update final_a_stock_comb_info with consensus report data - use min_price as target_price" as info;
-UPDATE final_a_stock_comb_info final
-INNER JOIN (
-  SELECT
-    consensus.eval_date AS tradedate,
-    ts_link_table.w_symbol AS symbol,
-    consensus.total_reports,
-    consensus.sentiment_pos,
-    consensus.sentiment_neg,
-    consensus.eps AS f_eps,
-    consensus.pe AS f_pe,
-    consensus.rd AS f_dv_ratio,  -- Map rd (dividend ratio) to f_dv_ratio
-    consensus.roe AS f_roe,
-    consensus.min_price AS f_target_price  -- Use min_price as target_price as requested
-  FROM ts_a_stock_consensus_report consensus
-  LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
-  WHERE consensus.eval_date >= @start_date
-    AND consensus.eval_date > @max_tradedate
-    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR YEAR(consensus.eval_date) >= 2025)  -- Match current year data using DATE functions
-    AND consensus.total_reports > 0  -- Only include records with actual reports
-) AS consensus_updates ON final.tradedate = consensus_updates.tradedate AND final.symbol = consensus_updates.symbol
-SET
-  final.f_pos_ratio = CASE
-    WHEN consensus_updates.total_reports > 0 THEN consensus_updates.sentiment_pos / consensus_updates.total_reports
-    ELSE 0
-  END,
-  final.f_neg_ratio = CASE
-    WHEN consensus_updates.total_reports > 0 THEN consensus_updates.sentiment_neg / consensus_updates.total_reports
-    ELSE 0
-  END,
-  final.f_eps = consensus_updates.f_eps,
-  final.f_pe = consensus_updates.f_pe,
-  final.f_dv_ratio = consensus_updates.f_dv_ratio,
-  final.f_roe = consensus_updates.f_roe,
-  final.f_target_price = consensus_updates.f_target_price;
