@@ -56,16 +56,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def parse_date_flexible(date_str: str, target_format: str = "%Y%m%d") -> str:
+def parse_date_flexible(date_str: str, target_format: str = "%Y%m%d", return_datetime: bool = False) -> Union[str, datetime.datetime]:
     """
-    Parse date string supporting multiple formats and return in target format
+    Parse date string supporting multiple formats and return in target format or datetime object
 
     Args:
         date_str: Date string to parse
         target_format: Target format for output (default: "%Y%m%d")
+        return_datetime: If True, return datetime object instead of string
 
     Returns:
-        Date string in target format
+        Date string in target format or datetime object
 
     Raises:
         ValueError: If unable to parse date with any supported format
@@ -75,6 +76,8 @@ def parse_date_flexible(date_str: str, target_format: str = "%Y%m%d") -> str:
     for fmt in supported_formats:
         try:
             dt = datetime.datetime.strptime(date_str, fmt)
+            if return_datetime:
+                return dt
             return dt.strftime(target_format)
         except ValueError:
             continue
@@ -331,7 +334,7 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 
         # Convert eval_date from string to DATE object for efficient storage and queries
         # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
-        eval_date_obj = pd.to_datetime(eval_date, format='%Y%m%d').date()
+        eval_date_obj = pd.to_datetime(eval_date, format='%Y-%m-%d').date()
 
         result = {
             'ts_code': ts_code,
@@ -372,8 +375,8 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
     """Optimized: Process all dates for a single stock and upsert results immediately"""
     # Calculate date range for bulk query (start_date - 6 months to end_date)
     # Support both YYYY-MM-DD and YYYYMMDD formats
-    start_dt = datetime.datetime.strptime(parse_date_flexible(min(date_list), "%Y-%m-%d"), "%Y-%m-%d")
-    end_dt = datetime.datetime.strptime(parse_date_flexible(max(date_list), "%Y-%m-%d"), "%Y-%m-%d")
+    start_dt = parse_date_flexible(min(date_list), return_datetime=True)
+    end_dt = parse_date_flexible(max(date_list), return_datetime=True)
     bulk_start_dt = start_dt - datetime.timedelta(days=180)  # 6 months back
 
     bulk_start_date = bulk_start_dt.strftime("%Y%m%d")
@@ -405,14 +408,14 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
         fiscal_infos = {date: get_fiscal_period_info(date) for date in date_list}
 
         # Convert current_date to datetime for comparison
-        bulk_df['report_date_dt'] = pd.to_datetime(bulk_df['report_date'], format='%Y%m%d')
+        bulk_df['report_date_dt'] = pd.to_datetime(bulk_df['report_date'], format='%Y-%m-%d')
 
         for current_date in date_list:
             try:
                 logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
                 # Get all reports available up to current_date
-                current_date_dt = pd.to_datetime(current_date, format='%Y%m%d')
+                current_date_dt = pd.to_datetime(current_date, format='%Y-%m-%d')
                 date_df = bulk_df[bulk_df['report_date_dt'] < current_date_dt].copy()
 
                 if date_df.empty:
@@ -431,7 +434,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
 
                 # Filter by quarter if needed
                 if min_quarter != 'ALL':
-                    min_quarter_for_comparison = f"{min_quarter}Q4" if min_quarter and 'Q' not in min_quarter else min_quarter
+                    min_quarter_for_comparison = min_quarter
 
                     # Filter out invalid quarter formats before comparison
                     valid_quarter_mask = date_df['quarter'].apply(
@@ -461,7 +464,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
         if stock_results:
             try:
                 df = pd.DataFrame(stock_results)
-                df['last_updated'] = pd.to_datetime(df['last_updated'])
+                df['last_updated'] = pd.to_datetime(df['last_updated'], format='%Y-%m-%d %H:%M:%S')
                 df = df.replace({np.nan: None})
                 for col in ALL_COLUMNS:
                     if col not in df.columns:
@@ -513,7 +516,7 @@ def get_date_window(eval_date: str, window_months: int = 6) -> Tuple[str, str]:
         Tuple of (start_date, end_date) in YYYYMMDD format
     """
     try:
-        eval_dt = datetime.datetime.strptime(parse_date_flexible(eval_date, "%Y-%m-%d"), "%Y-%m-%d")
+        eval_dt = parse_date_flexible(eval_date, return_datetime=True)
     except ValueError:
         raise ValueError(f"Invalid eval_date format: {eval_date}. Supported formats: YYYY-MM-DD, YYYYMMDD")
 
@@ -552,35 +555,35 @@ def get_fiscal_period_info(eval_date: str) -> Dict[str, Any]:
     if month <= 4:
         # 1-4月：上年年报发布期，代表上一个会计年度
         current_quarter = f"{year - 1}Q4"
-        current_fiscal_year = f"{year - 1}"
+        current_fiscal_year = f"{year - 1}Q4"
         current_fiscal_period = f"{year - 1}1231"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 5:
         # 5月：Q1季报发布期，代表当前会计年度第一季度
         current_quarter = f"{year}Q1"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0331"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 8:
         # 7-8月：半年报发布期，代表当前会计年度上半年
         current_quarter = f"{year}Q2"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0630"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     elif month <= 11:
         # 10-11月：Q3季报发布期，代表当前会计年度第三季度
         current_quarter = f"{year}Q3"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year}"
         next_fiscal_period = f"{year}1231"
     else:
         # 12月：Q4季报发布期，代表当前会计年度第四季度
         current_quarter = f"{year}Q4"
-        current_fiscal_year = f"{year}"
+        current_fiscal_year = f"{year}Q4"
         current_fiscal_period = f"{year}0930"
         next_fiscal_year = f"{year + 1}"
         next_fiscal_period = f"{year + 1}1231"

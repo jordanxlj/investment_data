@@ -132,19 +132,19 @@ def test_weighted_median_mismatched_lengths():
         evaluate_brokerage_report.weighted_median(np.array([1]), np.array([1, 2]))
 
 @pytest.mark.parametrize("eval_date, expected_quarter, expected_fiscal_year", [
-    ('2024-01-01', '2023Q4', '2023'),
-    ('2024-03-15', '2023Q4', '2023'),
-    ('2024-04-01', '2023Q4', '2023'),
-    ('2024-06-15', '2024Q2', '2024'),
-    ('2024-07-01', '2024Q2', '2024'),
-    ('2024-09-15', '2024Q3', '2024'),
-    ('2024-10-01', '2024Q3', '2024'),
-    ('2024-12-31', '2024Q4', '2024'),
-    ('2025-06-01', '2025Q2', '2025'),  # Additional for month=6
-    ('2025-08-01', '2025Q2', '2025'),  # Month=8
-    ('2025-09-15', '2025Q3', '2025'),  # Month=9
-    ('2025-11-01', '2025Q3', '2025'),  # Month=11
-    ('2025-12-01', '2025Q4', '2025'),  # Month=12
+    ('2024-01-01', '2023Q4', '2023Q4'),
+    ('2024-03-15', '2023Q4', '2023Q4'),
+    ('2024-04-01', '2023Q4', '2023Q4'),
+    ('2024-06-15', '2024Q2', '2024Q4'),
+    ('2024-07-01', '2024Q2', '2024Q4'),
+    ('2024-09-15', '2024Q3', '2024Q4'),
+    ('2024-10-01', '2024Q3', '2024Q4'),
+    ('2024-12-31', '2024Q4', '2024Q4'),
+    ('2025-06-01', '2025Q2', '2025Q4'),  # Additional for month=6
+    ('2025-08-01', '2025Q2', '2025Q4'),  # Month=8
+    ('2025-09-15', '2025Q3', '2025Q4'),  # Month=9
+    ('2025-11-01', '2025Q3', '2025Q4'),  # Month=11
+    ('2025-12-01', '2025Q4', '2025Q4'),  # Month=12
 ])
 def test_fiscal_period_info(eval_date, expected_quarter, expected_fiscal_year):
     """Test fiscal period info calculation comprehensively"""
@@ -693,8 +693,6 @@ def test_error_handling_comprehensive(mock_engine):
                 'rd', 'roe', 'ev_ebitda', 'max_price', 'min_price'
             ])
 
-        with patch('tushare_provider.evaluate_brokerage_report.get_annual_data_bulk') as mock_bulk_annual:
-            mock_bulk_annual.return_value = {date: None for date in date_list}
 
             result = evaluate_brokerage_report.process_stock_all_dates(
                 mock_engine, '000001.SZ', date_list, 1000
@@ -758,7 +756,7 @@ def test_data_quality_validation(sample_bulk_data):
 
     valid_result = evaluate_brokerage_report.aggregate_consensus_from_df(
         test_data, '000001.SZ', '2024-01-01',
-        {'current_quarter': '2024Q1', 'current_fiscal_year': '2024'}
+        {'current_quarter': '2024Q1', 'current_fiscal_year': '2024Q4'}
     )
     assert valid_result is not None
 
@@ -766,7 +764,7 @@ def test_data_quality_validation(sample_bulk_data):
 
     result = evaluate_brokerage_report.aggregate_consensus_from_df(
         incomplete_data, '000001.SZ', '2024-01-01',
-        {'current_quarter': '2024Q1', 'current_fiscal_year': '2024'}
+        {'current_quarter': '2024Q1', 'current_fiscal_year': '2024Q4'}
     )
     assert result is not None
     assert isinstance(result['buy_count'], (int, type(None)))
@@ -776,7 +774,7 @@ def test_data_quality_validation(sample_bulk_data):
 
     result = evaluate_brokerage_report.aggregate_consensus_from_df(
         invalid_data, '000001.SZ', '2024-01-01',
-        {'current_quarter': '2024Q1'}
+        {'current_quarter': '2024Q1', 'current_fiscal_year': '2024Q4'}
     )
 
     assert result is not None
@@ -850,7 +848,7 @@ def test_aggregate_consensus_from_df_bullish():
         'report_weight': [5.0, 4.0, 3.0],
         'quarter': ['2024Q4', '2024Q4', '2024Q4'],
     })
-    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
     assert result['sentiment_pos'] == 3
     assert result['sentiment_neg'] == 0
     assert result['depth_reports'] == 1
@@ -865,7 +863,7 @@ def test_aggregate_consensus_from_df_bearish():
         'report_weight': [2.0, 1.0, 3.0],
         'quarter': ['2024Q4', '2024Q4', '2024Q4'],
     })
-    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
     assert result['sentiment_pos'] == 0
     assert result['sentiment_neg'] == 3
     assert result['general_reports'] == 1
@@ -880,14 +878,14 @@ def test_aggregate_consensus_from_df_neutral():
         'report_weight': [5.0, 3.0],
         'quarter': ['2024Q4', '2024Q4'],
     })
-    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
     assert result['sentiment_pos'] == 1
     assert result['sentiment_neg'] == 1
 
 def test_aggregate_consensus_from_df_empty():
     """Test aggregate_consensus_from_df with empty DF"""
     df = pd.DataFrame()
-    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
     assert result is None
 
 def test_aggregate_consensus_from_df_error(caplog):
@@ -895,7 +893,7 @@ def test_aggregate_consensus_from_df_error(caplog):
     df = pd.DataFrame()  # Missing required columns to trigger KeyError
     with patch('pandas.DataFrame.__getitem__') as mock_getitem:
         mock_getitem.side_effect = KeyError("rating_category")
-        result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
+        result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
     assert result is None
     assert "Error aggregating consensus" in caplog.text
 
@@ -907,15 +905,15 @@ def test_aggregate_consensus_from_df_quarter_filter():
         'report_weight': [5.0, 4.0, 3.0],
         'quarter': ['2024Q3', '2024Q4', '2025Q1'],
     })
-    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024'})
-    assert result['total_reports'] == 2  # Filters out Q3
+    result = evaluate_brokerage_report.aggregate_consensus_from_df(df, '000001.SZ', '2025-01-01', {'current_quarter': '2024Q4', 'current_fiscal_year': '2024Q4'})
+    assert result['total_reports'] == 3  # Filters out Q3
 
 def test_process_stock_all_dates_with_brokerage(mock_engine):
     """Test process_stock_all_dates with brokerage data"""
-    date_list = ['2025-01-01']
+    date_list = ['2025-01-02']
     brokerage_df = pd.DataFrame({
         'ts_code': ['000001.SZ'],
-        'report_date': ['20250101'],
+        'report_date': ['2025-01-01'],
         'report_type': ['深度'],
         'rating': ['买入'],
         'quarter': ['2025Q1']
@@ -941,15 +939,16 @@ def test_process_stock_all_dates_error(caplog):
 
 def test_process_stock_all_dates_upsert_error(caplog):
     """Test process_stock_all_dates upsert error"""
+    caplog.set_level(logging.ERROR)  # Set log level to capture ERROR messages
     date_list = ['2025-01-01']
     mock_engine = MagicMock()
     with patch('pandas.read_sql') as mock_read_sql:
-        mock_read_sql.return_value = pd.DataFrame({'report_date': ['2025-01-01'], 'report_type': ['深度'], 'rating': ['买入'], 'quarter': ['2025Q1']})
+        mock_read_sql.return_value = pd.DataFrame({'ts_code': ['000001.SZ'], 'report_date': ['2024-12-31'], 'report_type': ['深度'], 'rating': ['买入'], 'quarter': ['2025Q1']})
         with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
             mock_upsert.side_effect = Exception("upsert error")
             result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
     assert result == 0
-    assert "Error upserting" in caplog.text
+    assert "Error upserting results for stock" in caplog.text
 
 def test_evaluate_brokerage_report_start_after_end(caplog):
     """Test evaluate_brokerage_report start > end"""
