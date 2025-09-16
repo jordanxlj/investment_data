@@ -16,9 +16,6 @@ AND final.tradedate IS NULL;
 
 /* Debug: Check source data availability */
 SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_fundamental WHERE trade_date > @max_tradedate;
-IF @debug = 1 THEN
-    SELECT 'Debug: No new data if count=0 above' AS note;
-END IF;
 
 SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental (day by day)" as info;
 
@@ -33,9 +30,6 @@ ORDER BY trade_date;
 
 /* Debug: Check if temp table has rows (reason for loop not entering) */
 SELECT COUNT(*) AS dates_to_process FROM temp_dates_to_process;
-IF @debug = 1 AND (SELECT COUNT(*) FROM temp_dates_to_process) = 0 THEN
-    SELECT 'Debug: No dates to process - loop will skip' AS warning;
-END IF;
 
 /* Process each date individually using a stored procedure */
 -- Change delimiter to handle multi-statement procedure
@@ -91,10 +85,7 @@ BEGIN
   CREATE INDEX idx_temp_fundamentals_date ON temp_fundamentals_joined (tradedate);
 
   /* Debug: Check joined temp table rows */
-  SELECT COUNT(*) AS joined_rows INTO @joined_count FROM temp_fundamentals_joined;
-  IF @debug = 1 THEN
-    SELECT CONCAT('Debug: Joined rows = ', @joined_count) AS info;
-  END IF;
+  SELECT COUNT(*) AS joined_rows FROM temp_fundamentals_joined;
 
   -- Open the cursor
   OPEN date_cursor;
