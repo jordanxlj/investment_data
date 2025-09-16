@@ -229,69 +229,77 @@ WHERE trade_date >= @start_date
   AND trade_date > @max_tradedate
 ORDER BY trade_date;
 
-/* Process each date individually */
-SET @current_date = NULL;
-SET @done = FALSE;
+/* Process each date individually using a simple loop */
+SET @processed_count = 0;
 
-REPEAT
+/* Process dates one by one */
+date_loop: LOOP
   /* Get next date to process */
   SELECT trade_date INTO @current_date
   FROM temp_dates_to_process
-  WHERE trade_date > COALESCE(@current_date, '1900-01-01')
   ORDER BY trade_date
   LIMIT 1;
 
-  IF @current_date IS NOT NULL THEN
-    SELECT CONCAT('Processing date: ', @current_date) as processing_info;
-
-    /* Update records for this specific date */
-    UPDATE final_a_stock_comb_info final
-    INNER JOIN (
-      SELECT
-        ts_raw.trade_date AS tradedate,
-        ts_link_table.w_symbol AS symbol,
-        ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
-        ts_raw.volume_ratio AS volume_ratio,
-        -- Use pe_ttm if available and valid, otherwise use pe
-        CASE
-          WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
-          ELSE ts_raw.pe
-        END AS pe_final,
-        ts_raw.pe_ttm AS pe_ttm,
-        ts_raw.pb AS pb,
-        -- Use ps_ttm if available and valid, otherwise use ps
-        CASE
-          WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
-          ELSE ts_raw.ps
-        END AS ps_final,
-        ts_raw.ps_ttm AS ps_ttm,
-        -- Use dv_ttm if available and valid, otherwise use dv_ratio
-        CASE
-          WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
-          ELSE ts_raw.dv_ratio / 100.0
-        END AS dv_ratio_final,
-        ts_raw.dv_ttm / 100.0 AS dv_ttm,
-        ts_raw.circ_mv * 10000.0 AS circ_mv
-      FROM ts_a_stock_fundamental ts_raw
-      LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-      WHERE ts_raw.trade_date = @current_date
-    ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
-    SET
-      final.turnover_rate = updates.turnover_rate,
-      final.volume_ratio = updates.volume_ratio,
-      final.pe = updates.pe_final,  -- Use TTM value when available
-      final.pb = updates.pb,
-      final.ps = updates.ps_final,  -- Use TTM value when available
-      final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
-      final.circ_mv = updates.circ_mv;
-
-    /* Remove processed date from temp table */
-    DELETE FROM temp_dates_to_process WHERE trade_date = @current_date;
-  ELSE
-    SET @done = TRUE;
+  /* Exit if no more dates to process */
+  IF @current_date IS NULL THEN
+    LEAVE date_loop;
   END IF;
 
-UNTIL @done END REPEAT;
+  SELECT CONCAT('Processing date: ', @current_date) as processing_info;
+
+  /* Update records for this specific date */
+  UPDATE final_a_stock_comb_info final
+  INNER JOIN (
+    SELECT
+      ts_raw.trade_date AS tradedate,
+      ts_link_table.w_symbol AS symbol,
+      ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
+      ts_raw.volume_ratio AS volume_ratio,
+      -- Use pe_ttm if available and valid, otherwise use pe
+      CASE
+        WHEN ts_raw.pe_ttm IS NOT NULL THEN ts_raw.pe_ttm
+        ELSE ts_raw.pe
+      END AS pe_final,
+      ts_raw.pe_ttm AS pe_ttm,
+      ts_raw.pb AS pb,
+      -- Use ps_ttm if available and valid, otherwise use ps
+      CASE
+        WHEN ts_raw.ps_ttm IS NOT NULL THEN ts_raw.ps_ttm
+        ELSE ts_raw.ps
+      END AS ps_final,
+      ts_raw.ps_ttm AS ps_ttm,
+      -- Use dv_ttm if available and valid, otherwise use dv_ratio
+      CASE
+        WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
+        ELSE ts_raw.dv_ratio / 100.0
+      END AS dv_ratio_final,
+      ts_raw.dv_ttm / 100.0 AS dv_ttm,
+      ts_raw.circ_mv * 10000.0 AS circ_mv
+    FROM ts_a_stock_fundamental ts_raw
+    LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
+    WHERE ts_raw.trade_date = @current_date
+  ) AS updates ON final.tradedate = updates.tradedate AND final.symbol = updates.symbol
+  SET
+    final.turnover_rate = updates.turnover_rate,
+    final.volume_ratio = updates.volume_ratio,
+    final.pe = updates.pe_final,  -- Use TTM value when available
+    final.pb = updates.pb,
+    final.ps = updates.ps_final,  -- Use TTM value when available
+    final.dv_ratio = updates.dv_ratio_final,  -- Use TTM value when available
+    final.circ_mv = updates.circ_mv;
+
+  /* Remove processed date from temp table */
+  DELETE FROM temp_dates_to_process WHERE trade_date = @current_date;
+
+  /* Increment counter */
+  SET @processed_count = @processed_count + 1;
+
+  /* Add a small delay every 10 dates to prevent overwhelming the server */
+  IF @processed_count % 10 = 0 THEN
+    DO SLEEP(0.1);
+  END IF;
+
+END LOOP date_loop;
 
 /* Clean up temporary table */
 DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
