@@ -220,9 +220,9 @@ class TTMCalculator:
               AND is_open = 1
             ORDER BY date
             """
-            logger.debug(f"Executing trading calendar query:")
-            logger.debug(f"Query parameters: start_date={start_date}, end_date={end_date}")
-            logger.debug(f"SQL Query:\n{query}")
+            logger.debug("Executing trading calendar query:")
+            logger.debug("Query parameters: start_date=%s, end_date=%s", start_date, end_date)
+            logger.debug("SQL Query:\n%s", query)
             dates_df = pd.read_sql(query, self.engine)
             date_list = dates_df['date'].tolist()
 
@@ -262,7 +262,7 @@ class TTMCalculator:
                 else:
                     stocks_list = []
 
-                logger.debug(f"Using provided stocks list: {stocks_list}")
+                logger.debug("Using provided stocks list: %s", stocks_list)
                 logger.info(f"Using provided stocks list: {len(stocks_list)} stocks")
             else:
                 # Get all stocks from ts_link_table
@@ -272,8 +272,8 @@ class TTMCalculator:
                 WHERE w_symbol IS NOT NULL
                 ORDER BY w_symbol
                 """
-                logger.debug(f"Executing stocks list query:")
-                logger.debug(f"SQL Query:\n{query}")
+                logger.debug("Executing stocks list query:")
+                logger.debug("SQL Query:\n%s", query)
                 stocks_df = pd.read_sql(query, self.engine)
                 stocks_list = stocks_df['symbol'].tolist()
                 logger.info(f"Retrieved {len(stocks_list)} stocks from database")
@@ -428,7 +428,7 @@ class TTMCalculator:
                         # If it's a dict, add all values
                         required_fields.update(source_fields.values())
                     else:
-                        logger.warning(f"Invalid source_fields format for {metric_config}: {source_fields}")
+                        logger.warning("Invalid source_fields format for %s: %s", str(metric_config), str(source_fields))
 
             # Add TTM fields
             ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
@@ -463,21 +463,21 @@ class TTMCalculator:
             ORDER BY financial.ann_date DESC
             """
 
-            logger.debug(f"Executing financial data query for {ts_code}:")
-            logger.debug(f"Query parameters: ts_code={ts_code}, start_date={query_start_str}, end_date={query_end_str}")
-            logger.debug(f"SQL Query:\n{query}")
-            logger.debug(f"Selected fields ({len(required_fields)}): {', '.join(sorted(required_fields))}")
+            logger.debug("Executing financial data query for %s:", ts_code)
+            logger.debug("Query parameters: ts_code=%s, start_date=%s, end_date=%s", ts_code, query_start_str, query_end_str)
+            logger.debug("SQL Query:\n%s", query)
+            logger.debug("Selected fields (%d): %s", len(required_fields), ', '.join(sorted(required_fields)))
             df = pd.read_sql(query, self.engine)
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
                 df['report_year'] = df['report_period'].str[:4].astype(int)
                 df['report_quarter'] = df['report_period'].str[-5:-3]
 
-            logger.debug(f"Retrieved {len(df)} financial records for {ts_code}")
+            logger.debug("Retrieved %d financial records for %s", len(df), ts_code)
             return df
 
         except Exception as e:
-            logger.error(f"Failed to get financial data for {ts_code}: {e}")
+            logger.error("Failed to get financial data for %s: %s", ts_code, str(e))
             raise
 
     def get_target_dates(self) -> pd.DataFrame:
@@ -493,8 +493,8 @@ class TTMCalculator:
         """
 
         try:
-            logger.debug(f"Executing target dates query:")
-            logger.debug(f"SQL Query:\n{query}")
+            logger.debug("Executing target dates query:")
+            logger.debug("SQL Query:\n%s", query)
             df = pd.read_sql(query, self.engine)
             logger.info(f"Found {len(df)} target dates for update")
             return df
@@ -530,7 +530,7 @@ class TTMCalculator:
             (stock_df['report_period'].isin([f"{year}-12-31" for year in years_to_include]))
         ].copy()
 
-        logger.debug(f"Filtered {len(filtered_df)} annual records for CAGR calculation (years: {', '.join(years_to_include)})")
+        logger.debug("Filtered %d annual records for CAGR calculation (years: %s)", len(filtered_df), ', '.join(years_to_include))
         return filtered_df
 
     def get_quarterly_data_for_ttm(self, stock_df: pd.DataFrame, ts_codes: List[str], target_date: str) -> pd.DataFrame:
@@ -722,7 +722,7 @@ class TTMCalculator:
                 fields = list(source_fields)
 
             if len(fields) < 2:
-                logger.warning(f"Need at least 2 fields for compound calculation, got {len(fields)}")
+                logger.warning("Need at least 2 fields for compound calculation, got %d", len(fields))
                 return None
 
             # Get field values
@@ -730,7 +730,7 @@ class TTMCalculator:
             for field in fields:
                 value = row.get(field)
                 if value is None or pd.isna(value):
-                    logger.debug(f"Missing value for field {field} in compound calculation")
+                    logger.debug("Missing value for field %s in compound calculation", field)
                     return None
                 values.append(float(value))
 
@@ -745,14 +745,14 @@ class TTMCalculator:
                     result *= val
             elif operation == 'divide':
                 if len(values) != 2:
-                    logger.warning(f"Divide operation requires exactly 2 values, got {len(values)}")
+                    logger.warning("Divide operation requires exactly 2 values, got %d", len(values))
                     return None
                 if values[1] == 0:
                     logger.warning("Division by zero in compound calculation")
                     return None
                 result = values[0] / values[1]
             else:
-                logger.warning(f"Unsupported operation: {operation}")
+                logger.warning("Unsupported operation: %s", operation)
                 return None
 
             return result
@@ -782,7 +782,7 @@ class TTMCalculator:
                     operation = config.get('operation', 'subtract')  # Default operation for compound fields
 
                     if not source_field and not source_fields:
-                        logger.warning(f"No source_field or source_fields defined for {output_field}")
+                        logger.warning("No source_field or source_fields defined for %s", output_field)
                         cagr_results[output_field] = None
                         continue
 
@@ -794,7 +794,7 @@ class TTMCalculator:
                     # Check if we have enough data points
                     required_data_points = periods + 1  # n-year CAGR needs n+1 data points
                     if len(calculation_data) < required_data_points:
-                        logger.debug(f"Insufficient data for {output_field}: need {required_data_points} points, got {len(calculation_data)}")
+                        logger.debug("Insufficient data for %s: need %d points, got %d", output_field, required_data_points, len(calculation_data))
                         cagr_results[output_field] = None
                         continue
 
@@ -808,8 +808,7 @@ class TTMCalculator:
                         start_value = self.calculate_compound_field(calculation_data.iloc[-1], source_fields, operation)
                         end_value = self.calculate_compound_field(calculation_data.iloc[0], source_fields, operation)
 
-                        logger.debug(f"Compound calculation for {output_field}: "
-                                   f"start_value={start_value}, end_value={end_value}")
+                        logger.debug("Compound calculation for %s: start_value=%s, end_value=%s", output_field, start_value, end_value)
 
                     # Validate data and calculate CAGR
                     if (start_value is not None and start_value > 0 and
@@ -819,25 +818,25 @@ class TTMCalculator:
                         cagr_value = (end_value / start_value) ** (1/periods) - 1
                         cagr_results[output_field] = cagr_value
 
-                        logger.debug(f"Calculated {output_field}: {cagr_value:.4f} "
-                                   f"(start: {start_value:.0f}, end: {end_value:.0f}, periods: {periods})")
+                        logger.debug("Calculated %s: %.4f (start: %.0f, end: %.0f, periods: %d)",
+                                   output_field, cagr_value, start_value, end_value, periods)
                     else:
                         cagr_results[output_field] = None
-                        logger.debug(f"Invalid data values for {output_field} calculation")
+                        logger.debug("Invalid data values for %s calculation", output_field)
 
                 except KeyError as e:
                     # Source field doesn't exist in the data
                     cagr_results[output_field] = None
-                    logger.debug(f"Source field not found for {output_field}: {e}")
+                    logger.debug("Source field not found for %s: %s", output_field, str(e))
                 except Exception as e:
                     # Handle calculation errors for individual metrics
                     cagr_results[output_field] = None
-                    logger.warning(f"Error calculating {output_field}: {e}")
+                    logger.warning("Error calculating %s: %s", output_field, str(e))
 
             return cagr_results
 
         except Exception as e:
-            logger.warning(f"CAGR calculation failed: {e}")
+            logger.warning("CAGR calculation failed: %s", str(e))
             # Return empty results for all configured metrics
             cagr_metrics_config = self.annual_config.get('cagr_metrics', {})
             return {metric_name: None for metric_name in cagr_metrics_config.keys()}
