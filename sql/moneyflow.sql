@@ -1,5 +1,5 @@
 /* Module 9: Update Moneyflow - Identify Missing and Update (Day by Day) */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2010l-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-01';
 SET @debug = 0;
 
@@ -57,17 +57,17 @@ BEGIN
     -- Pre-calculate ratios to avoid complex calculations in UPDATE
     CASE
       WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ((ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) - (ts_raw.sell_lg_amount + ts_raw.sell_elg_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
+      THEN ((ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) - (ts_raw.sell_lg_amount + ts_raw.sell_elg_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) * 100.0
       ELSE 0
     END AS main_inflow_ratio,
     CASE
       WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ((ts_raw.buy_sm_amount + ts_raw.buy_md_amount) - (ts_raw.sell_sm_amount + ts_raw.sell_md_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
+      THEN ((ts_raw.buy_sm_amount + ts_raw.buy_md_amount) - (ts_raw.sell_sm_amount + ts_raw.sell_md_amount)) / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) * 100.0
       ELSE 0
     END AS small_inflow_ratio,
     CASE
       WHEN (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) > 0
-      THEN ts_raw.net_mf_amount / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount)
+      THEN ts_raw.net_mf_amount / (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) * 100.0
       ELSE 0
     END AS net_inflow_ratio,
     -- Store denominator for potential future use

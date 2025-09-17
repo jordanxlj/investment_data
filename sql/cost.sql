@@ -1,5 +1,5 @@
 /* Module 10: Update Cost Pct - Identify Missing and Update (Day by Day) */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2018-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-01';
 SET @debug = 0;
 

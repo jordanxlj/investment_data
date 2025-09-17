@@ -9,7 +9,6 @@ SELECT "Update final_a_stock_comb_info with consensus report data - use min_pric
 SELECT MAX(eval_date) AS max_source_date, COUNT(*) AS source_rows
 FROM ts_a_stock_consensus_report
 WHERE eval_date > @max_tradedate
-  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
   AND total_reports > 0;
 
 /* Create a temporary table to store dates to process */
@@ -19,7 +18,6 @@ SELECT DISTINCT eval_date AS trade_date
 FROM ts_a_stock_consensus_report
 WHERE eval_date >= @start_date
   AND eval_date > @max_tradedate
-  AND (report_period LIKE '%2025%' OR report_period LIKE '2025%' OR YEAR(eval_date) >= 2025)
   AND total_reports > 0
 ORDER BY eval_date;
 
@@ -59,18 +57,17 @@ BEGIN
     consensus.min_price AS f_target_price,  -- Use min_price as target_price as requested
     -- Pre-calculate ratios to avoid division in UPDATE
     CASE
-      WHEN consensus.total_reports > 0 THEN consensus.sentiment_pos / consensus.total_reports
+      WHEN consensus.total_reports > 0 THEN consensus.sentiment_pos / consensus.total_reports * 100.0
       ELSE 0
     END AS f_pos_ratio,
     CASE
-      WHEN consensus.total_reports > 0 THEN consensus.sentiment_neg / consensus.total_reports
+      WHEN consensus.total_reports > 0 THEN consensus.sentiment_neg / consensus.total_reports * 100.0
       ELSE 0
     END AS f_neg_ratio
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
   WHERE consensus.eval_date >= @start_date
     AND consensus.eval_date > @max_tradedate
-    AND (consensus.report_period LIKE '%2025%' OR consensus.report_period LIKE '2025%' OR YEAR(consensus.eval_date) >= 2025)
     AND consensus.total_reports > 0;
 
   -- Create index on the temporary table for better performance

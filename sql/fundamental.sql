@@ -54,7 +54,7 @@ BEGIN
   SELECT
     ts_raw.trade_date AS tradedate,
     ts_link_table.w_symbol AS symbol,
-    ts_raw.turnover_rate_f / 100.0 AS turnover_rate,
+    ts_raw.turnover_rate_f AS turnover_rate,
     ts_raw.volume_ratio AS volume_ratio,
     -- Use pe_ttm if available and valid, otherwise use pe
     CASE
@@ -71,10 +71,10 @@ BEGIN
     ts_raw.ps_ttm AS ps_ttm,
     -- Use dv_ttm if available and valid, otherwise use dv_ratio
     CASE
-      WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm / 100.0
-      ELSE ts_raw.dv_ratio / 100.0
+      WHEN ts_raw.dv_ttm IS NOT NULL THEN ts_raw.dv_ttm
+      ELSE ts_raw.dv_ratio
     END AS dv_ratio_final,
-    ts_raw.dv_ttm / 100.0 AS dv_ttm,
+    ts_raw.dv_ttm AS dv_ttm,
     ts_raw.circ_mv * 10000.0 AS circ_mv
   FROM ts_a_stock_fundamental ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
