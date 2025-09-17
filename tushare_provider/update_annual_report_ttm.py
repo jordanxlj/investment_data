@@ -220,9 +220,6 @@ class TTMCalculator:
               AND is_open = 1
             ORDER BY date
             """)
-            logger.debug("Executing trading calendar query:")
-            logger.debug("Query parameters: start_date=%s, end_date=%s", start_date, end_date)
-            logger.debug("SQL Query:\n%s", str(query))
             dates_df = pd.read_sql(query, self.engine, params={"start_date": start_date, "end_date": end_date})
             date_list = dates_df['date'].tolist()
 
