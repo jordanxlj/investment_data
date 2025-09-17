@@ -1,12 +1,12 @@
 {
     "cagr_metrics": {
       "revenue_cagr_3y": {
-        "source_field": "revenue",
+        "source_field": "total_revenue",
         "description": "营收3年复合增长率",
         "periods": 3
       },
       "net_income_cagr_3y": {
-        "source_field": "net_income",
+        "source_field": "n_income_attr_p",
         "description": "净利润3年复合增长率",
         "periods": 3
       },
@@ -26,22 +26,23 @@
         "periods": 3
       },
       "operating_income_cagr_3y": {
-        "source_field": "operating_income",
+        "source_field": "op_income",
         "description": "经营收入3年复合增长率，反映公司核心运营活动的增长趋势。",
         "periods": 3
       },
       "gross_profit_cagr_3y": {
-        "source_field": "gross_profit",
+        "source_fields": ["total_revenue", "total_cogs"],
+        "operation": "subtract",
         "description": "毛利润3年复合增长率，评估收入扣除直接成本后的增长效率。",
         "periods": 3
       },
       "free_cash_flow_cagr_3y": {
-        "source_field": "free_cash_flow",
+        "source_field": "free_cashflow",
         "description": "自由现金流3年复合增长率，衡量公司生成现金的能力。",
         "periods": 3
       },
       "dividend_cagr_3y": {
-        "source_field": "dividend",
+        "source_field": "comshare_payable_dvd",
         "description": "股息3年复合增长率，评估公司分红政策的增长稳定性。",
         "periods": 3
       },
@@ -53,15 +54,15 @@
     },
     "ttm_metrics": {
       "gross_margin_ttm": {
-        "source_field": "gross_profit_margin",
+        "source_field": "gross_margin",
         "description": "毛利率滚动12个月"
       },
       "operating_margin_ttm": {
-        "source_field": "operating_profit_margin",
+        "source_field": "op_of_gr",
         "description": "营业利润率滚动12个月"
       },
       "net_margin_ttm": {
-        "source_field": "net_profit_margin",
+        "source_field": "netprofit_margin",
         "description": "净利润率滚动12个月"
       },
       "roe_ttm": {
@@ -77,7 +78,7 @@
         "description": "资本回报率滚动12个月"
       },
       "debt_to_equity_ttm": {
-        "source_field": "debt_to_equity",
+        "source_field": "debt_to_eqt",
         "description": "负债权益比滚动12个月"
       },
       "debt_to_assets_ttm": {

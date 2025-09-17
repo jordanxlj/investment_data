@@ -59,7 +59,7 @@ import numpy as np
 from datetime import datetime, date
 from sqlalchemy import create_engine, text, QueuePool
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import json
 import fire
 import concurrent.futures
@@ -413,11 +413,22 @@ class TTMCalculator:
             # Get all required fields for both CAGR and TTM calculations
             required_fields = set()
 
-            # Add CAGR fields
+            # Add CAGR fields (support both single field and multiple fields)
             for metric_config in cagr_metrics.values():
                 source_field = metric_config.get('source_field')
+                source_fields = metric_config.get('source_fields')
+
                 if source_field:
                     required_fields.add(source_field)
+                elif source_fields:
+                    # source_fields can be a list or set
+                    if isinstance(source_fields, (list, set)):
+                        required_fields.update(source_fields)
+                    elif isinstance(source_fields, dict):
+                        # If it's a dict, add all values
+                        required_fields.update(source_fields.values())
+                    else:
+                        logger.warning(f"Invalid source_fields format for {metric_config}: {source_fields}")
 
             # Add TTM fields
             ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
@@ -687,6 +698,68 @@ class TTMCalculator:
             logger.error(f"Error calculating TTM for {source_field}: {e}")
             return None
 
+    def calculate_compound_field(self, row: pd.Series, source_fields: Union[list, set, dict], operation: str = 'subtract') -> Optional[float]:
+        """
+        Calculate compound field from multiple source fields
+
+        Args:
+            row: DataFrame row containing the source fields
+            source_fields: List of field names or dict with operation info
+            operation: Default operation ('subtract', 'add', 'multiply', 'divide')
+
+        Returns:
+            Calculated compound value or None if calculation fails
+        """
+        try:
+            if isinstance(source_fields, dict):
+                # Dict format: {"revenue": "total_revenue", "cost": "total_cogs", "operation": "subtract"}
+                fields = list(source_fields.values())
+                if 'operation' in source_fields:
+                    operation = source_fields['operation']
+            else:
+                # List/set format: assume subtract operation for 2 fields
+                fields = list(source_fields)
+
+            if len(fields) < 2:
+                logger.warning(f"Need at least 2 fields for compound calculation, got {len(fields)}")
+                return None
+
+            # Get field values
+            values = []
+            for field in fields:
+                value = row.get(field)
+                if value is None or pd.isna(value):
+                    logger.debug(f"Missing value for field {field} in compound calculation")
+                    return None
+                values.append(float(value))
+
+            # Perform calculation based on operation
+            if operation == 'subtract':
+                result = values[0] - sum(values[1:])
+            elif operation == 'add':
+                result = sum(values)
+            elif operation == 'multiply':
+                result = 1.0
+                for val in values:
+                    result *= val
+            elif operation == 'divide':
+                if len(values) != 2:
+                    logger.warning(f"Divide operation requires exactly 2 values, got {len(values)}")
+                    return None
+                if values[1] == 0:
+                    logger.warning("Division by zero in compound calculation")
+                    return None
+                result = values[0] / values[1]
+            else:
+                logger.warning(f"Unsupported operation: {operation}")
+                return None
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error calculating compound field: {e}")
+            return None
+
     def calculate_cagr(self, financial_df: pd.DataFrame) -> Dict[str, Optional[float]]:
         """Calculate CAGR for multiple financial metrics based on configuration"""
         if financial_df.empty:
@@ -703,10 +776,12 @@ class TTMCalculator:
             for output_field, config in cagr_metrics_config.items():
                 try:
                     source_field = config.get('source_field')
+                    source_fields = config.get('source_fields')
                     periods = config.get('periods', 3)
+                    operation = config.get('operation', 'subtract')  # Default operation for compound fields
 
-                    if not source_field:
-                        logger.warning(f"No source_field defined for {output_field}")
+                    if not source_field and not source_fields:
+                        logger.warning(f"No source_field or source_fields defined for {output_field}")
                         cagr_results[output_field] = None
                         continue
 
@@ -723,8 +798,17 @@ class TTMCalculator:
                         continue
 
                     # Get start and end values
-                    start_value = calculation_data.iloc[-1][source_field]  # Oldest available data
-                    end_value = calculation_data.iloc[0][source_field]     # Newest available data
+                    if source_field:
+                        # Single field calculation
+                        start_value = calculation_data.iloc[-1][source_field]  # Oldest available data
+                        end_value = calculation_data.iloc[0][source_field]     # Newest available data
+                    elif source_fields:
+                        # Compound field calculation
+                        start_value = self.calculate_compound_field(calculation_data.iloc[-1], source_fields, operation)
+                        end_value = self.calculate_compound_field(calculation_data.iloc[0], source_fields, operation)
+
+                        logger.debug(f"Compound calculation for {output_field}: "
+                                   f"start_value={start_value}, end_value={end_value}")
 
                     # Validate data and calculate CAGR
                     if (start_value is not None and start_value > 0 and

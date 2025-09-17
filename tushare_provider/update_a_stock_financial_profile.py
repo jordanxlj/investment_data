@@ -341,9 +341,9 @@ BASE_COLUMNS = ["ts_code", "ann_date", "report_period", "period", "currency"]
 
 # Income statement fields
 INCOME_COLUMNS = [
-    "total_revenue", "operate_profit", "total_profit", "n_income", "basic_eps",
+    "total_revenue", "operate_profit", "total_profit", "n_income_attr_p", "basic_eps",
     "total_cogs", "sell_exp", "admin_exp", "fin_exp", "invest_income", "interest_exp",
-    "oper_exp", "ebit", "ebitda", "income_tax"
+    "oper_exp", "ebit", "ebitda", "income_tax", "comshare_payable_dvd"
 ]
 
 # Balance sheet fields
