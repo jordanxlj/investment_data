@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   comshare_payable_dvd      DECIMAL(16,4) NULL,
 
   -- Balance sheet fields
-  total_assets              DECIMAL(16,4) NULL,
+  total_assets              DECIMAL(18,4) NULL,
   total_liab                DECIMAL(16,4) NULL,
   total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL,
   total_cur_assets          DECIMAL(16,4) NULL,
