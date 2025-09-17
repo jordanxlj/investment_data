@@ -64,8 +64,15 @@ import json
 import fire
 import concurrent.futures
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('update_annual_report_ttm.log', mode='a')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class TTMCalculator:
@@ -238,6 +245,7 @@ class TTMCalculator:
             if stocks:
                 # Use provided stock list
                 stocks_list = [stock.upper() for stock in stocks]
+                logger.debug(f"Using provided stocks list: {stocks_list}")
                 logger.info(f"Using provided stocks list: {len(stocks_list)} stocks")
             else:
                 # Get all stocks from ts_link_table
