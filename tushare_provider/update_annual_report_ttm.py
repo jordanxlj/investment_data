@@ -463,6 +463,7 @@ class TTMCalculator:
             ORDER BY financial.ann_date DESC
             """
 
+            import pdb; pdb.set_trace()
             logger.debug("Executing financial data query for %s:", ts_code)
             logger.debug("Query parameters: ts_code=%s, start_date=%s, end_date=%s", ts_code, query_start_str, query_end_str)
             logger.debug("SQL Query:\n%s", query)
