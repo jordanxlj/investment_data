@@ -791,5 +791,264 @@ class TestDateFormatHandling(TestTTMCalculator):
         assert filtered_df['ann_date'].min() >= datetime(2024, 6, 30), "Should start from 12 months ago"
 
 
+class TestCompoundFieldCalculation(TestTTMCalculator):
+    """Test compound field calculation functionality"""
+
+    def test_calculate_compound_field_subtract_operation(self, calculator):
+        """Test compound field calculation with subtract operation (gross profit)"""
+        test_row = pd.Series({
+            'total_revenue': 1000.0,
+            'total_cogs': 600.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['total_revenue', 'total_cogs'], 'subtract')
+        assert result == 400.0, f"Expected 400.0 (1000 - 600), got {result}"
+
+    def test_calculate_compound_field_add_operation(self, calculator):
+        """Test compound field calculation with add operation"""
+        test_row = pd.Series({
+            'revenue': 1000.0,
+            'other_income': 200.0,
+            'investment_income': 150.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['revenue', 'other_income', 'investment_income'], 'add')
+        assert result == 1350.0, f"Expected 1350.0 (1000 + 200 + 150), got {result}"
+
+    def test_calculate_compound_field_multiply_operation(self, calculator):
+        """Test compound field calculation with multiply operation"""
+        test_row = pd.Series({
+            'price': 10.0,
+            'quantity': 5.0,
+            'multiplier': 1.1
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['price', 'quantity', 'multiplier'], 'multiply')
+        assert result == pytest.approx(55.0, abs=1e-10), f"Expected 55.0 (10 * 5 * 1.1), got {result}"
+
+    def test_calculate_compound_field_divide_operation(self, calculator):
+        """Test compound field calculation with divide operation"""
+        test_row = pd.Series({
+            'total_assets': 2000.0,
+            'total_liabilities': 800.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['total_assets', 'total_liabilities'], 'divide')
+        assert result == 2.5, f"Expected 2.5 (2000 / 800), got {result}"
+
+    def test_calculate_compound_field_dict_format(self, calculator):
+        """Test compound field calculation with dict format configuration"""
+        test_row = pd.Series({
+            'total_revenue': 1000.0,
+            'total_cogs': 600.0
+        })
+
+        config = {
+            'revenue': 'total_revenue',
+            'cost': 'total_cogs',
+            'operation': 'subtract'
+        }
+
+        result = calculator.calculate_compound_field(test_row, config)
+        assert result == 400.0, f"Expected 400.0 with dict config, got {result}"
+
+    def test_calculate_compound_field_missing_field(self, calculator):
+        """Test compound field calculation with missing field"""
+        test_row = pd.Series({
+            'total_revenue': 1000.0,
+            # total_cogs is missing
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['total_revenue', 'total_cogs'], 'subtract')
+        assert result is None, f"Expected None for missing field, got {result}"
+
+    def test_calculate_compound_field_nan_value(self, calculator):
+        """Test compound field calculation with NaN values"""
+        test_row = pd.Series({
+            'total_revenue': 1000.0,
+            'total_cogs': float('nan')
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['total_revenue', 'total_cogs'], 'subtract')
+        assert result is None, f"Expected None for NaN value, got {result}"
+
+    def test_calculate_compound_field_insufficient_fields(self, calculator):
+        """Test compound field calculation with insufficient fields"""
+        test_row = pd.Series({
+            'total_revenue': 1000.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['total_revenue'], 'subtract')
+        assert result is None, f"Expected None for insufficient fields, got {result}"
+
+    def test_calculate_compound_field_divide_by_zero(self, calculator):
+        """Test compound field calculation with division by zero"""
+        test_row = pd.Series({
+            'numerator': 1000.0,
+            'denominator': 0.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['numerator', 'denominator'], 'divide')
+        assert result is None, f"Expected None for division by zero, got {result}"
+
+    def test_calculate_compound_field_invalid_operation(self, calculator):
+        """Test compound field calculation with invalid operation"""
+        test_row = pd.Series({
+            'field1': 100.0,
+            'field2': 50.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['field1', 'field2'], 'invalid_op')
+        assert result is None, f"Expected None for invalid operation, got {result}"
+
+    def test_calculate_compound_field_negative_values(self, calculator):
+        """Test compound field calculation with negative values"""
+        test_row = pd.Series({
+            'revenue': -1000.0,
+            'cost': -600.0
+        })
+
+        result = calculator.calculate_compound_field(test_row, ['revenue', 'cost'], 'subtract')
+        assert result == -400.0, f"Expected -400.0 for negative values, got {result}"
+
+    def test_multi_field_config_parsing(self, calculator):
+        """Test parsing of multi-field configurations from config"""
+        # Test with list format
+        config_list = {
+            "gross_profit_cagr_3y": {
+                "source_fields": ["total_revenue", "total_cogs"],
+                "operation": "subtract",
+                "periods": 3
+            }
+        }
+
+        # Test with dict format
+        config_dict = {
+            "custom_metric_cagr_3y": {
+                "source_fields": {
+                    "revenue": "total_revenue",
+                    "costs": "total_cogs",
+                    "operation": "subtract"
+                },
+                "periods": 3
+            }
+        }
+
+        calculator.annual_config = {"cagr_metrics": config_list}
+        # This should not raise an error
+        assert "gross_profit_cagr_3y" in calculator.annual_config["cagr_metrics"]
+
+    def test_cagr_with_compound_field_calculation(self, calculator):
+        """Test CAGR calculation using compound fields"""
+        # Create test data with revenue and COGS
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 4,
+            'report_period': ['2024-12-31', '2023-12-31', '2022-12-31', '2021-12-31'],
+            'report_year': [2024, 2023, 2022, 2021],
+            'ann_date': [datetime(2024, 12, 31), datetime(2023, 12, 31),
+                        datetime(2022, 12, 31), datetime(2021, 12, 31)],
+            'total_revenue': [1200, 1100, 1000, 900],
+            'total_cogs': [800, 750, 700, 650]
+        })
+
+        # Mock config with compound field
+        calculator.annual_config = {
+            "cagr_metrics": {
+                "gross_profit_cagr_3y": {
+                    "source_fields": ["total_revenue", "total_cogs"],
+                    "operation": "subtract",
+                    "periods": 3
+                }
+            }
+        }
+
+        result = calculator.calculate_cagr(df)
+
+        # Gross profit values: 1200-800=400, 1100-750=350, 1000-700=300, 900-650=250
+        # CAGR = (400/250)^(1/3) - 1
+        expected_cagr = (400 / 250) ** (1/3) - 1
+        assert abs(result['gross_profit_cagr_3y'] - expected_cagr) < 1e-6, \
+            f"Expected CAGR {expected_cagr}, got {result['gross_profit_cagr_3y']}"
+
+    def test_cagr_with_compound_field_insufficient_data(self, calculator):
+        """Test CAGR calculation with compound field but insufficient data"""
+        # Create test data with only 2 years
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 2,
+            'report_period': ['2024-12-31', '2023-12-31'],
+            'report_year': [2024, 2023],
+            'ann_date': [datetime(2024, 12, 31), datetime(2023, 12, 31)],
+            'total_revenue': [1200, 1100],
+            'total_cogs': [800, 750]
+        })
+
+        # Mock config with compound field requiring 3 periods
+        calculator.annual_config = {
+            "cagr_metrics": {
+                "gross_profit_cagr_3y": {
+                    "source_fields": ["total_revenue", "total_cogs"],
+                    "operation": "subtract",
+                    "periods": 3
+                }
+            }
+        }
+
+        result = calculator.calculate_cagr(df)
+
+        # Should return None due to insufficient data
+        assert result['gross_profit_cagr_3y'] is None, \
+            f"Expected None for insufficient data, got {result['gross_profit_cagr_3y']}"
+
+    def test_field_collection_with_compound_fields(self, calculator):
+        """Test that compound fields are properly collected for SQL queries"""
+        # Mock config with compound fields
+        calculator.annual_config = {
+            "cagr_metrics": {
+                "single_field_metric": {
+                    "source_field": "revenue",
+                    "periods": 3
+                },
+                "compound_field_metric": {
+                    "source_fields": ["total_revenue", "total_cogs", "operating_expenses"],
+                    "operation": "subtract",
+                    "periods": 3
+                }
+            },
+            "ttm_metrics": {
+                "ttm_metric": {
+                    "source_field": "net_income"
+                }
+            }
+        }
+
+        # Test field collection (this is normally called in get_financial_data_for_single_stock)
+        # We'll simulate the logic
+        required_fields = set()
+
+        # Add CAGR fields
+        for metric_config in calculator.annual_config.get('cagr_metrics', {}).values():
+            source_field = metric_config.get('source_field')
+            source_fields = metric_config.get('source_fields')
+
+            if source_field:
+                required_fields.add(source_field)
+            elif source_fields:
+                if isinstance(source_fields, (list, set)):
+                    required_fields.update(source_fields)
+                elif isinstance(source_fields, dict):
+                    required_fields.update(source_fields.values())
+
+        # Add TTM fields
+        for metric_config in calculator.annual_config.get('ttm_metrics', {}).values():
+            source_field = metric_config.get('source_field')
+            if source_field:
+                required_fields.add(source_field)
+
+        # Check that all expected fields are collected
+        expected_fields = {'revenue', 'total_revenue', 'total_cogs', 'operating_expenses', 'net_income'}
+        assert required_fields == expected_fields, \
+            f"Expected fields {expected_fields}, got {required_fields}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

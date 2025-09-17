@@ -713,7 +713,8 @@ class TTMCalculator:
         try:
             if isinstance(source_fields, dict):
                 # Dict format: {"revenue": "total_revenue", "cost": "total_cogs", "operation": "subtract"}
-                fields = list(source_fields.values())
+                # Extract field names, excluding 'operation' key
+                fields = [v for k, v in source_fields.items() if k != 'operation']
                 if 'operation' in source_fields:
                     operation = source_fields['operation']
             else:
