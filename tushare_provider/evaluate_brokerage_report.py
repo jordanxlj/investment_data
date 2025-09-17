@@ -950,29 +950,9 @@ def evaluate_brokerage_report(
         window_months: Months for report window (default: 6)
     """
     mysql_url = mysql_url or os.environ.get("MYSQL_URL", "mysql+pymysql://root:@127.0.0.1:3306/investment_data")
+    start_date = str(start_date)
     today = datetime.datetime.now().strftime("%Y%m%d")
-    start_date = str(start_date or today)
     end_date = str(end_date or today)
-
-    try:
-        start_dt = datetime.datetime.strptime(start_date, "%Y%m%d")
-        end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
-        if start_dt > end_dt:
-            raise ValueError("start_date cannot be after end_date")
-    except ValueError as e:
-        logger.error(f"Invalid date: {e}")
-        return
-
-    trade_date_df = get_trade_cal(start_date, end_date)
-    if not trade_date_df.empty:
-        # 确保按日期正序排序（从早到晚）
-        trade_date_df = trade_date_df.sort_values('cal_date', ascending=True)
-        date_list = trade_date_df['cal_date'].tolist()
-    else:
-        date_list = [
-            (start_dt + datetime.timedelta(days=i)).strftime("%Y%m%d")
-            for i in range((end_dt - start_dt).days + 1)
-        ]
 
     # Optimize MySQL connection parameters for high concurrency
     mysql_url_with_params = mysql_url + "?charset=utf8mb4&autocommit=true&max_allowed_packet=67108864"
@@ -994,6 +974,37 @@ def evaluate_brokerage_report(
     )
     with engine.begin() as conn:
         conn.execute(text(CREATE_TABLE_DDL))
+
+    # 如果start_date为空，从ts_a_stock_consensus_report表中获取最后一天作为开始日期
+    if start_date is None:
+        with engine.begin() as conn:
+            result = conn.execute(text("SELECT MAX(eval_date) FROM ts_a_stock_consensus_report"))
+            max_date = result.scalar()
+            if max_date:
+                start_date = max_date.strftime("%Y%m%d")
+                logger.info(f"使用ts_a_stock_consensus_report表中的最后日期作为开始日期: {start_date}")
+    if not start_date:
+        start_date = "20100101"
+
+    try:
+        start_dt = datetime.datetime.strptime(start_date, "%Y%m%d")
+        end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
+        if start_dt > end_dt:
+            raise ValueError("start_date cannot be after end_date")
+    except ValueError as e:
+        logger.error(f"Invalid date: {e}")
+        return
+
+    trade_date_df = get_trade_cal(start_date, end_date)
+    if not trade_date_df.empty:
+        # 确保按日期正序排序（从早到晚）
+        trade_date_df = trade_date_df.sort_values('cal_date', ascending=True)
+        date_list = trade_date_df['cal_date'].tolist()
+    else:
+        date_list = [
+            (start_dt + datetime.timedelta(days=i)).strftime("%Y%m%d")
+            for i in range((end_dt - start_dt).days + 1)
+        ]
 
     stocks_list = get_stocks_list(engine, stocks)
     if not stocks_list:

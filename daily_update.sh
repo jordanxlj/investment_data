@@ -79,9 +79,17 @@ python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_moneyflow.py" --mysql_url
 echo "Updating A-share brokerage report"
 python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_brokerage_report.py" --mysql_url="${MYSQL_URL}"
 
-#echo "Merging to final tables"
-#PASS_OPT=""
-#if [[ -n "${MYSQL_PASSWORD}" ]]; then PASS_OPT="-p${MYSQL_PASSWORD}"; fi
-#mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/tushare_provider/regular_update.sql"
+echo "evaluate A-share brokerage report"
+python3 "${SCRIPT_DIR}/tushare_provider/evaluate_brokerage_report.py" --mysql_url="${MYSQL_URL}"
+
+echo "Merging to final tables"
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/price.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/fundamental.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/moneyflow.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/cost.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/brokerage.sql" &
+
+#wait for all finished
+wait
 
 echo "Daily MySQL update finished."
