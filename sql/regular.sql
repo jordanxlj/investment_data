@@ -1,51 +1,6 @@
 /* ============================================================================
-   Regular Update Script for final_a_stock_comb_info table
+   Price Update Script for final_a_stock_comb_info table
 
-   CRITICAL INDEXES REQUIRED FOR PERFORMANCE:
-   ============================================================================
-
-   必需的索引（按优先级排序）：
-
-   1. ts_link_table 表（最重要！）：
-      - INDEX idx_link_symbol (link_symbol) - 用于 JOIN ts_code
-      - INDEX idx_w_symbol (w_symbol) - 用于 JOIN symbol
-      - UNIQUE INDEX uk_w_symbol_link_symbol (w_symbol, link_symbol)
-
-   2. ts_a_stock_eod_price 表：
-      - INDEX idx_symbol_tradedate (symbol, tradedate) - 用于 JOIN 和 WHERE
-      - INDEX idx_tradedate (tradedate) - 用于日期范围查询
-
-   3. ts_a_stock_fundamental 表：
-      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
-      - INDEX idx_trade_date (trade_date) - 用于日期过滤
-
-   4. ts_a_stock_moneyflow 表：
-      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
-
-   5. ts_a_stock_cost_pct 表：
-      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
-
-   6. ts_a_stock_suspend_info 表：
-      - INDEX idx_ts_code_trade_date (ts_code, trade_date) - 用于 JOIN 和 WHERE
-
-   7. ts_a_stock_consensus_report 表：
-      - INDEX idx_ts_code_eval_date (ts_code, eval_date) - 用于 JOIN 和 WHERE
-      - INDEX idx_eval_date (eval_date) - 用于日期过滤
-
-   ============================================================================
-
-   OPTIMIZATIONS IMPLEMENTED:
-   1. Added start_date restriction (default: 2018-01-01)
-   2. Pre-computed shared values using MySQL variables
-   3. Conditional debug output (@debug = 0/1)
-   4. Replaced 10+ repeated COALESCE subqueries with variables
-
-   This ensures:
-   - No old historical data is inserted
-   - All operations are consistent with the 2018-01-01 start date
-   - Performance optimized by reducing repeated subqueries (10-20% improvement)
-   - Memory usage reduced by avoiding repeated calculations
-   - Debug output can be enabled/disabled as needed
    ============================================================================ */
 /* Create final table for combined info if it does not exist
    - percentages/ratios stored as FLOAT (already divided by 100 in SELECT)

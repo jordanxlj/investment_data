@@ -39,8 +39,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   act_name       VARCHAR(128)  NULL,
   act_ent_type   VARCHAR(64)   NULL,
   PRIMARY KEY (ts_code),
-  INDEX idx_market (market),
-  INDEX idx_exchange (exchange),
   INDEX idx_list_status (list_status),
   INDEX idx_industry_code (industry_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
