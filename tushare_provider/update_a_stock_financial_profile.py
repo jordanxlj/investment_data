@@ -479,6 +479,98 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             if col in out.columns:
                 out[col] = pd.to_numeric(out[col], errors="coerce")
 
+        # Validate and clamp numeric values to prevent DECIMAL overflow
+        # DECIMAL(precision, scale) limits:
+        # - DECIMAL(16,4): max 999999999999.9999, min -999999999999.9999
+        # - DECIMAL(18,4): max 99999999999999.9999, min -99999999999999.9999
+        # - DECIMAL(22,4): max 999999999999999999.9999, min -999999999999999999.9999
+        decimal_limits = {
+            'total_revenue': (16, 4),           # DECIMAL(16,4)
+            'operate_profit': (16, 4),          # DECIMAL(16,4)
+            'total_profit': (16, 4),            # DECIMAL(16,4)
+            'n_income_attr_p': (16, 4),         # DECIMAL(16,4)
+            'basic_eps': None,                  # FLOAT
+            'total_cogs': (16, 4),              # DECIMAL(16,4)
+            'sell_exp': (16, 4),                # DECIMAL(16,4)
+            'admin_exp': (16, 4),               # DECIMAL(16,4)
+            'fin_exp': (16, 4),                 # DECIMAL(16,4)
+            'invest_income': (16, 4),           # DECIMAL(16,4)
+            'interest_exp': (16, 4),            # DECIMAL(16,4)
+            'oper_exp': (16, 4),                # DECIMAL(16,4)
+            'ebit': (16, 4),                    # DECIMAL(16,4)
+            'ebitda': (16, 4),                  # DECIMAL(16,4)
+            'income_tax': (16, 4),              # DECIMAL(16,4)
+            'comshare_payable_dvd': (16, 4),    # DECIMAL(16,4)
+
+            # Balance sheet fields
+            'total_assets': (18, 4),            # DECIMAL(18,4)
+            'total_liab': (22, 4),              # DECIMAL(22,4) - This is the problematic field
+            'total_hldr_eqy_inc_min_int': (16, 4), # DECIMAL(16,4)
+            'total_cur_assets': (18, 4),        # DECIMAL(18,4)
+            'total_cur_liab': (18, 4),          # DECIMAL(18,4)
+            'accounts_receiv': (16, 4),         # DECIMAL(16,4)
+            'inventories': (16, 4),             # DECIMAL(16,4)
+            'acct_payable': (16, 4),            # DECIMAL(16,4)
+            'fix_assets': (16, 4),              # DECIMAL(16,4)
+            'lt_borr': (16, 4),                 # DECIMAL(16,4)
+            'r_and_d': (16, 4),                 # DECIMAL(16,4)
+            'goodwill': (16, 4),                # DECIMAL(16,4)
+            'intang_assets': (16, 4),           # DECIMAL(16,4)
+            'st_borr': (16, 4),                 # DECIMAL(16,4)
+            'total_share': (16, 4),             # DECIMAL(16,4)
+            'oth_eqt_tools_p_shr': (16, 4),     # DECIMAL(16,4)
+
+            # Cash flow fields
+            'n_cashflow_act': (16, 4),          # DECIMAL(16,4)
+            'n_cashflow_inv_act': (16, 4),      # DECIMAL(16,4)
+            'n_cash_flows_fnc_act': (16, 4),    # DECIMAL(16,4)
+            'free_cashflow': (16, 4),           # DECIMAL(16,4)
+            'c_pay_acq_const_fiolta': (16, 4),  # DECIMAL(16,4)
+            'c_fr_sale_sg': (16, 4),            # DECIMAL(16,4)
+            'c_paid_goods_s': (16, 4),          # DECIMAL(16,4)
+            'c_paid_to_for_empl': (16, 4),      # DECIMAL(16,4)
+            'c_paid_for_taxes': (16, 4),        # DECIMAL(16,4)
+            'n_incr_cash_cash_equ': (16, 4),    # DECIMAL(16,4)
+            'c_disp_withdrwl_invest': (16, 4),  # DECIMAL(16,4)
+            'c_pay_dist_dpcp_int_exp': (16, 4), # DECIMAL(16,4)
+            'c_cash_equ_end_period': (16, 4),   # DECIMAL(16,4)
+
+            # Financial indicator fields (ratios and percentages - smaller ranges)
+            'eps': None,                        # FLOAT
+            'dt_eps': None,                     # FLOAT
+            'gross_margin': None,               # FLOAT
+            'netprofit_margin': None,           # FLOAT
+            'grossprofit_margin': None,         # FLOAT
+            'ebitda_margin': None,              # FLOAT
+            'extra_item': (16, 4),              # DECIMAL(16,4)
+            'profit_dedt': (16, 4),             # DECIMAL(16,4)
+            'op_income': (16, 4),               # DECIMAL(16,4)
+            'daa': (16, 4),                     # DECIMAL(16,4)
+            'rd_exp': (16, 4),                  # DECIMAL(16,4)
+
+            # Most other indicator fields are FLOAT or smaller DECIMAL ranges
+            # For safety, we'll use conservative limits for large values
+        }
+
+        # Apply decimal limits to prevent overflow
+        for col in numeric_cols:
+            if col in out.columns and decimal_limits.get(col) is not None:
+                precision, scale = decimal_limits[col]
+                max_value = 10 ** (precision - scale) - (10 ** (-scale))
+                min_value = -max_value
+
+                # Clamp values to valid range
+                out[col] = out[col].clip(lower=min_value, upper=max_value)
+
+                # Log if values were clamped
+                if out[col].notna().any():
+                    original_max = pd.to_numeric(out[col], errors='coerce').max()
+                    original_min = pd.to_numeric(out[col], errors='coerce').min()
+                    if original_max is not None and original_max > max_value:
+                        print(f"Warning: Clamped {col} max value from {original_max} to {max_value}")
+                    if original_min is not None and original_min < min_value:
+                        print(f"Warning: Clamped {col} min value from {original_min} to {min_value}")
+
         # Ensure DB NULLs: cast to object then replace NaN with None
         out = out.astype(object).where(pd.notna(out), None)
         # Extra safety for numpy.nan
@@ -945,5 +1037,4 @@ def update_a_stock_financial_profile(
 
 
 if __name__ == "__main__":
-    # Run main program directly, test and tool functions please use independent modules
     fire.Fire(update_a_stock_financial_profile)
