@@ -220,6 +220,9 @@ class TTMCalculator:
               AND is_open = 1
             ORDER BY date
             """
+            logger.debug(f"Executing trading calendar query:")
+            logger.debug(f"Query parameters: start_date={start_date}, end_date={end_date}")
+            logger.debug(f"SQL Query:\n{query}")
             dates_df = pd.read_sql(query, self.engine)
             date_list = dates_df['date'].tolist()
 
@@ -269,6 +272,8 @@ class TTMCalculator:
                 WHERE w_symbol IS NOT NULL
                 ORDER BY w_symbol
                 """
+                logger.debug(f"Executing stocks list query:")
+                logger.debug(f"SQL Query:\n{query}")
                 stocks_df = pd.read_sql(query, self.engine)
                 stocks_list = stocks_df['symbol'].tolist()
                 logger.info(f"Retrieved {len(stocks_list)} stocks from database")
@@ -447,6 +452,10 @@ class TTMCalculator:
             ORDER BY financial.ann_date DESC
             """
 
+            logger.debug(f"Executing financial data query for {ts_code}:")
+            logger.debug(f"Query parameters: ts_code={ts_code}, start_date={query_start_str}, end_date={query_end_str}")
+            logger.debug(f"SQL Query:\n{query}")
+            logger.debug(f"Selected fields ({len(required_fields)}): {', '.join(sorted(required_fields))}")
             df = pd.read_sql(query, self.engine)
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
@@ -473,6 +482,8 @@ class TTMCalculator:
         """
 
         try:
+            logger.debug(f"Executing target dates query:")
+            logger.debug(f"SQL Query:\n{query}")
             df = pd.read_sql(query, self.engine)
             logger.info(f"Found {len(df)} target dates for update")
             return df
@@ -800,7 +811,9 @@ class TTMCalculator:
 
             try:
                 with self.engine.begin() as conn:
-                    for sql in batch:
+                    for i, sql in enumerate(batch, 1):
+                        logger.debug(f"Executing update statement {i}/{len(batch)}:")
+                        logger.debug(f"SQL Statement:\n{sql}")
                         conn.execute(text(sql))
 
                 logger.info(f"Processed batch {i//batch_size + 1} ({len(batch)} updates)")
