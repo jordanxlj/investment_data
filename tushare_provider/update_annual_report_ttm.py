@@ -243,8 +243,22 @@ class TTMCalculator:
         """Get list of stocks to process"""
         try:
             if stocks:
-                # Use provided stock list
-                stocks_list = [stock.upper() for stock in stocks]
+                # Handle stocks parameter - it could be a list or a single string
+                if isinstance(stocks, str):
+                    # If it's a single string, split by comma
+                    stocks_list = [s.strip().upper() for s in stocks.split(',') if s.strip()]
+                elif isinstance(stocks, list):
+                    # If it's already a list, process each item
+                    stocks_list = []
+                    for stock in stocks:
+                        if isinstance(stock, str):
+                            # Split each string by comma in case of nested strings
+                            stocks_list.extend([s.strip().upper() for s in stock.split(',') if s.strip()])
+                        else:
+                            stocks_list.append(str(stock).upper())
+                else:
+                    stocks_list = []
+
                 logger.debug(f"Using provided stocks list: {stocks_list}")
                 logger.info(f"Using provided stocks list: {len(stocks_list)} stocks")
             else:
