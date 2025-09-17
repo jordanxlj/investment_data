@@ -465,8 +465,8 @@ class TTMCalculator:
             })
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
-                df['report_year'] = df['report_period'].dt.year
-                df['report_quarter'] = df['report_period'].dt.month // 3 + 1
+                df['report_year'] = df['report_period'].year
+                df['report_quarter'] = df['report_period'].month // 3 + 1
 
             logger.debug("Retrieved %d financial records for %s", len(df), ts_code)
             return df
