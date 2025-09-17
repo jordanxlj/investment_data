@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   total_revenue             DECIMAL(16,4) NULL,
   operate_profit            DECIMAL(16,4) NULL,
   total_profit              DECIMAL(16,4) NULL,
-  n_income                  DECIMAL(16,4) NULL,
+  n_income_attr_p           DECIMAL(16,4) NULL,
   basic_eps                 FLOAT NULL,
   total_cogs                DECIMAL(16,4) NULL,
   sell_exp                  DECIMAL(16,4) NULL,
@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ebit                      DECIMAL(16,4) NULL,
   ebitda                    DECIMAL(16,4) NULL,
   income_tax                DECIMAL(16,4) NULL,
+  comshare_payable_dvd      DECIMAL(16,4) NULL,
 
   -- Balance sheet fields
   total_assets              DECIMAL(16,4) NULL,
