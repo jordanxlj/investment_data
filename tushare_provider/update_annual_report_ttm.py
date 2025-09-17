@@ -124,7 +124,7 @@ class TTMCalculator:
     ) -> None:
         """Process updates by stock (similar to evaluate_brokerage_report)"""
         try:
-                    # Set default dates (YYYY-MM-DD format for consistency with DATE type columns)
+            # Set default dates (YYYY-MM-DD format for consistency with DATE type columns)
             if start_date is None or end_date is None:
                 today = datetime.now().strftime('%Y-%m-%d')
                 start_date = start_date or today
@@ -206,12 +206,12 @@ class TTMCalculator:
         try:
             # Get trading calendar
             query = f"""
-            SELECT cal_date
-            FROM ts_trade_cal
-            WHERE cal_date >= DATE('{start_date}')
-              AND cal_date <= DATE('{end_date}')
+            SELECT date
+            FROM ts_trade_day_calendar
+            WHERE date >= DATE('{start_date}')
+              AND date <= DATE('{end_date}')
               AND is_open = 1
-            ORDER BY cal_date
+            ORDER BY date
             """
             dates_df = pd.read_sql(query, self.engine)
             date_list = dates_df['cal_date'].tolist()
