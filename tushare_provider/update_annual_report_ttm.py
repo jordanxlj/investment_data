@@ -214,7 +214,7 @@ class TTMCalculator:
             ORDER BY date
             """
             dates_df = pd.read_sql(query, self.engine)
-            date_list = dates_df['cal_date'].tolist()
+            date_list = dates_df['date'].tolist()
 
             if not date_list:
                 # Fallback: generate date range if no trading calendar
