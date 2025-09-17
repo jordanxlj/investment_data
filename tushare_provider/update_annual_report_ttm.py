@@ -212,18 +212,18 @@ class TTMCalculator:
         """Get list of dates to process"""
         try:
             # Get trading calendar
-            query = f"""
+            query = text("""
             SELECT date
             FROM ts_trade_day_calendar
-            WHERE date >= DATE('{start_date}')
-              AND date <= DATE('{end_date}')
+            WHERE date >= DATE(:start_date)
+              AND date <= DATE(:end_date)
               AND is_open = 1
             ORDER BY date
-            """
+            """)
             logger.debug("Executing trading calendar query:")
             logger.debug("Query parameters: start_date=%s, end_date=%s", start_date, end_date)
-            logger.debug("SQL Query:\n%s", query)
-            dates_df = pd.read_sql(query, self.engine)
+            logger.debug("SQL Query:\n%s", str(query))
+            dates_df = pd.read_sql(query, self.engine, params={"start_date": start_date, "end_date": end_date})
             date_list = dates_df['date'].tolist()
 
             if not date_list:
@@ -266,14 +266,14 @@ class TTMCalculator:
                 logger.info(f"Using provided stocks list: {len(stocks_list)} stocks")
             else:
                 # Get all stocks from ts_link_table
-                query = """
+                query = text("""
                 SELECT DISTINCT w_symbol as symbol
                 FROM ts_link_table
                 WHERE w_symbol IS NOT NULL
                 ORDER BY w_symbol
-                """
+                """)
                 logger.debug("Executing stocks list query:")
-                logger.debug("SQL Query:\n%s", query)
+                logger.debug("SQL Query:\n%s", str(query))
                 stocks_df = pd.read_sql(query, self.engine)
                 stocks_list = stocks_df['symbol'].tolist()
                 logger.info(f"Retrieved {len(stocks_list)} stocks from database")
@@ -450,25 +450,28 @@ class TTMCalculator:
 
             select_clause = ",\n            ".join(select_fields)
 
-            query = f"""
+            query = text(f"""
             SELECT
                 {select_clause}
             FROM ts_a_stock_financial_profile financial
-            WHERE financial.ts_code = '{ts_code}'
-                AND financial.ann_date >= DATE('{query_start_str}')
-                AND financial.ann_date <= DATE('{query_end_str}')
+            WHERE financial.ts_code = :ts_code
+                AND financial.ann_date >= DATE(:query_start_date)
+                AND financial.ann_date <= DATE(:query_end_date)
                 AND (
                     DATE_FORMAT(financial.report_period, '%m-%d') IN ('12-31', '03-31', '06-30', '09-30')
                 )
             ORDER BY financial.ann_date DESC
-            """
+            """)
 
-            import pdb; pdb.set_trace()
             logger.debug("Executing financial data query for %s:", ts_code)
             logger.debug("Query parameters: ts_code=%s, start_date=%s, end_date=%s", ts_code, query_start_str, query_end_str)
-            logger.debug("SQL Query:\n%s", query)
+            logger.debug("SQL Query:\n%s", str(query))
             logger.debug("Selected fields (%d): %s", len(required_fields), ', '.join(sorted(required_fields)))
-            df = pd.read_sql(query, self.engine)
+            df = pd.read_sql(query, self.engine, params={
+                "ts_code": ts_code,
+                "query_start_date": query_start_str,
+                "query_end_date": query_end_str
+            })
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
                 df['report_year'] = df['report_period'].str[:4].astype(int)
@@ -483,7 +486,7 @@ class TTMCalculator:
 
     def get_target_dates(self) -> pd.DataFrame:
         """Get dates that need TTM/CAGR updates"""
-        query = """
+        query = text("""
         SELECT DISTINCT trade_date
         FROM ts_a_stock_fundamental ts_raw
         LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
@@ -491,11 +494,11 @@ class TTMCalculator:
             (SELECT MAX(tradedate) FROM final_a_stock_comb_info), '2008-01-01'
         )
         ORDER BY trade_date
-        """
+        """)
 
         try:
             logger.debug("Executing target dates query:")
-            logger.debug("SQL Query:\n%s", query)
+            logger.debug("SQL Query:\n%s", str(query))
             df = pd.read_sql(query, self.engine)
             logger.info(f"Found {len(df)} target dates for update")
             return df
