@@ -444,6 +444,7 @@ class TTMCalculator:
                 select_fields.append(f"financial.{field}")
 
             select_clause = ",\n            ".join(select_fields)
+            import pdb; pdb.set_trace()
 
             query = text(f"""
             SELECT
