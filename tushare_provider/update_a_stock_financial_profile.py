@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
   -- Balance sheet fields
   total_assets              DECIMAL(18,4) NULL,
-  total_liab                DECIMAL(22,4) NULL,
+  total_liab                DECIMAL(18,4) NULL,
   total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL,
   total_cur_assets          DECIMAL(18,4) NULL,
   total_cur_liab            DECIMAL(18,4) NULL,
@@ -504,7 +504,7 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
 
             # Balance sheet fields
             'total_assets': (18, 4),            # DECIMAL(18,4)
-            'total_liab': (22, 4),              # DECIMAL(22,4) - This is the problematic field
+            'total_liab': (18, 4),              # DECIMAL(18,4) - This is the problematic field
             'total_hldr_eqy_inc_min_int': (16, 4), # DECIMAL(16,4)
             'total_cur_assets': (18, 4),        # DECIMAL(18,4)
             'total_cur_liab': (18, 4),          # DECIMAL(18,4)
