@@ -541,8 +541,7 @@ class TTMCalculator:
         filtered_df = stock_df[
             (stock_df['ts_code'].isin(ts_codes)) &
             (stock_df['ann_date'] <= target_date_dt) &
-            (stock_df['ann_date'] >= start_date) &
-            (stock_df['report_period'].str.endswith(('-12-31', '-03-31', '-06-30', '-09-30')))
+            (stock_df['ann_date'] >= start_date)
         ].copy()
 
         logger.debug(f"Filtered {len(filtered_df)} quarterly/annual records for TTM calculation")
