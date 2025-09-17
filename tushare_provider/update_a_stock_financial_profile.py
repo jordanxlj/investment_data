@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import tushare as ts
 from sqlalchemy import create_engine, text
+from sqlalchemy import Table, MetaData
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 import pymysql  # noqa: F401 - required by SQLAlchemy URL
 
@@ -552,6 +553,30 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             # For safety, we'll use conservative limits for large values
         }
 
+        # Add conservative default limits for any DECIMAL fields not explicitly defined
+        # This handles cases where the database schema might differ from our assumptions
+        default_decimal_limit = (16, 4)  # Conservative default: DECIMAL(16,4)
+
+        # Check for any numeric columns that might be DECIMAL but aren't in our limits dict
+        for col in numeric_cols:
+            if col not in out.columns:
+                continue
+
+            if col not in decimal_limits:
+                # Check if column might contain large values that could overflow
+                col_values = pd.to_numeric(out[col], errors='coerce')
+                if col_values.notna().any():
+                    max_val = col_values.abs().max()  # Check absolute value
+                    if max_val > 1000000000:  # If greater than 1 billion
+                        # Apply conservative limit to prevent overflow
+                        precision, scale = default_decimal_limit
+                        max_allowed = 10 ** (precision - scale) - (10 ** (-scale))
+                        min_allowed = -max_allowed
+
+                        if max_val > max_allowed:
+                            print(f"Warning: {col} has large value {max_val}, applying conservative limit")
+                            out[col] = out[col].clip(lower=min_allowed, upper=max_allowed)
+
         # Apply decimal limits to prevent overflow
         for col in numeric_cols:
             if col in out.columns and decimal_limits.get(col) is not None:
@@ -559,17 +584,30 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
                 max_value = 10 ** (precision - scale) - (10 ** (-scale))
                 min_value = -max_value
 
+                # Debug: Check for values that exceed limits before clamping
+                if out[col].notna().any():
+                    original_series = pd.to_numeric(out[col], errors='coerce')
+                    exceeding_max = original_series > max_value
+                    exceeding_min = original_series < min_value
+
+                    if exceeding_max.any():
+                        max_val = original_series[exceeding_max].max()
+                        print(f"Warning: {col} has value {max_val} exceeding max {max_value}")
+                    if exceeding_min.any():
+                        min_val = original_series[exceeding_min].min()
+                        print(f"Warning: {col} has value {min_val} below min {min_value}")
+
                 # Clamp values to valid range
                 out[col] = out[col].clip(lower=min_value, upper=max_value)
 
-                # Log if values were clamped
+                # Log clamping results
                 if out[col].notna().any():
-                    original_max = pd.to_numeric(out[col], errors='coerce').max()
-                    original_min = pd.to_numeric(out[col], errors='coerce').min()
-                    if original_max is not None and original_max > max_value:
-                        print(f"Warning: Clamped {col} max value from {original_max} to {max_value}")
-                    if original_min is not None and original_min < min_value:
-                        print(f"Warning: Clamped {col} min value from {original_min} to {min_value}")
+                    final_max = pd.to_numeric(out[col], errors='coerce').max()
+                    final_min = pd.to_numeric(out[col], errors='coerce').min()
+                    if final_max == max_value:
+                        print(f"Info: {col} clamped to max value {max_value}")
+                    if final_min == min_value:
+                        print(f"Info: {col} clamped to min value {min_value}")
 
         # Ensure DB NULLs: cast to object then replace NaN with None
         out = out.astype(object).where(pd.notna(out), None)
@@ -884,7 +922,6 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     # This gives a more accurate representation of processed records
     total_processed = len(df)
 
-    from sqlalchemy import Table, MetaData
     meta = MetaData()
     table = Table(TABLE_NAME, meta, autoload_with=engine)
 
