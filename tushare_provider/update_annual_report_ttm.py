@@ -272,8 +272,6 @@ class TTMCalculator:
                 WHERE w_symbol IS NOT NULL
                 ORDER BY w_symbol
                 """)
-                logger.debug("Executing stocks list query:")
-                logger.debug("SQL Query:\n%s", str(query))
                 stocks_df = pd.read_sql(query, self.engine)
                 stocks_list = stocks_df['symbol'].tolist()
                 logger.info(f"Retrieved {len(stocks_list)} stocks from database")
@@ -463,10 +461,6 @@ class TTMCalculator:
             ORDER BY financial.ann_date DESC
             """)
 
-            logger.debug("Executing financial data query for %s:", ts_code)
-            logger.debug("Query parameters: ts_code=%s, start_date=%s, end_date=%s", ts_code, query_start_str, query_end_str)
-            logger.debug("SQL Query:\n%s", str(query))
-            logger.debug("Selected fields (%d): %s", len(required_fields), ', '.join(sorted(required_fields)))
             df = pd.read_sql(query, self.engine, params={
                 "ts_code": ts_code,
                 "query_start_date": query_start_str,
@@ -497,8 +491,6 @@ class TTMCalculator:
         """)
 
         try:
-            logger.debug("Executing target dates query:")
-            logger.debug("SQL Query:\n%s", str(query))
             df = pd.read_sql(query, self.engine)
             logger.info(f"Found {len(df)} target dates for update")
             return df
