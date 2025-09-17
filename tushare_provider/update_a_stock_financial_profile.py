@@ -321,8 +321,8 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   capitalized_to_da         FLOAT NULL,
 
   -- 13. Valuation indicators
-  current_exint             FLOAT NULL,
-  non_current_exint         FLOAT NULL,
+  current_exint             DECIMAL(16,4) NULL,
+  non_current_exint         DECIMAL(16,4) NULL,
   intrinsicvalue            DECIMAL(16,4) NULL,
   tmv                       DECIMAL(16,4) NULL,
   lmv                       DECIMAL(16,4) NULL,
@@ -473,6 +473,9 @@ YUAN_TO_WAN_FIELDS = [
 
     # Other monetary amounts
     'profit_prefin_exp', 'non_op_profit', 'fixed_assets',
+
+    # Valuation indicators
+    'current_exint', 'non_current_exint', 'intrinsicvalue', 'tmv', 'lmv'
 ]
 
 # Per-share metrics that should remain in 元 (not converted)
