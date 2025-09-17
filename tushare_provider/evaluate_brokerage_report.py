@@ -950,7 +950,6 @@ def evaluate_brokerage_report(
         window_months: Months for report window (default: 6)
     """
     mysql_url = mysql_url or os.environ.get("MYSQL_URL", "mysql+pymysql://root:@127.0.0.1:3306/investment_data")
-    start_date = str(start_date)
     today = datetime.datetime.now().strftime("%Y%m%d")
     end_date = str(end_date or today)
 
@@ -977,14 +976,21 @@ def evaluate_brokerage_report(
 
     # 如果start_date为空，从ts_a_stock_consensus_report表中获取最后一天作为开始日期
     if start_date is None:
-        with engine.begin() as conn:
-            result = conn.execute(text("SELECT MAX(eval_date) FROM ts_a_stock_consensus_report"))
-            max_date = result.scalar()
-            if max_date:
-                start_date = max_date.strftime("%Y%m%d")
-                logger.info(f"使用ts_a_stock_consensus_report表中的最后日期作为开始日期: {start_date}")
-    if not start_date:
-        start_date = "20100101"
+        try:
+            with engine.begin() as conn:
+                result = conn.execute(text("SELECT MAX(eval_date) FROM ts_a_stock_consensus_report"))
+                max_date = result.scalar()
+                if max_date:
+                    start_date = max_date.strftime("%Y%m%d")
+                    logger.info(f"使用ts_a_stock_consensus_report表中的最后日期作为开始日期: {start_date}")
+                else:
+                    start_date = today
+                    logger.info(f"ts_a_stock_consensus_report表为空，使用今天日期作为开始日期: {start_date}")
+        except Exception as e:
+            logger.warning(f"查询ts_a_stock_consensus_report表失败，使用今天日期: {e}")
+            start_date = today
+    else:
+        start_date = str(start_date)
 
     try:
         start_dt = datetime.datetime.strptime(start_date, "%Y%m%d")

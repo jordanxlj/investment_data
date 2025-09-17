@@ -281,7 +281,11 @@ def test_evaluate_brokerage_report_dry_run(caplog):
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
             with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
-                evaluate_brokerage_report.evaluate_brokerage_report(dry_run=True)
+                evaluate_brokerage_report.evaluate_brokerage_report(
+                    start_date='20250101',
+                    end_date='20250101',
+                    dry_run=True
+                )
     assert "DRY RUN - No DB writes" in caplog.text
 
 def test_evaluate_brokerage_report_invalid_date(caplog):
@@ -294,7 +298,14 @@ def test_evaluate_brokerage_report_invalid_date(caplog):
 def test_evaluate_brokerage_report_no_stocks():
     """Test evaluate_brokerage_report no stocks"""
     with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
-        mock_create_engine.return_value = MagicMock()
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = datetime.datetime(2025, 1, 1)
+        mock_conn.execute.return_value = mock_result
+        mock_engine.begin.return_value.__enter__.return_value = mock_conn
+        mock_create_engine.return_value = mock_engine
+
         with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
             with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
@@ -954,9 +965,9 @@ def test_evaluate_brokerage_report_start_after_end(caplog):
     """Test evaluate_brokerage_report start > end"""
     with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
         mock_engine.return_value = MagicMock()
-    result = evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250102', end_date='20250101')
-    assert result is None
-    assert "Invalid date" in caplog.text
+        result = evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250102', end_date='20250101')
+        assert result is None
+        assert "Invalid date" in caplog.text
 '''
 def test_evaluate_brokerage_report_normal(caplog):
     """Test evaluate_brokerage_report normal run"""
