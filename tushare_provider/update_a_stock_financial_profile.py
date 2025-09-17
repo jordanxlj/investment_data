@@ -105,10 +105,10 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
   -- Balance sheet fields
   total_assets              DECIMAL(18,4) NULL,
-  total_liab                DECIMAL(16,4) NULL,
+  total_liab                DECIMAL(18,4) NULL,
   total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL,
-  total_cur_assets          DECIMAL(16,4) NULL,
-  total_cur_liab            DECIMAL(16,4) NULL,
+  total_cur_assets          DECIMAL(18,4) NULL,
+  total_cur_liab            DECIMAL(18,4) NULL,
   accounts_receiv           DECIMAL(16,4) NULL,
   inventories               DECIMAL(16,4) NULL,
   acct_payable              DECIMAL(16,4) NULL,
