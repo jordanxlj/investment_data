@@ -86,90 +86,90 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   currency                  VARCHAR(3)   NOT NULL,
   ann_date                  DATE         NULL,
 
-  -- Income statement fields (based on actual Tushare field names)
-  total_revenue             DECIMAL(16,4) NULL,
-  operate_profit            DECIMAL(16,4) NULL,
-  total_profit              DECIMAL(16,4) NULL,
-  n_income_attr_p           DECIMAL(16,4) NULL,
-  basic_eps                 FLOAT NULL,
-  total_cogs                DECIMAL(16,4) NULL,
-  sell_exp                  DECIMAL(16,4) NULL,
-  admin_exp                 DECIMAL(16,4) NULL,
-  fin_exp                   DECIMAL(16,4) NULL,
-  invest_income             DECIMAL(16,4) NULL,
-  interest_exp              DECIMAL(16,4) NULL,
-  oper_exp                  DECIMAL(16,4) NULL,
-  ebit                      DECIMAL(16,4) NULL,
-  ebitda                    DECIMAL(16,4) NULL,
-  income_tax                DECIMAL(16,4) NULL,
-  comshare_payable_dvd      DECIMAL(16,4) NULL,
+  -- Income statement fields (万元存储 - converted from 元)
+  total_revenue             DECIMAL(16,4) NULL COMMENT '总营收(万元)',
+  operate_profit            DECIMAL(16,4) NULL COMMENT '营业利润(万元)',
+  total_profit              DECIMAL(16,4) NULL COMMENT '利润总额(万元)',
+  n_income_attr_p           DECIMAL(16,4) NULL COMMENT '净利润(万元)',
+  basic_eps                 FLOAT NULL COMMENT '基本每股收益(元)',
+  total_cogs                DECIMAL(16,4) NULL COMMENT '营业总成本(万元)',
+  sell_exp                  DECIMAL(16,4) NULL COMMENT '销售费用(万元)',
+  admin_exp                 DECIMAL(16,4) NULL COMMENT '管理费用(万元)',
+  fin_exp                   DECIMAL(16,4) NULL COMMENT '财务费用(万元)',
+  invest_income             DECIMAL(16,4) NULL COMMENT '投资收益(万元)',
+  interest_exp              DECIMAL(16,4) NULL COMMENT '利息支出(万元)',
+  oper_exp                  DECIMAL(16,4) NULL COMMENT '营业支出(万元)',
+  ebit                      DECIMAL(16,4) NULL COMMENT '息税前利润(万元)',
+  ebitda                    DECIMAL(16,4) NULL COMMENT 'EBITDA(万元)',
+  income_tax                DECIMAL(16,4) NULL COMMENT '所得税(万元)',
+  comshare_payable_dvd      DECIMAL(16,4) NULL COMMENT '应付股利(万元)',
 
-  -- Balance sheet fields
-  total_assets              DECIMAL(18,4) NULL,
-  total_liab                DECIMAL(18,4) NULL,
-  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL,
-  total_cur_assets          DECIMAL(18,4) NULL,
-  total_cur_liab            DECIMAL(18,4) NULL,
-  accounts_receiv           DECIMAL(16,4) NULL,
-  inventories               DECIMAL(16,4) NULL,
-  acct_payable              DECIMAL(16,4) NULL,
-  fix_assets                DECIMAL(16,4) NULL,
-  lt_borr                   DECIMAL(16,4) NULL,
-  r_and_d                   DECIMAL(16,4) NULL,
-  goodwill                  DECIMAL(16,4) NULL,
-  intang_assets             DECIMAL(16,4) NULL,
-  st_borr                   DECIMAL(16,4) NULL,
-  total_share               DECIMAL(16,4) NULL,
-  oth_eqt_tools_p_shr       DECIMAL(16,4) NULL,
+  -- Balance sheet fields (万元存储 - converted from 元)
+  total_assets              DECIMAL(16,4) NULL COMMENT '总资产(万元)',
+  total_liab                DECIMAL(16,4) NULL COMMENT '总负债(万元)',
+  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(万元)',
+  total_cur_assets          DECIMAL(16,4) NULL COMMENT '流动资产(万元)',
+  total_cur_liab            DECIMAL(16,4) NULL COMMENT '流动负债(万元)',
+  accounts_receiv           DECIMAL(16,4) NULL COMMENT '应收账款(万元)',
+  inventories               DECIMAL(16,4) NULL COMMENT '存货(万元)',
+  acct_payable              DECIMAL(16,4) NULL COMMENT '应付账款(万元)',
+  fix_assets                DECIMAL(16,4) NULL COMMENT '固定资产(万元)',
+  lt_borr                   DECIMAL(16,4) NULL COMMENT '长期借款(万元)',
+  r_and_d                   DECIMAL(16,4) NULL COMMENT '研发支出(万元)',
+  goodwill                  DECIMAL(16,4) NULL COMMENT '商誉(万元)',
+  intang_assets             DECIMAL(16,4) NULL COMMENT '无形资产(万元)',
+  st_borr                   DECIMAL(16,4) NULL COMMENT '短期借款(万元)',
+  total_share               DECIMAL(16,4) NULL COMMENT '股本(万元)',
+  oth_eqt_tools_p_shr       DECIMAL(16,4) NULL COMMENT '其他权益工具(万元)',
 
-  -- Cash flow statement fields
-  n_cashflow_act            DECIMAL(16,4) NULL,
-  n_cashflow_inv_act        DECIMAL(16,4) NULL,
-  n_cash_flows_fnc_act      DECIMAL(16,4) NULL,
-  free_cashflow             DECIMAL(16,4) NULL,
-  c_pay_acq_const_fiolta    DECIMAL(16,4) NULL,
-  c_fr_sale_sg              DECIMAL(16,4) NULL,
-  c_paid_goods_s            DECIMAL(16,4) NULL,
-  c_paid_to_for_empl        DECIMAL(16,4) NULL,
-  c_paid_for_taxes          DECIMAL(16,4) NULL,
-  n_incr_cash_cash_equ      DECIMAL(16,4) NULL,
-  c_disp_withdrwl_invest    DECIMAL(16,4) NULL,
-  c_pay_dist_dpcp_int_exp   DECIMAL(16,4) NULL,
-  c_cash_equ_end_period     DECIMAL(16,4) NULL,
+  -- Cash flow statement fields (万元存储 - converted from 元)
+  n_cashflow_act            DECIMAL(16,4) NULL COMMENT '经营现金流(万元)',
+  n_cashflow_inv_act        DECIMAL(16,4) NULL COMMENT '投资现金流(万元)',
+  n_cash_flows_fnc_act      DECIMAL(16,4) NULL COMMENT '融资现金流(万元)',
+  free_cashflow             DECIMAL(16,4) NULL COMMENT '自由现金流(万元)',
+  c_pay_acq_const_fiolta    DECIMAL(16,4) NULL COMMENT '购建固定资产(万元)',
+  c_fr_sale_sg              DECIMAL(16,4) NULL COMMENT '销售商品收款(万元)',
+  c_paid_goods_s            DECIMAL(16,4) NULL COMMENT '购买商品付款(万元)',
+  c_paid_to_for_empl        DECIMAL(16,4) NULL COMMENT '支付职工薪酬(万元)',
+  c_paid_for_taxes          DECIMAL(16,4) NULL COMMENT '支付税费(万元)',
+  n_incr_cash_cash_equ      DECIMAL(16,4) NULL COMMENT '现金等价物净增加(万元)',
+  c_disp_withdrwl_invest    DECIMAL(16,4) NULL COMMENT '处置投资收款(万元)',
+  c_pay_dist_dpcp_int_exp   DECIMAL(16,4) NULL COMMENT '分配股利利息(万元)',
+  c_cash_equ_end_period     DECIMAL(16,4) NULL COMMENT '期末现金余额(万元)',
 
   -- === Financial indicator fields (grouped by relevance) ===
 
   -- 1. Basic financial indicators
-  eps                       FLOAT NULL,
-  dt_eps                    FLOAT NULL,
-  gross_margin              FLOAT NULL,
-  netprofit_margin          FLOAT NULL,
-  grossprofit_margin        FLOAT NULL,
-  ebitda_margin             FLOAT NULL,
-  extra_item                DECIMAL(16,4) NULL,
-  profit_dedt               DECIMAL(16,4) NULL,
-  op_income                 DECIMAL(16,4) NULL,
-  daa                       DECIMAL(16,4) NULL,
-  rd_exp                    DECIMAL(16,4) NULL,
+  eps                       FLOAT NULL COMMENT '每股收益(元)',
+  dt_eps                    FLOAT NULL COMMENT '稀释每股收益(元)',
+  gross_margin              FLOAT NULL COMMENT '毛利率(%)',
+  netprofit_margin          FLOAT NULL COMMENT '净利率(%)',
+  grossprofit_margin        FLOAT NULL COMMENT '毛利润率(%)',
+  ebitda_margin             FLOAT NULL COMMENT 'EBITDA利润率(%)',
+  extra_item                DECIMAL(16,4) NULL COMMENT '其他项目(万元)',
+  profit_dedt               DECIMAL(16,4) NULL COMMENT '扣除非经常性损益后的净利润(万元)',
+  op_income                 DECIMAL(16,4) NULL COMMENT '营业收入(万元)',
+  daa                       DECIMAL(16,4) NULL COMMENT '折旧和摊销(万元)',
+  rd_exp                    DECIMAL(16,4) NULL COMMENT '研发费用(万元)',
 
-  -- 2. Solvency indicators
-  current_ratio             FLOAT NULL,
-  quick_ratio               FLOAT NULL,
-  cash_ratio                FLOAT NULL,
-  debt_to_assets            FLOAT NULL,
-  assets_to_eqt             FLOAT NULL,
-  dp_assets_to_eqt          FLOAT NULL,
-  debt_to_eqt               FLOAT NULL,
-  eqt_to_debt               FLOAT NULL,
-  eqt_to_interestdebt       FLOAT NULL,
-  ebit_to_interest          FLOAT NULL,
-  ebitda_to_debt            FLOAT NULL,
-  debt_to_assets_2          FLOAT NULL,
-  assets_to_eqt_2           FLOAT NULL,
-  dp_assets_to_eqt_2        FLOAT NULL,
-  tangibleasset_to_debt     FLOAT NULL,
-  tangasset_to_intdebt      FLOAT NULL,
-  tangibleasset_to_netdebt  FLOAT NULL,
+  -- 2. Solvency indicators (ratios - no unit conversion needed)
+  current_ratio             FLOAT NULL COMMENT '流动比率',
+  quick_ratio               FLOAT NULL COMMENT '速动比率',
+  cash_ratio                FLOAT NULL COMMENT '现金比率',
+  debt_to_assets            FLOAT NULL COMMENT '资产负债率',
+  assets_to_eqt             FLOAT NULL COMMENT '权益乘数',
+  dp_assets_to_eqt          FLOAT NULL COMMENT '有形资产权益乘数',
+  debt_to_eqt               FLOAT NULL COMMENT '产权比率',
+  eqt_to_debt               FLOAT NULL COMMENT '净资产负债率倒数',
+  eqt_to_interestdebt       FLOAT NULL COMMENT '净资产利息负担率倒数',
+  ebit_to_interest          FLOAT NULL COMMENT '利息保障倍数',
+  ebitda_to_debt            FLOAT NULL COMMENT 'EBITDA对债务比率',
+  debt_to_assets_2          FLOAT NULL COMMENT '资产负债率(备选)',
+  assets_to_eqt_2           FLOAT NULL COMMENT '权益乘数(备选)',
+  dp_assets_to_eqt_2        FLOAT NULL COMMENT '有形资产权益乘数(备选)',
+  tangibleasset_to_debt     FLOAT NULL COMMENT '有形资产债务率',
+  tangasset_to_intdebt      FLOAT NULL COMMENT '有形资产利息债务率',
+  tangibleasset_to_netdebt  FLOAT NULL COMMENT '有形资产净债务率',
 
   -- 3. Operating efficiency indicators
   invturn_days              FLOAT NULL,
@@ -443,6 +443,69 @@ INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']  # Keep end_date for
 # === Merged total field list (used for database operations) ===
 ALL_COLUMNS: List[str] = BASE_COLUMNS + INCOME_COLUMNS + BALANCE_COLUMNS + CASHFLOW_COLUMNS + INDICATOR_COLUMNS
 
+# Fields that need conversion from 元 to 万元 for storage
+# These are monetary amount fields (not ratios or per-share metrics)
+YUAN_TO_WAN_FIELDS = [
+    # Income statement - main monetary amounts
+    'total_revenue', 'operate_profit', 'total_profit', 'n_income_attr_p',
+    'total_cogs', 'sell_exp', 'admin_exp', 'fin_exp', 'invest_income',
+    'interest_exp', 'oper_exp', 'ebit', 'ebitda', 'income_tax',
+    'comshare_payable_dvd',
+
+    # Balance sheet - main monetary amounts
+    'total_assets', 'total_liab', 'total_hldr_eqy_inc_min_int',
+    'total_cur_assets', 'total_cur_liab', 'accounts_receiv', 'inventories',
+    'acct_payable', 'fix_assets', 'lt_borr', 'r_and_d', 'goodwill',
+    'intang_assets', 'st_borr', 'total_share', 'oth_eqt_tools_p_shr',
+
+    # Cash flow statement - main monetary amounts
+    'n_cashflow_act', 'n_cashflow_inv_act', 'n_cash_flows_fnc_act',
+    'free_cashflow', 'c_pay_acq_const_fiolta', 'c_fr_sale_sg',
+    'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
+    'n_incr_cash_cash_equ', 'c_disp_withdrwl_invest',
+    'c_pay_dist_dpcp_int_exp', 'c_cash_equ_end_period',
+
+    # Financial indicators - monetary amounts (not ratios)
+    'extra_item', 'profit_dedt', 'op_income', 'daa', 'rd_exp',
+
+    # Quarterly financial indicators
+    'q_opincome', 'q_investincome', 'q_dtprofit',
+
+    # Other monetary amounts
+    'profit_prefin_exp', 'non_op_profit', 'fixed_assets',
+]
+
+# Per-share metrics that should remain in 元 (not converted)
+PER_SHARE_FIELDS = [
+    'eps', 'dt_eps', 'basic_eps', 'q_eps',
+    'bps', 'ocfps', 'retainedps', 'cfps', 'ebit_ps', 'fcff_ps', 'fcfe_ps'
+]
+
+
+def convert_wan_to_yuan(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert stored 万元 values back to 元 for API responses
+    This ensures API consumers get data in the expected 元 format
+
+    Args:
+        df: DataFrame with values stored in 万元
+
+    Returns:
+        DataFrame with monetary values converted back to 元
+    """
+    if df.empty:
+        return df
+
+    df_copy = df.copy()
+
+    # Convert 万元 back to 元 for monetary amount fields
+    for col in YUAN_TO_WAN_FIELDS:
+        if col in df_copy.columns and df_copy[col].notna().any():
+            # Convert 万元 to 元 (multiply by 10,000)
+            df_copy[col] = df_copy[col] * 10000.0
+
+    return df_copy
+
 
 def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure all expected columns exist and normalize data types"""
@@ -480,17 +543,35 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             if col in out.columns:
                 out[col] = pd.to_numeric(out[col], errors="coerce")
 
+        # Convert monetary amounts from 元 to 万元 for storage
+        # This reduces storage space and prevents DECIMAL overflow
+        for col in YUAN_TO_WAN_FIELDS:
+            if col in out.columns and out[col].notna().any():
+                # Convert 元 to 万元 (divide by 10,000)
+                original_values = out[col].copy()
+                out[col] = out[col] / 10000.0
+
+                # Log conversion for large values
+                large_conversions = original_values.abs() > 1000000000  # > 10亿
+                if large_conversions.any():
+                    max_original = original_values[large_conversions].max()
+                    converted = out[col][large_conversions].max()
+                    print(f"Converted {col}: {max_original:.0f}元 → {converted:.4f}万元")
+
+                print(f"Converted {col} from 元 to 万元 for storage")
+
         # Validate and clamp numeric values to prevent DECIMAL overflow
-        # DECIMAL(precision, scale) limits:
-        # - DECIMAL(16,4): max 999999999999.9999, min -999999999999.9999
-        # - DECIMAL(18,4): max 99999999999999.9999, min -99999999999999.9999
-        # - DECIMAL(22,4): max 999999999999999999.9999, min -999999999999999999.9999
+        # After conversion to 万元, the limits are much more generous:
+        # - DECIMAL(16,4): max ~999,999,999,999万元 (999万亿), min ~-999,999,999,999万元
+        # - DECIMAL(18,4): max ~99,999,999,999,999万元 (99万亿), min ~-99,999,999,999,999万元
+        # - DECIMAL(22,4): max ~99,999,999,999,999,999万元 (99万亿), min ~-99,999,999,999,999,999万元
         decimal_limits = {
-            'total_revenue': (16, 4),           # DECIMAL(16,4)
+            # After 元→万元 conversion, limits are very generous for most financial data
+            'total_revenue': (16, 4),           # DECIMAL(16,4) - up to ~999万亿万元
             'operate_profit': (16, 4),          # DECIMAL(16,4)
             'total_profit': (16, 4),            # DECIMAL(16,4)
             'n_income_attr_p': (16, 4),         # DECIMAL(16,4)
-            'basic_eps': None,                  # FLOAT
+            'basic_eps': None,                  # FLOAT - per-share metrics remain in 元
             'total_cogs': (16, 4),              # DECIMAL(16,4)
             'sell_exp': (16, 4),                # DECIMAL(16,4)
             'admin_exp': (16, 4),               # DECIMAL(16,4)
@@ -503,9 +584,9 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             'income_tax': (16, 4),              # DECIMAL(16,4)
             'comshare_payable_dvd': (16, 4),    # DECIMAL(16,4)
 
-            # Balance sheet fields
-            'total_assets': (18, 4),            # DECIMAL(18,4)
-            'total_liab': (18, 4),              # DECIMAL(18,4) - This is the problematic field
+            # Balance sheet fields - very generous limits after conversion
+            'total_assets': (16, 4),            # DECIMAL(16,4)
+            'total_liab': (16, 4),              # DECIMAL(16,4)
             'total_hldr_eqy_inc_min_int': (16, 4), # DECIMAL(16,4)
             'total_cur_assets': (18, 4),        # DECIMAL(18,4)
             'total_cur_liab': (18, 4),          # DECIMAL(18,4)
@@ -536,20 +617,20 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             'c_pay_dist_dpcp_int_exp': (16, 4), # DECIMAL(16,4)
             'c_cash_equ_end_period': (16, 4),   # DECIMAL(16,4)
 
-            # Financial indicator fields (ratios and percentages - smaller ranges)
-            'eps': None,                        # FLOAT
-            'dt_eps': None,                     # FLOAT
-            'gross_margin': None,               # FLOAT
-            'netprofit_margin': None,           # FLOAT
-            'grossprofit_margin': None,         # FLOAT
-            'ebitda_margin': None,              # FLOAT
-            'extra_item': (16, 4),              # DECIMAL(16,4)
-            'profit_dedt': (16, 4),             # DECIMAL(16,4)
-            'op_income': (16, 4),               # DECIMAL(16,4)
-            'daa': (16, 4),                     # DECIMAL(16,4)
-            'rd_exp': (16, 4),                  # DECIMAL(16,4)
+            # Financial indicator fields (ratios/per-share metrics - no conversion)
+            'eps': None,                        # FLOAT - per-share (元)
+            'dt_eps': None,                     # FLOAT - per-share (元)
+            'gross_margin': None,               # FLOAT - ratio (%)
+            'netprofit_margin': None,           # FLOAT - ratio (%)
+            'grossprofit_margin': None,         # FLOAT - ratio (%)
+            'ebitda_margin': None,              # FLOAT - ratio (%)
+            'extra_item': (16, 4),              # DECIMAL(16,4) - monetary amount
+            'profit_dedt': (16, 4),             # DECIMAL(16,4) - monetary amount
+            'op_income': (16, 4),               # DECIMAL(16,4) - monetary amount
+            'daa': (16, 4),                     # DECIMAL(16,4) - monetary amount
+            'rd_exp': (16, 4),                  # DECIMAL(16,4) - monetary amount
 
-            # Most other indicator fields are FLOAT or smaller DECIMAL ranges
+            # Most other indicator fields are FLOAT (ratios) or smaller ranges
             # For safety, we'll use conservative limits for large values
         }
 
