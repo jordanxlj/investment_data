@@ -94,10 +94,10 @@ class TTMCalculator:
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            logger.info(f"Loaded CAGR configuration for {len(config.get('cagr_metrics', {}))} metrics")
+            logger.info("Loaded CAGR configuration for %d metrics", len(config.get('cagr_metrics', {})))
             return config
         except Exception as e:
-            logger.error(f"Failed to load annual config: {e}")
+            logger.error("Failed to load annual config: %s", str(e))
             raise
 
     def create_db_engine(self, mysql_url: str):
@@ -444,7 +444,6 @@ class TTMCalculator:
                 select_fields.append(f"financial.{field}")
 
             select_clause = ",\n            ".join(select_fields)
-            import pdb; pdb.set_trace()
 
             query = text(f"""
             SELECT
@@ -466,8 +465,8 @@ class TTMCalculator:
             })
             if not df.empty:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
-                df['report_year'] = df['report_period'].str[:4].astype(int)
-                df['report_quarter'] = df['report_period'].str[-5:-3]
+                df['report_year'] = df['report_period'].dt.year
+                df['report_quarter'] = df['report_period'].dt.month // 3 + 1
 
             logger.debug("Retrieved %d financial records for %s", len(df), ts_code)
             return df
