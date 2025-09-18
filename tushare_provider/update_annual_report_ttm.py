@@ -382,6 +382,39 @@ class TTMCalculator:
             logger.error(f"Failed to process stock {ts_code}: {e}")
             return []
 
+    def _validate_report_period_data(self, df: pd.DataFrame, context: str = "general") -> pd.DataFrame:
+        """
+        Validate report_period data and remove invalid entries
+
+        Args:
+            df: DataFrame containing report_period column
+            context: Context for logging (e.g., "database", "input", "calculation")
+
+        Returns:
+            DataFrame with invalid report_period entries removed
+        """
+        if df.empty or 'report_period' not in df.columns:
+            return df
+
+        try:
+            original_count = len(df)
+
+            # Convert to datetime if needed
+            if not pd.api.types.is_datetime64_any_dtype(df['report_period']):
+                df = df.copy()
+                df['report_period'] = pd.to_datetime(df['report_period'], errors='coerce')
+
+            # Remove invalid dates
+            invalid_dates = df['report_period'].isna()
+            if invalid_dates.any():
+                logger.warning(f"[{context}] Found {invalid_dates.sum()} rows with invalid report_period dates, removing them")
+                df = df[~invalid_dates]
+
+            return df
+        except Exception as e:
+            logger.error(f"[{context}] Error validating report_period data: {e}")
+            return pd.DataFrame()
+
     def get_financial_data_for_single_stock(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Get all financial data for a single stock within date range"""
         try:
@@ -464,10 +497,16 @@ class TTMCalculator:
                 "query_end_date": query_end_str
             })
             if not df.empty:
-                df['ann_date'] = pd.to_datetime(df['ann_date'])
-                df['report_period'] = pd.to_datetime(df['report_period'])
-                df['report_year'] = df['report_period'].dt.year
-                df['report_quarter'] = df['report_period'].dt.month // 3
+                df['ann_date'] = pd.to_datetime(df['ann_date'], errors='coerce')
+                df['report_period'] = pd.to_datetime(df['report_period'], errors='coerce')
+
+                # Use validation function
+                df = self._validate_report_period_data(df, "database")
+
+                # Set derived columns for valid data
+                if not df.empty:
+                    df['report_year'] = df['report_period'].dt.year
+                    df['report_quarter'] = df['report_period'].dt.month // 3
 
             logger.debug("Retrieved %d financial records for %s", len(df), ts_code)
             return df
@@ -536,11 +575,18 @@ class TTMCalculator:
         target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
         start_date = target_date_dt - pd.DateOffset(months=12)
 
+        # Define quarter end dates
+        quarter_ends = ['03-31', '06-30', '09-30', '12-31']
+
+        # Validate and filter data
+        df_copy = self._validate_report_period_data(stock_df, "input")
+
         # Filter for required stocks and date range
-        filtered_df = stock_df[
-            (stock_df['ts_code'].isin(ts_codes)) &
-            (stock_df['ann_date'] < target_date_dt) &
-            (stock_df['ann_date'] >= start_date)
+        filtered_df = df_copy[
+            (df_copy['ts_code'].isin(ts_codes)) &
+            (df_copy['report_period'].dt.strftime('%m-%d').isin(quarter_ends)) &
+            (df_copy['ann_date'] < target_date_dt) &
+            (df_copy['ann_date'] >= start_date)
         ].copy()
 
         logger.debug(f"Filtered {len(filtered_df)} quarterly/annual records for TTM calculation")
@@ -610,28 +656,16 @@ class TTMCalculator:
             TTM value or None if calculation not possible
         """
         try:
-            # Ensure data types are correct
-            df_copy = financial_df.copy()
-            import pdb; pdb.set_trace()    
-            # Convert date columns to datetime if they're not already
-            if 'report_period' in df_copy.columns:
-                if not pd.api.types.is_datetime64_any_dtype(df_copy['report_period']):
-                    df_copy['report_period'] = pd.to_datetime(df_copy['report_period'])
+            # Ensure data types are correct and validate data
+            df_copy = self._validate_report_period_data(financial_df, "calculation")
 
-            if 'ann_date' in df_copy.columns:
-                if not pd.api.types.is_datetime64_any_dtype(df_copy['ann_date']):
-                    df_copy['ann_date'] = pd.to_datetime(df_copy['ann_date'])
-
-            # Add report_year and report_quarter if they don't exist
-            if 'report_year' not in df_copy.columns:
-                df_copy['report_year'] = df_copy['report_period'].dt.year
-
-            if 'report_quarter' not in df_copy.columns:
-                df_copy['report_quarter'] = ((df_copy['report_period'].dt.month - 1) // 3) + 1
+            if df_copy.empty:
+                logger.debug(f"No valid data available for TTM calculation of {source_field} after validation")
+                return None
 
             # Find the most recent quarterly report that is not in the future
             target_dt = pd.to_datetime(target_date)
-            valid_reports = df_copy[df_copy['ann_date'] <= target_dt]
+            valid_reports = df_copy[df_copy['ann_date'] < target_dt]
 
             if valid_reports.empty:
                 logger.debug(f"No historical quarterly data available for TTM calculation of {source_field}")
