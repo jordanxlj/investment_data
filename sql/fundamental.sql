@@ -1,7 +1,7 @@
 /* Update Fundamentals - Identify Missing and Update (Day by Day) */
 SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-01';
-SET @debug = 0;
+SET @debug = 1;  -- Enable debug for more outputs
 
 SELECT "Identify and print records from ts_a_stock_fundamental that do not exist in final_a_stock_comb_info" as info;
 SELECT
@@ -87,6 +87,14 @@ BEGIN
   /* Debug: Check joined temp table rows */
   SELECT COUNT(*) AS joined_rows FROM temp_fundamentals_joined;
 
+  -- Debug: Sample data from temp table for first date (if debug enabled)
+  IF @debug = 1 THEN
+    SELECT "Sample source data for first processing date" AS sample_info;
+    SELECT tradedate, symbol, turnover_rate, pe_final, pb, ps_final, dv_ratio_final, circ_mv
+    FROM temp_fundamentals_joined
+    LIMIT 5;
+  END IF;
+
   -- Open the cursor
   OPEN date_cursor;
 
@@ -97,6 +105,38 @@ BEGIN
     END IF;
 
     SELECT CONCAT('Update Fundamental, Processing date: ', v_current_date) as processing_info;
+
+    -- Debug: Count potential matches before UPDATE (rows that would be joined)
+    SELECT 
+      CONCAT('Debug: Potential matches for ', v_current_date, ': ', COUNT(*)) AS match_count_info
+    FROM temp_fundamentals_joined updates
+    INNER JOIN final_a_stock_comb_info final ON final.tradedate = updates.tradedate
+                                             AND final.symbol = updates.symbol
+    WHERE updates.tradedate = v_current_date;
+
+    -- Debug: If debug enabled, sample existing vs source values for first symbol on this date
+    IF @debug = 1 THEN
+      SELECT "Sample comparison (existing vs source) for first symbol on this date" AS comparison_info;
+      
+      -- Sample symbol (pick the first one from final for this date)
+      SELECT 
+        CONCAT('final_symbol: ', final.symbol, ', turnover_rate: ', final.turnover_rate, 
+               ', pe: ', final.pe, ', pb: ', final.pb, 
+               ', ps: ', final.ps, ', dv_ratio: ', final.dv_ratio, 
+               ', circ_mv: ', final.circ_mv) AS existing_values
+      FROM final_a_stock_comb_info final
+      WHERE final.tradedate = v_current_date
+      LIMIT 1;
+      
+      SELECT 
+        CONCAT('source_symbol: ', updates.symbol, ', turnover_rate: ', updates.turnover_rate, 
+               ', pe_final: ', updates.pe_final, ', pb: ', updates.pb, 
+               ', ps_final: ', updates.ps_final, ', dv_ratio_final: ', updates.dv_ratio_final, 
+               ', circ_mv: ', updates.circ_mv) AS source_values
+      FROM temp_fundamentals_joined updates
+      WHERE updates.tradedate = v_current_date
+      LIMIT 1;
+    END IF;
 
     /* Update records for this specific date using pre-joined temp table */
     UPDATE final_a_stock_comb_info final
@@ -112,7 +152,7 @@ BEGIN
       final.circ_mv = updates.circ_mv
     WHERE updates.tradedate = v_current_date;
 
-    /* Debug: Rows updated for this date */
+    /* Debug: Rows updated for this date (actual changes made) */
     SELECT ROW_COUNT() AS updated_for_date;
 
     /* Remove processed date from temp table */

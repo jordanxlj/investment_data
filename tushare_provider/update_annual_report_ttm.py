@@ -313,7 +313,6 @@ class TTMCalculator:
 
             for target_date in date_list:
                 try:
-                    import pdb; pdb.set_trace()
                     target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
 
                     # Find the most recent announcement date before or on target_date
