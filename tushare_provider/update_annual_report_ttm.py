@@ -301,7 +301,7 @@ class TTMCalculator:
             # Get all unique announcement dates for this stock (sorted)
             announcement_dates = sorted(stock_financial_df['ann_date'].unique())
             logger.debug(f"{ts_code} has {len(announcement_dates)} financial reports in date range")
-
+            logger.debug(f"Announcement dates: {announcement_dates}")
             # Get the actual trading dates for this stock within the date range
             stock_dates = pd.date_range(start=start_date, end=end_date, freq='D')
             date_list = [d.strftime('%Y-%m-%d') for d in stock_dates]
@@ -323,6 +323,7 @@ class TTMCalculator:
                         logger.debug(f"Skipping {ts_code} on {target_date}: no financial data available")
                         continue
 
+                    import pdb; pdb.set_trace()    
                     most_recent_announcement = max(recent_announcement_dates)
 
                     # Check if we have new financial data since last calculation
