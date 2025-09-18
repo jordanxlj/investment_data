@@ -516,7 +516,7 @@ class TTMCalculator:
             max_periods = max(max_periods, periods)
 
         # Get enough years of data: max_periods + 1 (for start and end values)
-        years_to_include = [str(target_year - i) for i in range(max_periods + 1)]
+        years_to_include = [str(target_year - i - 1) for i in range(max_periods + 1)]
 
         # Filter for required stocks, date range, and annual reports
         filtered_df = stock_df[
