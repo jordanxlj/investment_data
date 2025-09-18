@@ -638,10 +638,20 @@ class TTMCalculator:
                     (financial_df['report_year'] == current_year)
                 )
                 current_data = financial_df[current_mask]
+
+                # Debug logging
+                logger.debug(f"Looking for Q{current_quarter} {current_year} data")
+                logger.debug(f"Quarter end date: {quarter_ends[current_quarter][1:]}")
+                logger.debug(f"Available report periods: {financial_df['report_period'].dt.strftime('%Y-%m-%d').unique() if not financial_df.empty else 'No data'}")
+                logger.debug(f"Available report years: {financial_df['report_year'].unique() if not financial_df.empty else 'No data'}")
+                logger.debug(f"Current mask matches: {len(current_data)} records")
+
                 if not current_data.empty:
                     current_ytd_value = current_data.iloc[0].get(source_field)
                     logger.debug(f"Current YTD {source_field}: {current_ytd_value} "
                                f"(Q{current_quarter} {current_year})")
+                else:
+                    logger.debug(f"No current quarter data found for Q{current_quarter} {current_year}")
 
             # 2. Get previous year annual value
             prev_year_annual_value = None
