@@ -569,11 +569,13 @@ class TTMCalculator:
         current_month = target_dt.month
 
         # Determine current quarter based on month
-        if current_month <= 3:
+        if current_month <= 4:
+            current_quarter = 4
+        elif current_month <= 5:
             current_quarter = 1
-        elif current_month <= 6:
+        elif current_month <= 8:
             current_quarter = 2
-        elif current_month <= 9:
+        elif current_month <= 11:
             current_quarter = 3
         else:
             current_quarter = 4
