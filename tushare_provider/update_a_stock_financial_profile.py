@@ -88,11 +88,13 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 
   -- Income statement fields (万元存储 - converted from 元)
   total_revenue             DECIMAL(16,4) NULL COMMENT '总营收(万元)',
+  revenue                   DECIMAL(16,4) NULL COMMENT '营业收入(万元)',
   operate_profit            DECIMAL(16,4) NULL COMMENT '营业利润(万元)',
   total_profit              DECIMAL(16,4) NULL COMMENT '利润总额(万元)',
   n_income_attr_p           DECIMAL(16,4) NULL COMMENT '净利润(万元)',
   basic_eps                 FLOAT NULL COMMENT '基本每股收益(元)',
   total_cogs                DECIMAL(16,4) NULL COMMENT '营业总成本(万元)',
+  oper_cost                 DECIMAL(16,4) NULL COMMENT '营业成本(万元)',
   sell_exp                  DECIMAL(16,4) NULL COMMENT '销售费用(万元)',
   admin_exp                 DECIMAL(16,4) NULL COMMENT '管理费用(万元)',
   fin_exp                   DECIMAL(16,4) NULL COMMENT '财务费用(万元)',
@@ -107,7 +109,9 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   -- Balance sheet fields (万元存储 - converted from 元)
   total_assets              DECIMAL(16,4) NULL COMMENT '总资产(万元)',
   total_liab                DECIMAL(16,4) NULL COMMENT '总负债(万元)',
-  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(万元)',
+  total_equity              DECIMAL(16,4) NULL COMMENT '股东权益(万元)',
+  total_hldr_eqy_exc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(不含少数股东权益)(万元)',
+  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(含少数股东权益)(万元)',
   total_cur_assets          DECIMAL(16,4) NULL COMMENT '流动资产(万元)',
   total_cur_liab            DECIMAL(16,4) NULL COMMENT '流动负债(万元)',
   accounts_receiv           DECIMAL(16,4) NULL COMMENT '应收账款(万元)',
@@ -343,9 +347,9 @@ BASE_COLUMNS = ["ts_code", "ann_date", "report_period", "period", "currency"]
 
 # Income statement fields
 INCOME_COLUMNS = [
-    "total_revenue", "operate_profit", "total_profit", "n_income_attr_p", "basic_eps",
-    "total_cogs", "sell_exp", "admin_exp", "fin_exp", "invest_income", "interest_exp",
-    "oper_exp", "ebit", "ebitda", "income_tax", "comshare_payable_dvd"
+    "total_revenue", "revenue", "operate_profit", "total_profit", "n_income_attr_p", "basic_eps",
+    "total_cogs", "oper_cost", "sell_exp", "admin_exp", "fin_exp", "invest_income", "interest_exp",
+    "oper_exp", "ebit", "ebitda", "income_tax", "comshare_payable_dvd", "rd_exp"
 ]
 
 # Balance sheet fields
@@ -353,7 +357,7 @@ BALANCE_COLUMNS = [
     "total_assets", "total_liab", "total_hldr_eqy_inc_min_int", "total_cur_assets",
     "total_cur_liab", "accounts_receiv", "inventories", "acct_payable",
     "fix_assets", "lt_borr", "r_and_d", "goodwill", "intang_assets", "st_borr",
-    "total_share", "oth_eqt_tools_p_shr"
+    "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int"
 ]
 
 # Cash flow statement fields
@@ -368,7 +372,7 @@ CASHFLOW_COLUMNS = [
 INDICATOR_COLUMNS = [
     # Basic financial indicators
     "eps", "dt_eps", "gross_margin", "netprofit_margin", "grossprofit_margin",
-    "ebitda_margin", "extra_item", "profit_dedt", "op_income", "daa", "rd_exp",
+    "ebitda_margin", "extra_item", "profit_dedt", "op_income", "daa",
 
     # Solvency indicators
     "current_ratio", "quick_ratio", "cash_ratio", "debt_to_assets", "assets_to_eqt",
@@ -447,16 +451,17 @@ ALL_COLUMNS: List[str] = BASE_COLUMNS + INCOME_COLUMNS + BALANCE_COLUMNS + CASHF
 # These are monetary amount fields (not ratios or per-share metrics)
 YUAN_TO_WAN_FIELDS = [
     # Income statement - main monetary amounts
-    'total_revenue', 'operate_profit', 'total_profit', 'n_income_attr_p',
-    'total_cogs', 'sell_exp', 'admin_exp', 'fin_exp', 'invest_income',
+    'total_revenue', 'revenue', 'operate_profit', 'total_profit', 'n_income_attr_p',
+    'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp', 'invest_income',
     'interest_exp', 'oper_exp', 'ebit', 'ebitda', 'income_tax',
-    'comshare_payable_dvd',
+    'comshare_payable_dvd', 'rd_exp',
 
     # Balance sheet - main monetary amounts
-    'total_assets', 'total_liab', 'total_hldr_eqy_inc_min_int',
-    'total_cur_assets', 'total_cur_liab', 'accounts_receiv', 'inventories',
-    'acct_payable', 'fix_assets', 'lt_borr', 'r_and_d', 'goodwill',
-    'intang_assets', 'st_borr', 'total_share', 'oth_eqt_tools_p_shr',
+    'total_assets', 'total_liab', 'total_cur_assets', 'total_cur_liab', 
+    'accounts_receiv', 'inventories', 'acct_payable', 'fix_assets', 
+    'lt_borr', 'r_and_d', 'goodwill', 'intang_assets', 'st_borr',
+    'total_share', 'oth_eqt_tools_p_shr', 'total_hldr_eqy_exc_min_int', 
+    'total_hldr_eqy_inc_min_int',
 
     # Cash flow statement - main monetary amounts
     'n_cashflow_act', 'n_cashflow_inv_act', 'n_cash_flows_fnc_act',
@@ -466,7 +471,7 @@ YUAN_TO_WAN_FIELDS = [
     'c_pay_dist_dpcp_int_exp', 'c_cash_equ_end_period',
 
     # Financial indicators - monetary amounts (not ratios)
-    'extra_item', 'profit_dedt', 'op_income', 'daa', 'rd_exp',
+    'extra_item', 'profit_dedt', 'op_income', 'daa',
 
     # Quarterly financial indicators
     'q_opincome', 'q_investincome', 'q_dtprofit',
@@ -571,11 +576,13 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         decimal_limits = {
             # After 元→万元 conversion, limits are very generous for most financial data
             'total_revenue': (16, 4),           # DECIMAL(16,4) - up to ~999万亿万元
+            'revenue': (16, 4),                 # DECIMAL(16,4)
             'operate_profit': (16, 4),          # DECIMAL(16,4)
             'total_profit': (16, 4),            # DECIMAL(16,4)
             'n_income_attr_p': (16, 4),         # DECIMAL(16,4)
             'basic_eps': None,                  # FLOAT - per-share metrics remain in 元
             'total_cogs': (16, 4),              # DECIMAL(16,4)
+            'oper_cost': (16, 4),               # DECIMAL(16,4)
             'sell_exp': (16, 4),                # DECIMAL(16,4)
             'admin_exp': (16, 4),               # DECIMAL(16,4)
             'fin_exp': (16, 4),                 # DECIMAL(16,4)
@@ -591,8 +598,8 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
             'total_assets': (16, 4),            # DECIMAL(16,4)
             'total_liab': (16, 4),              # DECIMAL(16,4)
             'total_hldr_eqy_inc_min_int': (16, 4), # DECIMAL(16,4)
-            'total_cur_assets': (18, 4),        # DECIMAL(18,4)
-            'total_cur_liab': (18, 4),          # DECIMAL(18,4)
+            'total_cur_assets': (16, 4),        # DECIMAL(18,4)
+            'total_cur_liab': (16, 4),          # DECIMAL(18,4)
             'accounts_receiv': (16, 4),         # DECIMAL(16,4)
             'inventories': (16, 4),             # DECIMAL(16,4)
             'acct_payable': (16, 4),            # DECIMAL(16,4)

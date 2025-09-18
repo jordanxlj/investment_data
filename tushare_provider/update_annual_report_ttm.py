@@ -573,7 +573,7 @@ class TTMCalculator:
 
         # Convert target_date to proper format and calculate date range
         target_date_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
-        start_date = target_date_dt - pd.DateOffset(months=12)
+        start_date = target_date_dt - pd.DateOffset(months=16)
 
         # Define quarter end dates
         quarter_ends = ['03-31', '06-30', '09-30', '12-31']
