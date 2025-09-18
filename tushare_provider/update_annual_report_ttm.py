@@ -323,7 +323,6 @@ class TTMCalculator:
                         logger.debug(f"Skipping {ts_code} on {target_date}: no financial data available")
                         continue
 
-                    import pdb; pdb.set_trace()    
                     most_recent_announcement = max(recent_announcement_dates)
 
                     # Check if we have new financial data since last calculation
@@ -563,22 +562,9 @@ class TTMCalculator:
         if financial_df.empty:
             return self._get_empty_ttm_metrics()
 
-        # Parse target date
+        # Parse target date - we no longer need to determine quarter from date
+        # since we find the most recent available quarter from the data
         target_dt = pd.to_datetime(target_date, format='%Y-%m-%d')
-        current_year = target_dt.year
-        current_month = target_dt.month
-
-        # Determine current quarter based on month
-        if current_month <= 4:
-            current_quarter = 4
-        elif current_month <= 5:
-            current_quarter = 1
-        elif current_month <= 8:
-            current_quarter = 2
-        elif current_month <= 11:
-            current_quarter = 3
-        else:
-            current_quarter = 4
 
         # Get TTM metrics configuration
         ttm_metrics_config = self.annual_config.get('ttm_metrics', {})
@@ -598,18 +584,18 @@ class TTMCalculator:
                 continue
 
             ttm_value = self._calculate_single_ttm_metric(
-                financial_df, source_field, current_year, current_quarter
+                financial_df, source_field, target_date
             )
 
             if ttm_value is not None:
                 ttm_metrics[output_field] = ttm_value
                 logger.debug(".4f"
-                           f"for {metric_name} (quarter {current_quarter})")
+                           f"for {metric_name}")
 
         return ttm_metrics
 
     def _calculate_single_ttm_metric(self, financial_df: pd.DataFrame, source_field: str,
-                                   current_year: int, current_quarter: int) -> Optional[float]:
+                                   target_date: str) -> Optional[float]:
         """
         Calculate TTM for a single metric using YTD formula
 
@@ -618,13 +604,49 @@ class TTMCalculator:
         Args:
             financial_df: Financial data DataFrame
             source_field: Field name to calculate TTM for
-            current_year: Current year
-            current_quarter: Current quarter (1-4)
+            target_date: Target date for calculation (YYYY-MM-DD format)
 
         Returns:
             TTM value or None if calculation not possible
         """
         try:
+            # Ensure data types are correct
+            df_copy = financial_df.copy()
+
+            # Convert date columns to datetime if they're not already
+            if 'report_period' in df_copy.columns:
+                if not pd.api.types.is_datetime64_any_dtype(df_copy['report_period']):
+                    df_copy['report_period'] = pd.to_datetime(df_copy['report_period'])
+
+            if 'ann_date' in df_copy.columns:
+                if not pd.api.types.is_datetime64_any_dtype(df_copy['ann_date']):
+                    df_copy['ann_date'] = pd.to_datetime(df_copy['ann_date'])
+
+            # Add report_year and report_quarter if they don't exist
+            if 'report_year' not in df_copy.columns:
+                df_copy['report_year'] = df_copy['report_period'].dt.year
+
+            if 'report_quarter' not in df_copy.columns:
+                df_copy['report_quarter'] = ((df_copy['report_period'].dt.month - 1) // 3) + 1
+
+            # Find the most recent quarterly report that is not in the future
+            target_dt = pd.to_datetime(target_date)
+            valid_reports = df_copy[df_copy['ann_date'] <= target_dt]
+
+            if valid_reports.empty:
+                logger.debug(f"No historical quarterly data available for TTM calculation of {source_field}")
+                return None
+
+            # Sort by report period to find the most recent one
+            sorted_valid_reports = valid_reports.sort_values('report_period', ascending=False)
+            most_recent = sorted_valid_reports.iloc[0]
+            current_period = most_recent['report_period']
+            current_year = most_recent['report_year']
+            current_quarter = most_recent['report_quarter']
+
+            logger.debug(f"Using most recent quarter: Q{current_quarter} {current_year} "
+                        f"(period: {current_period.strftime('%Y-%m-%d')}) for {source_field}")
+
             # Define quarter end dates
             quarter_ends = {
                 1: '-03-31',
@@ -636,35 +658,24 @@ class TTMCalculator:
             # 1. Get current year YTD value (most recent report for current quarter)
             current_ytd_value = None
             if current_quarter in quarter_ends:
-                import pdb; pdb.set_trace()
                 current_mask = (
-                    (financial_df['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
-                    (financial_df['report_year'] == current_year)
+                    (df_copy['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
+                    (df_copy['report_year'] == current_year)
                 )
-                current_data = financial_df[current_mask]
-
-                # Debug logging
-                logger.debug(f"Looking for Q{current_quarter} {current_year} data")
-                logger.debug(f"Quarter end date: {quarter_ends[current_quarter][1:]}")
-                logger.debug(f"Available report periods: {financial_df['report_period'].dt.strftime('%Y-%m-%d').unique() if not financial_df.empty else 'No data'}")
-                logger.debug(f"Available report years: {financial_df['report_year'].unique() if not financial_df.empty else 'No data'}")
-                logger.debug(f"Current mask matches: {len(current_data)} records")
-
+                current_data = df_copy[current_mask]
                 if not current_data.empty:
                     current_ytd_value = current_data.iloc[0].get(source_field)
                     logger.debug(f"Current YTD {source_field}: {current_ytd_value} "
                                f"(Q{current_quarter} {current_year})")
-                else:
-                    logger.debug(f"No current quarter data found for Q{current_quarter} {current_year}")
 
             # 2. Get previous year annual value
             prev_year_annual_value = None
             prev_year = current_year - 1
             annual_mask = (
-                (financial_df['report_period'].dt.strftime('%m-%d') == '12-31') &
-                (financial_df['report_year'] == prev_year)
+                (df_copy['report_period'].dt.strftime('%m-%d') == '12-31') &
+                (df_copy['report_year'] == prev_year)
             )
-            annual_data = financial_df[annual_mask]
+            annual_data = df_copy[annual_mask]
             if not annual_data.empty:
                 prev_year_annual_value = annual_data.iloc[0].get(source_field)
                 logger.debug(f"Previous year annual {source_field}: {prev_year_annual_value} "
@@ -674,35 +685,26 @@ class TTMCalculator:
             prev_year_quarter_value = None
             if current_quarter in quarter_ends:
                 prev_quarter_mask = (
-                    (financial_df['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
-                    (financial_df['report_year'] == prev_year)
+                    (df_copy['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
+                    (df_copy['report_year'] == prev_year)
                 )
-                prev_quarter_data = financial_df[prev_quarter_mask]
+                prev_quarter_data = df_copy[prev_quarter_mask]
                 if not prev_quarter_data.empty:
                     prev_year_quarter_value = prev_quarter_data.iloc[0].get(source_field)
                     logger.debug(f"Previous year Q{current_quarter} {source_field}: {prev_year_quarter_value} "
                                f"(Q{current_quarter} {prev_year})")
 
             # Calculate TTM using the formula: Current YTD + Prev Year Annual - Prev Year Same Quarter YTD
-            if (current_ytd_value is not None and
-                prev_year_annual_value is not None and
-                prev_year_quarter_value is not None):
-
+            if current_ytd_value is not None and prev_year_annual_value is not None and prev_year_quarter_value is not None:
                 ttm_value = current_ytd_value + prev_year_annual_value - prev_year_quarter_value
-
-                logger.debug(f"TTM calculation for {source_field}: "
-                           f"{current_ytd_value} + {prev_year_annual_value} - {prev_year_quarter_value} = {ttm_value}")
-
+                logger.debug(f"Calculated TTM {source_field}: {ttm_value} = {current_ytd_value} + {prev_year_annual_value} - {prev_year_quarter_value}")
                 return ttm_value
             else:
-                logger.debug(f"Insufficient data for TTM calculation of {source_field}: "
-                           f"Current YTD: {current_ytd_value}, "
-                           f"Prev Annual: {prev_year_annual_value}, "
-                           f"Prev Quarter: {prev_year_quarter_value}")
+                logger.debug(f"Insufficient data for TTM calculation of {source_field}: Current YTD: {current_ytd_value}, Prev Annual: {prev_year_annual_value}, Prev Quarter: {prev_year_quarter_value}")
                 return None
 
         except Exception as e:
-            logger.error(f"Error calculating TTM for {source_field}: {e}")
+            logger.error("Error calculating TTM for %s: %s", source_field, str(e))
             return None
 
     def calculate_compound_field(self, row: pd.Series, source_fields: Union[list, set, dict], operation: str = 'subtract') -> Optional[float]:
@@ -776,6 +778,26 @@ class TTMCalculator:
             return {metric_name: None for metric_name in cagr_metrics.keys()}
 
         try:
+            # Ensure data types are correct for CAGR calculation
+            df_copy = financial_df.copy()
+
+            # Convert date columns to datetime if they're not already
+            if 'report_period' in df_copy.columns:
+                if not pd.api.types.is_datetime64_any_dtype(df_copy['report_period']):
+                    df_copy['report_period'] = pd.to_datetime(df_copy['report_period'])
+
+            if 'ann_date' in df_copy.columns:
+                if not pd.api.types.is_datetime64_any_dtype(df_copy['ann_date']):
+                    df_copy['ann_date'] = pd.to_datetime(df_copy['ann_date'])
+
+            # Add report_year if it doesn't exist
+            if 'report_year' not in df_copy.columns:
+                df_copy['report_year'] = df_copy['report_period'].dt.year
+
+            # Add report_quarter if it doesn't exist (for consistency)
+            if 'report_quarter' not in df_copy.columns:
+                df_copy['report_quarter'] = ((df_copy['report_period'].dt.month - 1) // 3) + 1
+
             # Get CAGR metrics configuration
             cagr_metrics_config = self.annual_config.get('cagr_metrics', {})
             cagr_results = {}
@@ -794,8 +816,8 @@ class TTMCalculator:
                         continue
 
                     # Use only annual reports for all metrics (simplified approach)
-                    calculation_data = financial_df[
-                        financial_df['report_period'].dt.strftime('%m-%d') == '12-31'
+                    calculation_data = df_copy[
+                        df_copy['report_period'].dt.strftime('%m-%d') == '12-31'
                     ].sort_values('report_year', ascending=False)
 
                     # Check if we have enough data points

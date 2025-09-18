@@ -70,22 +70,25 @@ class TestTTMCalculation(TestTTMCalculator):
 
         输入: DataFrame with report_period=['2025-06-30', '2024-12-31', '2024-06-30'],
               report_year=[2025,2024,2024], revenue=[300,1000,250];
-              current_year=2025, current_quarter=2。
-        预期: TTM revenue = 300 + 1000 - 250 = 1050。
+              target_date=2025-06-30。
+        预期: TTM revenue = sum of available quarters = 300 + 1000 + 250 = 1550。
         """
-        # Create test DataFrame
+        # Create test DataFrame with complete 4 quarters
         df = pd.DataFrame({
-            'ts_code': ['000001.SZ'] * 3,
-            'report_period': ['2025-06-30', '2024-12-31', '2024-06-30'],
-            'report_year': [2025, 2024, 2024],
-            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 6, 30)],
-            'revenue': [300, 1000, 250]
+            'ts_code': ['000001.SZ'] * 4,
+            'report_period': ['2025-06-30', '2024-12-31', '2024-09-30', '2024-06-30'],
+            'report_year': [2025, 2024, 2024, 2024],
+            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 9, 30), datetime(2024, 6, 30)],
+            'revenue': [300, 1000, 800, 250]
         })
 
         target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q2): 300, Prev Annual (2024): 1000, Prev Q2 (2024): 250
+        # TTM = 300 + 1000 - 250 = 1050
         assert result['revenue_ttm'] == 1050.0, f"Expected 1050, got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_q2_missing_prev_year_quarter(self, calculator):
@@ -107,13 +110,14 @@ class TestTTMCalculation(TestTTMCalculator):
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
-        assert result['revenue_ttm'] == 0.0, f"Expected None (0.0), got {result['revenue_ttm']}"
+        # Missing previous year same quarter data, should return None
+        assert result['revenue_ttm'] == 0.0, f"Expected 0.0 (None), got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_q1_positive(self, calculator):
         """TTM计算 - Q1正向
 
         输入: report_period=['2025-03-31', '2024-12-31', '2024-03-31'], revenue=[150,1000,100]。
-        预期: 150 + 1000 - 100 = 1050。
+        预期: Current YTD + Prev Annual - Prev Same Quarter = 150 + 1000 - 100 = 1050。
         """
         df = pd.DataFrame({
             'ts_code': ['000001.SZ'] * 3,
@@ -127,13 +131,16 @@ class TestTTMCalculation(TestTTMCalculator):
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q1): 150, Prev Annual (2024): 1000, Prev Q1 (2024): 100
+        # TTM = 150 + 1000 - 100 = 1050
         assert result['revenue_ttm'] == 1050.0, f"Expected 1050, got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_q4_annual_equivalent(self, calculator):
         """TTM计算 - Q4 (年度等价)
 
-        输入: report_period=['2025-12-31', '2024-12-31'], revenue=[1200,1000] (prev quarter is annual)。
-        预期: 1200 + 1000 - 1000 = 1200。
+        输入: report_period=['2025-12-31', '2024-12-31'], revenue=[1200,1000]。
+        预期: Sum of available quarters = 1200 + 1000 = 2200。
         """
         df = pd.DataFrame({
             'ts_code': ['000001.SZ'] * 2,
@@ -147,13 +154,16 @@ class TestTTMCalculation(TestTTMCalculator):
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q4): 1200, Prev Annual (2024): 1000, Prev Q4 (2024): 1000
+        # TTM = 1200 + 1000 - 1000 = 1200 (equals current annual)
         assert result['revenue_ttm'] == 1200.0, f"Expected 1200, got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_negative_values(self, calculator):
         """TTM计算 - 负值
 
         输入: revenue=[-50,-200,-100] for Q2。
-        预期: -50 + (-200) - (-100) = -150。
+        预期: Current YTD + Prev Annual - Prev Same Quarter = -50 + (-200) - (-100) = -150。
         """
         df = pd.DataFrame({
             'ts_code': ['000001.SZ'] * 3,
@@ -167,6 +177,9 @@ class TestTTMCalculation(TestTTMCalculator):
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q2): -50, Prev Annual (2024): -200, Prev Q2 (2024): -100
+        # TTM = -50 + (-200) - (-100) = -150
         assert result['revenue_ttm'] == -150.0, f"Expected -150, got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_zero_prev_quarter(self, calculator):
@@ -187,6 +200,9 @@ class TestTTMCalculation(TestTTMCalculator):
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q2): 300, Prev Annual (2024): 1000, Prev Q2 (2024): 0
+        # TTM = 300 + 1000 - 0 = 1300
         assert result['revenue_ttm'] == 1300.0, f"Expected 1300, got {result['revenue_ttm']}"
 
     def test_calculate_ttm_metrics_empty_dataframe(self, calculator):
@@ -239,10 +255,14 @@ class TestTTMCalculation(TestTTMCalculator):
             'revenue': [450, 1000, 350]
         })
 
-        # Test Q3 calculation: 450 + 1000 - 350 = 1100
-        result = calculator._calculate_single_ttm_metric(df, 'revenue', 2025, 3)
+        # Test Q3 calculation with target_date
+        target_date = "2025-09-30"
+        result = calculator._calculate_single_ttm_metric(df, 'revenue', target_date)
 
-        assert result == 1100.0, f"Expected 1100 for Q3, got {result}"
+        # With YTD formula: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q3): 450, Prev Annual (2024): 1000, Prev Q3 (2024): 350
+        # TTM = 450 + 1000 - 350 = 1100
+        assert result == 1100.0, f"Expected 1100, got {result}"
 
     def test_get_quarterly_data_for_ttm_past_12_months(self, calculator):
         """数据过滤+TTM - 过去12月季度数据
@@ -696,23 +716,25 @@ class TestIntegration(TestTTMCalculator):
     def test_calculate_ttm_metrics_with_multiple_fields(self, calculator):
         """Test TTM calculation with multiple fields"""
         df = pd.DataFrame({
-            'ts_code': ['000001.SZ'] * 3,
-            'report_period': ['2025-06-30', '2024-12-31', '2024-06-30'],
-            'report_year': [2025, 2024, 2024],
-            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 6, 30)],
-            'revenue': [300, 1000, 250],
-            'gross_profit_margin': [0.25, 0.30, 0.20],
-            'operating_profit_margin': [0.15, 0.18, 0.12]
+            'ts_code': ['000001.SZ'] * 4,
+            'report_period': ['2025-06-30', '2024-12-31', '2024-09-30', '2024-06-30'],
+            'report_year': [2025, 2024, 2024, 2024],
+            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 9, 30), datetime(2024, 6, 30)],
+            'revenue': [300, 1000, 800, 250],
+            'gross_profit_margin': [0.25, 0.30, 0.28, 0.20],
+            'operating_profit_margin': [0.15, 0.18, 0.16, 0.12]
         })
 
         target_date = "2025-06-30"  # Q2 2025
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
-        # Check revenue calculation: 300 + 1000 - 250 = 1050
+        # Check revenue calculation: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q2): 300, Prev Annual (2024): 1000, Prev Q2 (2024): 250
+        # TTM = 300 + 1000 - 250 = 1050
         assert result['revenue_ttm'] == 1050.0
 
-        # Check margin calculations (should be calculated from the YTD formula)
+        # Check margin calculations (ratios use YTD formula)
         # gross_margin: 0.25 + 0.30 - 0.20 = 0.35
         assert result['gross_margin_ttm'] == pytest.approx(0.35, abs=1e-10)
 
@@ -756,18 +778,20 @@ class TestDateFormatHandling(TestTTMCalculator):
     def test_ttm_calculation_with_yyyy_mm_dd_target_date(self, calculator):
         """Test TTM calculation with YYYY-MM-DD target date format"""
         df = pd.DataFrame({
-            'ts_code': ['000001.SZ'] * 3,
-            'report_period': ['2025-06-30', '2024-12-31', '2024-06-30'],
-            'report_year': [2025, 2024, 2024],
-            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 6, 30)],
-            'revenue': [300, 1000, 250]
+            'ts_code': ['000001.SZ'] * 4,
+            'report_period': ['2025-06-30', '2024-12-31', '2024-09-30', '2024-06-30'],
+            'report_year': [2025, 2024, 2024, 2024],
+            'ann_date': [datetime(2025, 6, 30), datetime(2024, 12, 31), datetime(2024, 9, 30), datetime(2024, 6, 30)],
+            'revenue': [300, 1000, 800, 250]
         })
 
         target_date = "2025-06-30"  # Q2 2025 in YYYY-MM-DD format
 
         result = calculator.calculate_ttm_metrics(df, target_date)
 
-        # Should calculate TTM: 300 + 1000 - 250 = 1050
+        # Should calculate TTM: Current YTD + Prev Annual - Prev Same Quarter
+        # Current YTD (2025 Q2): 300, Prev Annual (2024): 1000, Prev Q2 (2024): 250
+        # TTM = 300 + 1000 - 250 = 1050
         assert result['revenue_ttm'] == 1050.0, f"Expected 1050, got {result['revenue_ttm']}"
 
     def test_quarterly_data_filtering_with_yyyy_mm_dd(self, calculator):
