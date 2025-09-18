@@ -634,7 +634,7 @@ class TTMCalculator:
             current_ytd_value = None
             if current_quarter in quarter_ends:
                 current_mask = (
-                    (financial_df['report_period'].str.endswith(quarter_ends[current_quarter])) &
+                    (financial_df['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
                     (financial_df['report_year'] == current_year)
                 )
                 current_data = financial_df[current_mask]
@@ -647,7 +647,7 @@ class TTMCalculator:
             prev_year_annual_value = None
             prev_year = current_year - 1
             annual_mask = (
-                (financial_df['report_period'].str.endswith('-12-31')) &
+                (financial_df['report_period'].dt.strftime('%m-%d') == '12-31') &
                 (financial_df['report_year'] == prev_year)
             )
             annual_data = financial_df[annual_mask]
@@ -660,7 +660,7 @@ class TTMCalculator:
             prev_year_quarter_value = None
             if current_quarter in quarter_ends:
                 prev_quarter_mask = (
-                    (financial_df['report_period'].str.endswith(quarter_ends[current_quarter])) &
+                    (financial_df['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
                     (financial_df['report_year'] == prev_year)
                 )
                 prev_quarter_data = financial_df[prev_quarter_mask]
@@ -781,7 +781,7 @@ class TTMCalculator:
 
                     # Use only annual reports for all metrics (simplified approach)
                     calculation_data = financial_df[
-                        financial_df['report_period'].str.endswith('-12-31')
+                        financial_df['report_period'].dt.strftime('%m-%d') == '12-31'
                     ].sort_values('report_year', ascending=False)
 
                     # Check if we have enough data points
