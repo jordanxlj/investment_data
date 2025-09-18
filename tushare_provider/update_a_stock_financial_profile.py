@@ -146,10 +146,10 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   -- 1. Basic financial indicators
   eps                       FLOAT NULL COMMENT '每股收益(元)',
   dt_eps                    FLOAT NULL COMMENT '稀释每股收益(元)',
-  gross_margin              FLOAT NULL COMMENT '毛利率(%)',
   netprofit_margin          FLOAT NULL COMMENT '净利率(%)',
   grossprofit_margin        FLOAT NULL COMMENT '毛利润率(%)',
   ebitda_margin             FLOAT NULL COMMENT 'EBITDA利润率(%)',
+  gross_margin              DECIMAL(16,4) NULL COMMENT '毛利(元)',
   extra_item                DECIMAL(16,4) NULL COMMENT '其他项目(万元)',
   profit_dedt               DECIMAL(16,4) NULL COMMENT '扣除非经常性损益后的净利润(万元)',
   op_income                 DECIMAL(16,4) NULL COMMENT '营业收入(万元)',
@@ -471,7 +471,7 @@ YUAN_TO_WAN_FIELDS = [
     'c_pay_dist_dpcp_int_exp', 'c_cash_equ_end_period',
 
     # Financial indicators - monetary amounts (not ratios)
-    'extra_item', 'profit_dedt', 'op_income', 'daa',
+    'extra_item', 'profit_dedt', 'op_income', 'daa', 'gross_margin',
 
     # Quarterly financial indicators
     'q_opincome', 'q_investincome', 'q_dtprofit',

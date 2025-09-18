@@ -54,7 +54,7 @@
     },
     "ttm_metrics": {
       "gross_margin_ttm": {
-        "source_field": "gross_margin",
+        "source_field": "grossprofit_margin",
         "description": "毛利率滚动12个月"
       },
       "operating_margin_ttm": {
