@@ -634,6 +634,7 @@ class TTMCalculator:
             # 1. Get current year YTD value (most recent report for current quarter)
             current_ytd_value = None
             if current_quarter in quarter_ends:
+                import pdb; pdb.set_trace()
                 current_mask = (
                     (financial_df['report_period'].dt.strftime('%m-%d') == quarter_ends[current_quarter][1:]) &
                     (financial_df['report_year'] == current_year)
