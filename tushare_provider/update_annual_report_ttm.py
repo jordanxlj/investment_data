@@ -467,7 +467,7 @@ class TTMCalculator:
                 df['ann_date'] = pd.to_datetime(df['ann_date'])
                 df['report_period'] = pd.to_datetime(df['report_period'])
                 df['report_year'] = df['report_period'].dt.year
-                df['report_quarter'] = df['report_period'].dt.month // 3 + 1
+                df['report_quarter'] = df['report_period'].dt.month // 3
 
             logger.debug("Retrieved %d financial records for %s", len(df), ts_code)
             return df
@@ -539,7 +539,7 @@ class TTMCalculator:
         # Filter for required stocks and date range
         filtered_df = stock_df[
             (stock_df['ts_code'].isin(ts_codes)) &
-            (stock_df['ann_date'] <= target_date_dt) &
+            (stock_df['ann_date'] < target_date_dt) &
             (stock_df['ann_date'] >= start_date)
         ].copy()
 
