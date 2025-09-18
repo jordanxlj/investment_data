@@ -612,7 +612,7 @@ class TTMCalculator:
         try:
             # Ensure data types are correct
             df_copy = financial_df.copy()
-
+            import pdb; pdb.set_trace()    
             # Convert date columns to datetime if they're not already
             if 'report_period' in df_copy.columns:
                 if not pd.api.types.is_datetime64_any_dtype(df_copy['report_period']):
