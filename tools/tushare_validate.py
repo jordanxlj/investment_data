@@ -363,36 +363,35 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     else:
         df['calc_ebit_to_interest'] = np.nan
     
-    # 5. Operating efficiency - corrected with average values
-    # Calculate average values for turnover ratios (standard financial calculation)
+    # Sort for shift operations (required for all average calculations)
+    df = df.sort_values(['ts_code', 'report_period'])
+
+    # Calculate all average values first (before using them)
+    # 1. Average values for turnover ratios
     df['prev_inv'] = df.groupby('ts_code')['inventories'].shift(1)
     df['avg_inv'] = (df['inventories'] + df['prev_inv'].fillna(df['inventories'])) / 2
     df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
     df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
 
-    # Corrected turnover ratios using average values and proper formulas
-    # Use total_cogs for inventory turnover (matches Tushare definition)
-    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['total_cogs'] / df['avg_inv'], np.nan)
-    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
-    df['calc_assets_turn'] = np.where(df['avg_assets'] > 0, df['revenue'] / df['avg_assets'], np.nan)
-
-    # 6. Profitability - refined with standard weighted average calculations
-    # Sort for shift operations (required for average calculations)
-    df = df.sort_values(['ts_code', 'report_period'])
-
-    # Calculate average equity and assets using standard method (period initial + end / 2)
+    # 2. Average values for profitability ratios
     for col in ['total_hldr_eqy_inc_min_int', 'total_assets']:
         prev_col = f'prev_{col}'
         avg_col = f'avg_{col}'
         df[prev_col] = df.groupby('ts_code')[col].shift(1)  # Period initial value
         df[avg_col] = (df[col] + df[prev_col].fillna(df[col])) / 2  # Fill first period with end value
 
-    avg_equity = df['avg_total_hldr_eqy_inc_min_int']
-    avg_assets = df['avg_total_assets']
+    # 5. Operating efficiency - corrected with average values
+    # Corrected turnover ratios using average values and proper formulas
+    # Use total_cogs for inventory turnover (matches Tushare definition)
+    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['total_cogs'] / df['avg_inv'], np.nan)
+    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
+    df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df['revenue'] / df['avg_total_assets'], np.nan)
+
+    # 6. Profitability - refined with standard weighted average calculations
 
     # Corrected ROE/ROA/NPTA using average values (standard financial calculation)
-    df['calc_roe_waa'] = np.where(avg_equity > 0, (df['n_income_attr_p'] / avg_equity) * 100, np.nan)
-    df['calc_roa'] = np.where(avg_assets > 0, (df['n_income_attr_p'] / avg_assets) * 100, np.nan)
+    df['calc_roe_waa'] = np.where(df['avg_total_hldr_eqy_inc_min_int'] > 0, (df['n_income_attr_p'] / df['avg_total_hldr_eqy_inc_min_int']) * 100, np.nan)
+    df['calc_roa'] = np.where(df['avg_total_assets'] > 0, (df['n_income_attr_p'] / df['avg_total_assets']) * 100, np.nan)
     df['calc_npta'] = df['calc_roa']  # Equivalent to ROA
     # Calculate ROIC with proper vectorization
     # NOPAT = Operating Profit * (1 - tax_rate)
