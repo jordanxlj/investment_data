@@ -6,8 +6,10 @@ from datetime import datetime
 import argparse
 from typing import List
 
-# Tushare init
-ts.set_token(os.environ["TUSHARE"])  # expects env var set
+# Tushare init with error handling
+if "TUSHARE" not in os.environ:
+    raise ValueError("TUSHARE environment variable not set. Please set your Tushare token.")
+ts.set_token(os.environ["TUSHARE"])
 pro = ts.pro_api()
 
 # Income statement fields (core primitives for calculations)
@@ -96,8 +98,16 @@ def generate_periods(start_date: str, end_date: str, period: str = "annual") -> 
         List of period strings in YYYYMMDD format
     """
     periods = []
-    start_dt = datetime.datetime.strptime(start_date, "%Y%m%d")
-    end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
+    # Support both YYYY-MM-DD and YYYYMMDD formats
+    try:
+        if '-' in start_date:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            start_dt = datetime.strptime(start_date, "%Y%m%d")
+            end_dt = datetime.strptime(end_date, "%Y%m%d")
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Use YYYY-MM-DD or YYYYMMDD. Error: {e}")
 
     if period == "annual":
         # Generate all annual report dates (12-31) within the date range
@@ -130,55 +140,91 @@ def generate_periods(start_date: str, end_date: str, period: str = "annual") -> 
 
     return periods
 
-def fetch_tushare_data(stocks str, report_period str):
+def fetch_tushare_data(stocks: str, periods: List[str]):
     """Fetch data from multiple Tushare interfaces"""
     try:
-        income_df = pd.DataFrame()
-        balance_df = pd.DataFrame()
-        cashflow_df = pd.DataFrame()
-        fina_df = pd.DataFrame()
+        # Handle stocks parameter
         if stocks:
-            for ts_code in stocks:
-                # Income statement (doc_id=33) - focus on basics
-                income_df.append(pro.income_vip(ts_code=ts_code, period=report_period,
-                                    fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
-                )
-                
-                # Balance sheet (doc_id=36) - for equity/assets
-                balance_df.append(pro.balancesheet_vip(ts_code=ts_code, period=report_period,
-                                            fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
-                )
-                # Cash flow (doc_id=44) - basic for completeness
-                cashflow_df.append(pro.cashflow_vip(ts_code=ts_code, period=report_period,
-                                        fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
-                )
-                # Financial indicators (doc_id=79) - for validation (extended fields)
-                indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                fina_df.append(pro.fina_indicator_vip(ts_code=ts_code, period=report_period,
-                                            fields=','.join(indicator_fields))
-                )
-            return income_df, balance_df, cashflow_df, fina_df
+            stocks_list = [s.strip() for s in stocks.split(',') if s.strip()]
         else:
-            # Income statement (doc_id=33) - focus on basics
-            income_df.append(pro.income_vip(period=report_period,
-                                fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
-            )
-            
-            # Balance sheet (doc_id=36) - for equity/assets
-            balance_df.append(pro.balancesheet_vip(period=report_period,
-                                        fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
-            )
-            # Cash flow (doc_id=44) - basic for completeness
-            cashflow_df.append(pro.cashflow_vip(period=report_period,
-                                    fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
-            )
-            # Financial indicators (doc_id=79) - for validation (extended fields)
-            indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-            fina_df.append(pro.fina_indicator_vip(period=report_period,
-                                        fields=','.join(indicator_fields))
-            )
-            return income_df, balance_df, cashflow_df, fina_df
+            stocks_list = []
 
+        income_dfs = []
+        balance_dfs = []
+        cashflow_dfs = []
+        fina_dfs = []
+
+        if stocks_list:
+            for ts_code in stocks_list:
+                for period in periods:
+                    try:
+                        # Income statement (doc_id=33) - focus on basics
+                        income_df = pro.income_vip(ts_code=ts_code, period=period,
+                                        fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
+                        if not income_df.empty:
+                            income_dfs.append(income_df)
+
+                        # Balance sheet (doc_id=36) - for equity/assets
+                        balance_df = pro.balancesheet_vip(ts_code=ts_code, period=period,
+                                                fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
+                        if not balance_df.empty:
+                            balance_dfs.append(balance_df)
+
+                        # Cash flow (doc_id=44) - basic for completeness
+                        cashflow_df = pro.cashflow_vip(ts_code=ts_code, period=period,
+                                            fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
+                        if not cashflow_df.empty:
+                            cashflow_dfs.append(cashflow_df)
+
+                        # Financial indicators (doc_id=79) - for validation (extended fields)
+                        indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
+                        fina_df = pro.fina_indicator_vip(ts_code=ts_code, period=period,
+                                                fields=','.join(indicator_fields))
+                        if not fina_df.empty:
+                            fina_dfs.append(fina_df)
+                    except Exception as e:
+                        print(f"Error fetching data for {ts_code} period {period}: {e}")
+                        continue
+        else:
+            # Fetch sample data for testing (limit periods to avoid rate limits)
+            print("Warning: No specific stocks provided, fetching sample data for testing")
+            for period in periods[:2]:  # Limit periods for testing
+                try:
+                    # Income statement
+                    income_df = pro.income_vip(period=period,
+                                    fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
+                    if not income_df.empty:
+                        income_dfs.append(income_df)
+
+                    # Balance sheet
+                    balance_df = pro.balancesheet_vip(period=period,
+                                            fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
+                    if not balance_df.empty:
+                        balance_dfs.append(balance_df)
+
+                    # Cash flow
+                    cashflow_df = pro.cashflow_vip(period=period,
+                                        fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
+                    if not cashflow_df.empty:
+                        cashflow_dfs.append(cashflow_df)
+
+                    # Financial indicators
+                    indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
+                    fina_df = pro.fina_indicator_vip(period=period,
+                                            fields=','.join(indicator_fields))
+                    if not fina_df.empty:
+                        fina_dfs.append(fina_df)
+                except Exception as e:
+                    print(f"Error fetching data for period {period}: {e}")
+                    continue
+
+        # Concatenate all dataframes
+        income_df = pd.concat(income_dfs, ignore_index=True) if income_dfs else pd.DataFrame()
+        balance_df = pd.concat(balance_dfs, ignore_index=True) if balance_dfs else pd.DataFrame()
+        cashflow_df = pd.concat(cashflow_dfs, ignore_index=True) if cashflow_dfs else pd.DataFrame()
+        fina_df = pd.concat(fina_dfs, ignore_index=True) if fina_dfs else pd.DataFrame()
+
+        return income_df, balance_df, cashflow_df, fina_df
     except Exception as e:
         print(f"Error fetching data: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -187,10 +233,18 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     """Compute extended basic indicators from primitives"""
     if income_df.empty or balance_df.empty or cashflow_df.empty:
         return pd.DataFrame()
-    
-    df = pd.merge(pd.merge(income_df, balance_df, on=['ts_code', 'report_period'], how='inner'),
-                  cashflow_df, on=['ts_code', 'report_period'], how='inner')
+
+    # Add report_period column if it doesn't exist
+    for df_name, df in [('income', income_df), ('balance', balance_df), ('cashflow', cashflow_df)]:
+        if 'report_period' not in df.columns and 'end_date' in df.columns:
+            df = df.copy()
+            df['report_period'] = df['end_date'].str.replace('-', '')
+
+    df = pd.merge(pd.merge(income_df, balance_df, on=['ts_code', 'end_date'], how='inner'),
+                  cashflow_df, on=['ts_code', 'end_date'], how='inner')
     df = df.copy()
+    # Add report_period column for consistency
+    df['report_period'] = df['end_date'].str.replace('-', '')
     
     # 1. Gross profit and margin
     df['calc_gross_profit'] = df['revenue'] - df['oper_cost']
@@ -264,10 +318,12 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']  # Single quarter
     df['calc_q_roe'] = df['calc_roe_waa']
     
-    # 9. Growth (YoY, approx with pct_change for demo; real needs lag by 4 periods)
+    # 9. Growth (YoY, approx with pct_change; adjust periods based on data frequency)
     df = df.sort_values('report_period')
-    df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=4) * 100  # Approx 1 year
-    df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=4) * 100
+    # For quarterly data, use periods=4; for annual data, use periods=1
+    periods_for_yoy = 4 if len(df) > 4 and df['report_period'].str.endswith(('0331', '0630', '0930', '1231')).any() else 1
+    df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=periods_for_yoy) * 100
+    df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=periods_for_yoy) * 100
     
     # 10. Cost structure
     df['calc_cogs_of_sales'] = np.where(
@@ -293,9 +349,12 @@ def cross_validate_indicators(computed_df, fina_df):
     """Cross-validate: computed vs API (extended)"""
     if computed_df.empty or fina_df.empty:
         return pd.DataFrame(), {}
-    
-    # Align: trade_date to report_period (quarter-end approx)
-    fina_df['report_period'] = pd.to_datetime(fina_df['trade_date']).dt.to_period('Q').dt.end_time.strftime('%Y%m%d')
+
+    # Align: end_date to report_period
+    if 'end_date' in fina_df.columns:
+        fina_df = fina_df.copy()
+        fina_df['report_period'] = fina_df['end_date'].str.replace('-', '')
+
     merged = pd.merge(computed_df, fina_df, on=['ts_code', 'report_period'], how='inner', suffixes=('_calc', '_api'))
     
     if merged.empty:
@@ -350,7 +409,7 @@ def check_completeness(df_list):
         total_rows = len(df)
         null_keys = {
             'income': 'total_revenue',
-            'balance': 'total_equity',
+            'balance': 'total_hldr_eqy_inc_min_int',
             'cashflow': 'n_cashflow_act',
             'fina': 'netprofit_margin'
         }
@@ -371,13 +430,13 @@ def check_completeness(df_list):
     return report
 
 # Main function (updated for extended)
-def run_validation(stocks str, start_date='20240101', end_date='20250918'):
+def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '20250918', period: str = 'annual'):
     """Run full extended validation"""
     print(f"Starting Tushare cross-validation for {stocks} ({start_date} to {end_date})")
-    
+
     # Fetch
     print("1. Fetching data...")
-    periods = generate_periods(start_date, end_date)
+    periods = generate_periods(start_date, end_date, period)
     income_df, balance_df, cashflow_df, fina_df = fetch_tushare_data(stocks, periods)
     
     # Compute (extended)
@@ -414,19 +473,21 @@ def run_validation(stocks str, start_date='20240101', end_date='20250918'):
     
     # Save CSVs
     if not validation_df.empty:
-        validation_df.to_csv(f'{ts_code}_extended_validation.csv', index=False)
-        computed_df.to_csv(f'{ts_code}_extended_computed.csv', index=False)
-        print(f"\nSaved: {ts_code}_extended_validation.csv & {ts_code}_extended_computed.csv")
+        stock_name = stocks.replace(',', '_') if stocks else 'sample'
+        validation_df.to_csv(f'{stock_name}_extended_validation.csv', index=False)
+        computed_df.to_csv(f'{stock_name}_extended_computed.csv', index=False)
+        print(f"\nSaved: {stock_name}_extended_validation.csv & {stock_name}_extended_computed.csv")
 
 
 
 # Example run and test
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate data from Tushare.")
-    parser.add_argument("--start_date", type=str, help="Start date in YYYY-MM-DD format.")
-    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD format.")
-    parser.add_argument("--stocks", type=str, help="Stocks to validate.", default='')
+    parser.add_argument("--start_date", type=str, help="Start date in YYYY-MM-DD or YYYYMMDD format.", default='20240101')
+    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD or YYYYMMDD format.", default='20241231')
+    parser.add_argument("--stocks", type=str, help="Stocks to validate (comma-separated).", default='')
+    parser.add_argument("--period", type=str, help="Period type: annual or quarter.", default='annual')
 
     args = parser.parse_args()
-    result = run_validation(args.stocks, args.start_date,Vargs.end_date)
+    result = run_validation(args.stocks, args.start_date, args.end_date, args.period)
     print(f"Validation completed: {result}")
