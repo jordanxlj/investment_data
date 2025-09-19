@@ -621,8 +621,7 @@ if __name__ == "__main__":
             'results': result
         }
         print(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({summary['success_rate']:.1f}% success rate)")
-        return summary
     else:
         summary = {'total_stocks': 0, 'successful_stocks': 0, 'results': {}}
         print("Validation completed: No results to display")
-        return summary
+    return summary
