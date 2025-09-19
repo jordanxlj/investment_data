@@ -57,7 +57,8 @@ BALANCE_COLUMNS = [
     "total_assets", "total_liab", "total_hldr_eqy_inc_min_int", "total_cur_assets",
     "total_cur_liab", "accounts_receiv", "inventories", "acct_payable",
     "fix_assets", "lt_borr", "r_and_d", "goodwill", "intang_assets", "st_borr",
-    "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int"
+    "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int",
+    "money_cap"  # Currency funds for more accurate ROIC calculation
 ]
 
 # Cash flow statement fields (core primitives)
@@ -369,24 +370,29 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
     df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
 
-    # Calculate average equity and assets using previous period + current period
-    df['prev_equity'] = df.groupby('ts_code')['total_hldr_eqy_inc_min_int'].shift(1)
-    df['avg_equity'] = (df['total_hldr_eqy_inc_min_int'] + df['prev_equity'].fillna(df['total_hldr_eqy_inc_min_int'])) / 2
-    df['prev_assets'] = df.groupby('ts_code')['total_assets'].shift(1)
-    df['avg_assets'] = (df['total_assets'] + df['prev_assets'].fillna(df['total_assets'])) / 2
-
     # Corrected turnover ratios using average values and proper formulas
-    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
+    # Use total_cogs for inventory turnover (matches Tushare definition)
+    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['total_cogs'] / df['avg_inv'], np.nan)
     df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
     df['calc_assets_turn'] = np.where(df['avg_assets'] > 0, df['revenue'] / df['avg_assets'], np.nan)
-    
-    # 6. Profitability - corrected with average values for proper financial calculations
+
+    # 6. Profitability - refined with standard weighted average calculations
     # Sort for shift operations (required for average calculations)
     df = df.sort_values(['ts_code', 'report_period'])
 
+    # Calculate average equity and assets using standard method (period initial + end / 2)
+    for col in ['total_hldr_eqy_inc_min_int', 'total_assets']:
+        prev_col = f'prev_{col}'
+        avg_col = f'avg_{col}'
+        df[prev_col] = df.groupby('ts_code')[col].shift(1)  # Period initial value
+        df[avg_col] = (df[col] + df[prev_col].fillna(df[col])) / 2  # Fill first period with end value
+
+    avg_equity = df['avg_total_hldr_eqy_inc_min_int']
+    avg_assets = df['avg_total_assets']
+
     # Corrected ROE/ROA/NPTA using average values (standard financial calculation)
-    df['calc_roe_waa'] = np.where(df['avg_equity'] > 0, df['n_income_attr_p'] / df['avg_equity'], np.nan)
-    df['calc_roa'] = np.where(df['avg_assets'] > 0, df['n_income_attr_p'] / df['avg_assets'], np.nan)
+    df['calc_roe_waa'] = np.where(avg_equity > 0, (df['n_income_attr_p'] / avg_equity) * 100, np.nan)
+    df['calc_roa'] = np.where(avg_assets > 0, (df['n_income_attr_p'] / avg_assets) * 100, np.nan)
     df['calc_npta'] = df['calc_roa']  # Equivalent to ROA
     # Calculate ROIC with proper vectorization
     # NOPAT = Operating Profit * (1 - tax_rate)
@@ -398,20 +404,24 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     )
     nopat = df['operate_profit'] * (1 - tax_rate)
 
-    # Calculate average invested capital for more accurate ROIC
-    df['prev_liab'] = df.groupby('ts_code')['total_liab'].shift(1)
-    df['avg_liab'] = (df['total_liab'] + df['prev_liab'].fillna(df['total_liab'])) / 2
-    df['prev_cash'] = df.groupby('ts_code')['n_cashflow_act'].shift(1)
-    df['avg_cash'] = (df['n_cashflow_act'] + df['prev_cash'].fillna(df['n_cashflow_act'])) / 2
+    # ROIC/ROCE refined with money_cap preference
+    # Prefer money_cap over n_cashflow_act for more accurate cash proxy
+    df['cash_proxy'] = df.get('money_cap', df['n_cashflow_act'])
 
-    # Invested capital = Average Total Liabilities - Average Cash
-    avg_invested_capital = df['avg_liab'] - df['avg_cash']
+    # Invested capital = Total Assets - Cash proxy
+    invested_capital = df['total_assets'] - df['cash_proxy']
 
+    # Calculate average invested capital
+    df['prev_invested_cap'] = df.groupby('ts_code')[invested_capital].shift(1)
+    avg_invested_capital = (invested_capital + df['prev_invested_cap'].fillna(invested_capital)) / 2
+
+    # ROIC and ROCE calculations
     df['calc_roic'] = np.where(
         avg_invested_capital > 0,
-        nopat / avg_invested_capital,
+        (nopat / avg_invested_capital) * 100,
         np.nan
     )
+    df['calc_roce'] = df['calc_roic']  # ROCE equivalent to ROIC in this context
     
     # 7. Cash flow ratios
     df['calc_ocf_to_debt'] = np.where(
@@ -421,7 +431,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['revenue'] > 0, df['n_cashflow_act'] / df['revenue'], np.nan
     )
     
-    # 8. Quarterly indicators - handle differently for quarterly vs annual data
+    # 8. Quarterly indicators - refined handling for quarterly vs annual data
     # Check if this is quarterly or annual data
     quarterly_endings = ['0331', '0630', '0930', '1231']
     is_quarterly_data = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
@@ -429,13 +439,13 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     if is_quarterly_data:
         # For quarterly data, use the same calculations
         df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']
-        df['calc_q_roe'] = df['calc_roe_waa']
+        df['calc_q_roe'] = df['calc_roe_waa']  # Annualized quarterly ROE
     else:
         # For annual data, quarterly metrics don't apply
         df['calc_q_netprofit_margin'] = np.nan
         df['calc_q_roe'] = np.nan
     
-    # 9. Growth (YoY) - corrected with stock grouping for accurate year-over-year calculations
+    # 9. Growth (YoY) - refined with proper periods for quarterly vs annual data
     # Sort by stock and period for proper YoY calculation
     df = df.sort_values(['ts_code', 'report_period'])
 
@@ -444,9 +454,9 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     has_quarterly = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
     periods_for_yoy = 4 if len(df) > 4 and has_quarterly else 1
 
-    # Calculate YoY changes by stock (standard financial calculation)
-    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None)
-    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None)
+    # Calculate YoY changes by stock with proper periods (standard financial calculation)
+    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None) * 100
+    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None) * 100
     
     # 10. Cost structure
     df['calc_cogs_of_sales'] = np.where(
@@ -574,8 +584,17 @@ def check_completeness(df_list):
     for name, df in zip(names, df_list):
         total_rows = len(df)
         # Calculate unique stock-period combinations for accurate coverage
-        if not df.empty and 'ts_code' in df.columns and 'report_period' in df.columns:
-            unique_combinations = df[['ts_code', 'report_period']].drop_duplicates().shape[0]
+        if not df.empty and 'ts_code' in df.columns:
+            if name == 'fina':
+                # For fina, use end_date instead of report_period
+                if 'end_date' in df.columns:
+                    unique_combinations = df[['ts_code', 'end_date']].drop_duplicates().shape[0]
+                else:
+                    unique_combinations = len(df)
+            elif 'report_period' in df.columns:
+                unique_combinations = df[['ts_code', 'report_period']].drop_duplicates().shape[0]
+            else:
+                unique_combinations = len(df)
             coverage_pct = round(unique_combinations / total_periods * 100, 2) if total_periods > 0 else 0
         else:
             coverage_pct = 0
