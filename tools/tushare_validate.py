@@ -15,7 +15,7 @@ pro = ts.pro_api()
 # Income statement fields (core primitives for calculations)
 INCOME_COLUMNS = [
     "total_revenue", "revenue", "operate_profit", "total_profit", "n_income_attr_p", "basic_eps",
-    "total_cogs", "oper_cost", "sell_exp", "admin_exp", "fin_exp", "invest_income", "interest_exp",
+    "total_cogs", "oper_cost", "sell_exp", "admin_exp", "fin_exp", "invest_income", "int_exp",
     "oper_exp", "ebit", "ebitda", "income_tax", "comshare_payable_dvd", "rd_exp"
 ]
 
@@ -291,7 +291,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['ebit'] = df['operate_profit']  # Approximation: EBIT ≈ Operating Profit
 
     df['calc_ebit_to_interest'] = np.where(
-        df['interest_exp'] > 0, df['ebit'] / df['interest_exp'], np.nan
+        df['int_exp'] > 0, df['ebit'] / df['int_exp'], np.nan
     )
     
     # 5. Operating efficiency
