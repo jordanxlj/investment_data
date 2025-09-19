@@ -4,6 +4,7 @@ import numpy as np
 import tushare as ts
 from datetime import datetime
 import argparse
+import time
 from typing import List
 
 # Tushare init with error handling
@@ -11,6 +12,30 @@ if "TUSHARE" not in os.environ:
     raise ValueError("TUSHARE environment variable not set. Please set your Tushare token.")
 ts.set_token(os.environ["TUSHARE"])
 pro = ts.pro_api()
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+
+def retry_api_call(func, *args, **kwargs):
+    """Retry API call with exponential backoff"""
+    last_exception = None
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAY * (2 ** attempt)  # Exponential backoff
+                print(f"API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                print(f"API call failed after {MAX_RETRIES} attempts: {e}")
+
+    # If all retries failed, raise the last exception
+    raise last_exception
 
 # Income statement fields (core primitives for calculations)
 INCOME_COLUMNS = [
@@ -159,31 +184,47 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                 for period in periods:
                     try:
                         # Income statement (doc_id=33) - focus on basics
-                        income_df = pro.income_vip(ts_code=ts_code, period=period,
-                                        fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
+                        income_df = retry_api_call(
+                            pro.income_vip,
+                            ts_code=ts_code,
+                            period=period,
+                            fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
+                        )
                         if not income_df.empty:
                             income_dfs.append(income_df)
 
                         # Balance sheet (doc_id=36) - for equity/assets
-                        balance_df = pro.balancesheet_vip(ts_code=ts_code, period=period,
-                                                fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
+                        balance_df = retry_api_call(
+                            pro.balancesheet_vip,
+                            ts_code=ts_code,
+                            period=period,
+                            fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
+                        )
                         if not balance_df.empty:
                             balance_dfs.append(balance_df)
 
                         # Cash flow (doc_id=44) - basic for completeness
-                        cashflow_df = pro.cashflow_vip(ts_code=ts_code, period=period,
-                                            fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
+                        cashflow_df = retry_api_call(
+                            pro.cashflow_vip,
+                            ts_code=ts_code,
+                            period=period,
+                            fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
+                        )
                         if not cashflow_df.empty:
                             cashflow_dfs.append(cashflow_df)
 
                         # Financial indicators (doc_id=79) - for validation (extended fields)
                         indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                        fina_df = pro.fina_indicator_vip(ts_code=ts_code, period=period,
-                                                fields=','.join(indicator_fields))
+                        fina_df = retry_api_call(
+                            pro.fina_indicator_vip,
+                            ts_code=ts_code,
+                            period=period,
+                            fields=','.join(indicator_fields)
+                        )
                         if not fina_df.empty:
                             fina_dfs.append(fina_df)
                     except Exception as e:
-                        print(f"Error fetching data for {ts_code} period {period}: {e}")
+                        print(f"Error fetching data for {ts_code} period {period} after retries: {e}")
                         continue
         else:
             # Fetch sample data for testing (limit periods to avoid rate limits)
@@ -191,31 +232,43 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
             for period in periods[:2]:  # Limit periods for testing
                 try:
                     # Income statement
-                    income_df = pro.income_vip(period=period,
-                                    fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS))
+                    income_df = retry_api_call(
+                        pro.income_vip,
+                        period=period,
+                        fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
+                    )
                     if not income_df.empty:
                         income_dfs.append(income_df)
 
                     # Balance sheet
-                    balance_df = pro.balancesheet_vip(period=period,
-                                            fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS))
+                    balance_df = retry_api_call(
+                        pro.balancesheet_vip,
+                        period=period,
+                        fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
+                    )
                     if not balance_df.empty:
                         balance_dfs.append(balance_df)
 
                     # Cash flow
-                    cashflow_df = pro.cashflow_vip(period=period,
-                                        fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS))
+                    cashflow_df = retry_api_call(
+                        pro.cashflow_vip,
+                        period=period,
+                        fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
+                    )
                     if not cashflow_df.empty:
                         cashflow_dfs.append(cashflow_df)
 
                     # Financial indicators
                     indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                    fina_df = pro.fina_indicator_vip(period=period,
-                                            fields=','.join(indicator_fields))
+                    fina_df = retry_api_call(
+                        pro.fina_indicator_vip,
+                        period=period,
+                        fields=','.join(indicator_fields)
+                    )
                     if not fina_df.empty:
                         fina_dfs.append(fina_df)
                 except Exception as e:
-                    print(f"Error fetching data for period {period}: {e}")
+                    print(f"Error fetching data for period {period} after retries: {e}")
                     continue
 
         # Concatenate all dataframes
