@@ -553,12 +553,15 @@ def cross_validate_indicators(computed_df, fina_df):
     consistency_summary = {}
     for api_col, calc_col in diff_map.items():
         if api_col in merged.columns and calc_col in merged.columns:
-            # Calculate absolute difference
-            abs_diff = abs(merged[calc_col] - merged[api_col])
+            # Calculate absolute difference and handle NaN values
+            # Ensure both columns are properly handled for NaN values
+            calc_values = merged[calc_col].fillna(0)
+            api_values_raw = merged[api_col].fillna(0)
+            abs_diff = abs(calc_values - api_values_raw)
 
             # Calculate relative difference (percentage)
             # Use absolute value of API values to avoid division by zero and handle negative values
-            api_values = merged[api_col].abs()
+            api_values = api_values_raw.abs()
             rel_diff = np.where(
                 api_values != 0,
                 (abs_diff / api_values) * 100,  # Percentage difference
