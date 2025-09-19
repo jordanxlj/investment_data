@@ -408,16 +408,16 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['cash_proxy'] = df.get('money_cap', df['n_cashflow_act'])
 
     # Invested capital = Total Assets - Cash proxy
-    invested_capital = df['total_assets'] - df['cash_proxy']
+    df['invested_capital'] = df['total_assets'] - df['cash_proxy']
 
     # Calculate average invested capital
-    df['prev_invested_cap'] = df.groupby('ts_code')[invested_capital].shift(1)
-    avg_invested_capital = (invested_capital + df['prev_invested_cap'].fillna(invested_capital)) / 2
+    df['prev_invested_cap'] = df.groupby('ts_code')['invested_capital'].shift(1)
+    df['avg_invested_capital'] = (df['invested_capital'] + df['prev_invested_cap'].fillna(df['invested_capital'])) / 2
 
     # ROIC and ROCE calculations
     df['calc_roic'] = np.where(
-        avg_invested_capital > 0,
-        (nopat / avg_invested_capital) * 100,
+        df['avg_invested_capital'] > 0,
+        (nopat / df['avg_invested_capital']) * 100,
         np.nan
     )
     df['calc_roce'] = df['calc_roic']  # ROCE equivalent to ROIC in this context
