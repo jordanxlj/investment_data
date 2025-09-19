@@ -229,7 +229,7 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
         else:
             # Fetch sample data for testing (limit periods to avoid rate limits)
             print("Warning: No specific stocks provided, fetching sample data for testing")
-            for period in periods[:2]:  # Limit periods for testing
+            for period in periods:  # Limit periods for testing
                 try:
                     # Income statement
                     income_df = retry_api_call(
