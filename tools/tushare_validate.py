@@ -369,6 +369,12 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
     df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
 
+    # Calculate average equity and assets using previous period + current period
+    df['prev_equity'] = df.groupby('ts_code')['total_hldr_eqy_inc_min_int'].shift(1)
+    df['avg_equity'] = (df['total_hldr_eqy_inc_min_int'] + df['prev_equity'].fillna(df['total_hldr_eqy_inc_min_int'])) / 2
+    df['prev_assets'] = df.groupby('ts_code')['total_assets'].shift(1)
+    df['avg_assets'] = (df['total_assets'] + df['prev_assets'].fillna(df['total_assets'])) / 2
+
     # Corrected turnover ratios using average values and proper formulas
     df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
     df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
@@ -377,12 +383,6 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     # 6. Profitability - corrected with average values for proper financial calculations
     # Sort for shift operations (required for average calculations)
     df = df.sort_values(['ts_code', 'report_period'])
-
-    # Calculate average equity and assets using previous period + current period
-    df['prev_equity'] = df.groupby('ts_code')['total_hldr_eqy_inc_min_int'].shift(1)
-    df['avg_equity'] = (df['total_hldr_eqy_inc_min_int'] + df['prev_equity'].fillna(df['total_hldr_eqy_inc_min_int'])) / 2
-    df['prev_assets'] = df.groupby('ts_code')['total_assets'].shift(1)
-    df['avg_assets'] = (df['total_assets'] + df['prev_assets'].fillna(df['total_assets'])) / 2
 
     # Corrected ROE/ROA/NPTA using average values (standard financial calculation)
     df['calc_roe_waa'] = np.where(df['avg_equity'] > 0, df['n_income_attr_p'] / df['avg_equity'], np.nan)
