@@ -240,11 +240,16 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
             df = df.copy()
             df['report_period'] = df['end_date'].str.replace('-', '')
 
-    df = pd.merge(pd.merge(income_df, balance_df, on=['ts_code', 'end_date'], how='inner'),
-                  cashflow_df, on=['ts_code', 'end_date'], how='inner')
+    # Ensure all dataframes have consistent report_period format
+    for df_name, df in [('income', income_df), ('balance', balance_df), ('cashflow', cashflow_df)]:
+        if 'report_period' not in df.columns and 'end_date' in df.columns:
+            df = df.copy()
+            df['report_period'] = df['end_date'].str.replace('-', '')
+
+    # Merge using report_period for consistency (handles both YYYY-MM-DD and YYYYMMDD)
+    df = pd.merge(pd.merge(income_df, balance_df, on=['ts_code', 'report_period'], how='inner'),
+                  cashflow_df, on=['ts_code', 'report_period'], how='inner')
     df = df.copy()
-    # Add report_period column for consistency
-    df['report_period'] = df['end_date'].str.replace('-', '')
     
     # 1. Gross profit and margin
     df['calc_gross_profit'] = df['revenue'] - df['oper_cost']
@@ -278,6 +283,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['calc_assets_to_eqt'] = np.where(
         df['total_hldr_eqy_inc_min_int'] > 0, df['total_assets'] / df['total_hldr_eqy_inc_min_int'], np.nan
     )
+    # Ensure EBIT is available (use proxy if missing)
+    if 'ebit' not in df.columns or df['ebit'].isna().all():
+        df['ebit'] = df['operate_profit']  # Approximation: EBIT ≈ Operating Profit
+
     df['calc_ebit_to_interest'] = np.where(
         df['interest_exp'] > 0, df['ebit'] / df['interest_exp'], np.nan
     )
@@ -301,9 +310,23 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['total_assets'] > 0, (df['n_income_attr_p'] / df['total_assets']) * 100, np.nan
     )
     df['calc_npta'] = df['calc_roa']  # Often equivalent
-    df['calc_roic'] = np.where(  # Simplified NOPAT / Invested Capital
-        (df['total_liab'] - df['n_cashflow_act']) > 0,  # Approx invested cap
-        (df['operate_profit'] * (1 - (df['income_tax'] / df['total_profit'] if df['total_profit'] > 0 else 0.25))) / (df['total_liab'] - df['n_cashflow_act']) * 100, np.nan
+    # Calculate ROIC with proper vectorization
+    # NOPAT = Operating Profit * (1 - tax_rate)
+    # Invested Capital = Total Liabilities - Cash & Cash Equivalents
+    tax_rate = np.where(
+        df['total_profit'] > 0,
+        np.where(df['income_tax'].notna(), df['income_tax'] / df['total_profit'], 0.25),
+        0.25  # Default tax rate
+    )
+    nopat = df['operate_profit'] * (1 - tax_rate)
+
+    # Approximate invested capital: Total Liabilities - Cash (using n_cashflow_act as proxy)
+    invested_capital = df['total_liab'] - df['n_cashflow_act']
+
+    df['calc_roic'] = np.where(
+        invested_capital > 0,
+        (nopat / invested_capital) * 100,
+        np.nan
     )
     
     # 7. Cash flow ratios
@@ -321,7 +344,9 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     # 9. Growth (YoY, approx with pct_change; adjust periods based on data frequency)
     df = df.sort_values('report_period')
     # For quarterly data, use periods=4; for annual data, use periods=1
-    periods_for_yoy = 4 if len(df) > 4 and df['report_period'].str.endswith(('0331', '0630', '0930', '1231')).any() else 1
+    quarterly_endings = ['0331', '0630', '0930', '1231']
+    has_quarterly = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
+    periods_for_yoy = 4 if len(df) > 4 and has_quarterly else 1
     df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=periods_for_yoy) * 100
     df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=periods_for_yoy) * 100
     
@@ -407,6 +432,13 @@ def check_completeness(df_list):
     
     for name, df in zip(names, df_list):
         total_rows = len(df)
+        # Calculate unique stock-period combinations for accurate coverage
+        if not df.empty and 'ts_code' in df.columns and 'report_period' in df.columns:
+            unique_combinations = df[['ts_code', 'report_period']].drop_duplicates().shape[0]
+            coverage_pct = round(unique_combinations / total_periods * 100, 2) if total_periods > 0 else 0
+        else:
+            coverage_pct = 0
+
         null_keys = {
             'income': 'total_revenue',
             'balance': 'total_hldr_eqy_inc_min_int',
@@ -416,7 +448,7 @@ def check_completeness(df_list):
         null_key = null_keys.get(name, 'ts_code')
         null_count = df[null_key].isnull().sum() if null_key in df.columns and not df.empty else 0
         null_pct = (null_count / total_rows * 100) if total_rows > 0 else 0
-        report[name] = {'rows': total_rows, 'null_pct': round(null_pct, 2), 'coverage': round(total_rows / total_periods * 100, 2) if total_periods > 0 else 0}
+        report[name] = {'rows': total_rows, 'null_pct': round(null_pct, 2), 'coverage': coverage_pct}
     
     # Outliers (extended)
     outliers = []
