@@ -243,7 +243,6 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     income_df = retry_api_call(
                         pro.income_vip,
                         period=period,
-                        limit=100,  # Limit to 100 stocks to avoid rate limits
                         fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
                     )
                     if not income_df.empty:
@@ -253,7 +252,6 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     balance_df = retry_api_call(
                         pro.balancesheet_vip,
                         period=period,
-                        limit=100,
                         fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
                     )
                     if not balance_df.empty:
@@ -263,7 +261,6 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     cashflow_df = retry_api_call(
                         pro.cashflow_vip,
                         period=period,
-                        limit=100,
                         fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
                     )
                     if not cashflow_df.empty:
@@ -274,7 +271,6 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     fina_df = retry_api_call(
                         pro.fina_indicator_vip,
                         period=period,
-                        limit=100,
                         fields=','.join(indicator_fields)
                     )
                     if not fina_df.empty:
