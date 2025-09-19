@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import tushare as ts
-from datetime import datetime
+import datetime
 import argparse
 from typing import List
 
