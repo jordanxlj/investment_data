@@ -351,29 +351,43 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     if 'ebit' not in df.columns or df['ebit'].isna().all():
         df['ebit'] = df['operate_profit']  # Approximation: EBIT ≈ Operating Profit
 
-    df['calc_ebit_to_interest'] = np.where(
-        df['int_exp'] > 0, (df['ebit'] / df['int_exp']) * 100, np.nan  # Convert to ratio (times)
-    )
+    # Ensure EBIT is properly defined (standard financial calculation)
+    if 'ebit' not in df.columns or df['ebit'].isna().all():
+        df['ebit'] = df['operate_profit'] + df['invest_income'].fillna(0) - df['int_exp'].fillna(0)
+
+    # Use correct field name for interest expense
+    interest_field = 'int_exp' if 'int_exp' in df.columns else 'interest_exp'
+    if interest_field in df.columns:
+        df['calc_ebit_to_interest'] = np.where(df[interest_field] > 0, df['ebit'] / df[interest_field], np.nan)
+    else:
+        df['calc_ebit_to_interest'] = np.nan
     
-    # 5. Operating efficiency
-    df['calc_inv_turn'] = np.where(
-        df['inventories'] > 0, (df['oper_cost'] / df['inventories']) * 100, np.nan  # Use oper_cost for inventory turnover
-    )
-    df['calc_ar_turn'] = np.where(
-        df['accounts_receiv'] > 0, (df['revenue'] / df['accounts_receiv']) * 100, np.nan  # Convert to percentage
-    )
-    df['calc_assets_turn'] = np.where(
-        df['total_assets'] > 0, (df['revenue'] / df['total_assets']) * 100, np.nan  # Convert to percentage
-    )
+    # 5. Operating efficiency - corrected with average values
+    # Calculate average values for turnover ratios (standard financial calculation)
+    df['prev_inv'] = df.groupby('ts_code')['inventories'].shift(1)
+    df['avg_inv'] = (df['inventories'] + df['prev_inv'].fillna(df['inventories'])) / 2
+    df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
+    df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
+
+    # Corrected turnover ratios using average values and proper formulas
+    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
+    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
+    df['calc_assets_turn'] = np.where(df['avg_assets'] > 0, df['revenue'] / df['avg_assets'], np.nan)
     
-    # 6. Profitability
-    df['calc_roe_waa'] = np.where(  # Simplified; real waa needs avg equity
-        df['total_hldr_eqy_inc_min_int'] > 0, df['n_income_attr_p'] / df['total_hldr_eqy_inc_min_int'], np.nan
-    )
-    df['calc_roa'] = np.where(
-        df['total_assets'] > 0, df['n_income_attr_p'] / df['total_assets'], np.nan
-    )
-    df['calc_npta'] = df['calc_roa']  # Often equivalent
+    # 6. Profitability - corrected with average values for proper financial calculations
+    # Sort for shift operations (required for average calculations)
+    df = df.sort_values(['ts_code', 'report_period'])
+
+    # Calculate average equity and assets using previous period + current period
+    df['prev_equity'] = df.groupby('ts_code')['total_hldr_eqy_inc_min_int'].shift(1)
+    df['avg_equity'] = (df['total_hldr_eqy_inc_min_int'] + df['prev_equity'].fillna(df['total_hldr_eqy_inc_min_int'])) / 2
+    df['prev_assets'] = df.groupby('ts_code')['total_assets'].shift(1)
+    df['avg_assets'] = (df['total_assets'] + df['prev_assets'].fillna(df['total_assets'])) / 2
+
+    # Corrected ROE/ROA/NPTA using average values (standard financial calculation)
+    df['calc_roe_waa'] = np.where(df['avg_equity'] > 0, df['n_income_attr_p'] / df['avg_equity'], np.nan)
+    df['calc_roa'] = np.where(df['avg_assets'] > 0, df['n_income_attr_p'] / df['avg_assets'], np.nan)
+    df['calc_npta'] = df['calc_roa']  # Equivalent to ROA
     # Calculate ROIC with proper vectorization
     # NOPAT = Operating Profit * (1 - tax_rate)
     # Invested Capital = Total Liabilities - Cash & Cash Equivalents
@@ -384,12 +398,18 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     )
     nopat = df['operate_profit'] * (1 - tax_rate)
 
-    # Approximate invested capital: Total Liabilities - Cash (using n_cashflow_act as proxy)
-    invested_capital = df['total_liab'] - df['n_cashflow_act']
+    # Calculate average invested capital for more accurate ROIC
+    df['prev_liab'] = df.groupby('ts_code')['total_liab'].shift(1)
+    df['avg_liab'] = (df['total_liab'] + df['prev_liab'].fillna(df['total_liab'])) / 2
+    df['prev_cash'] = df.groupby('ts_code')['n_cashflow_act'].shift(1)
+    df['avg_cash'] = (df['n_cashflow_act'] + df['prev_cash'].fillna(df['n_cashflow_act'])) / 2
+
+    # Invested capital = Average Total Liabilities - Average Cash
+    avg_invested_capital = df['avg_liab'] - df['avg_cash']
 
     df['calc_roic'] = np.where(
-        invested_capital > 0,
-        nopat / invested_capital,
+        avg_invested_capital > 0,
+        nopat / avg_invested_capital,
         np.nan
     )
     
@@ -401,25 +421,50 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['revenue'] > 0, df['n_cashflow_act'] / df['revenue'], np.nan
     )
     
-    # 8. Quarterly (assume df is quarterly)
-    df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']  # Single quarter
-    df['calc_q_roe'] = df['calc_roe_waa']
+    # 8. Quarterly indicators - handle differently for quarterly vs annual data
+    # Check if this is quarterly or annual data
+    quarterly_endings = ['0331', '0630', '0930', '1231']
+    is_quarterly_data = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
+
+    if is_quarterly_data:
+        # For quarterly data, use the same calculations
+        df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']
+        df['calc_q_roe'] = df['calc_roe_waa']
+    else:
+        # For annual data, quarterly metrics don't apply
+        df['calc_q_netprofit_margin'] = np.nan
+        df['calc_q_roe'] = np.nan
     
-    # 9. Growth (YoY, approx with pct_change; adjust periods based on data frequency)
-    df = df.sort_values('report_period')
+    # 9. Growth (YoY) - corrected with stock grouping for accurate year-over-year calculations
+    # Sort by stock and period for proper YoY calculation
+    df = df.sort_values(['ts_code', 'report_period'])
+
     # For quarterly data, use periods=4; for annual data, use periods=1
     quarterly_endings = ['0331', '0630', '0930', '1231']
     has_quarterly = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
     periods_for_yoy = 4 if len(df) > 4 and has_quarterly else 1
-    df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None)
-    df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None)
+
+    # Calculate YoY changes by stock (standard financial calculation)
+    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None)
+    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None)
     
     # 10. Cost structure
     df['calc_cogs_of_sales'] = np.where(
         df['revenue'] > 0, df['oper_cost'] / df['revenue'] * 100, np.nan
     )
+    # Expense of sales - include more expense items for comprehensive calculation
+    total_expenses = (
+        df['sell_exp'].fillna(0) +
+        df['admin_exp'].fillna(0) +
+        df['fin_exp'].fillna(0)
+    )
+
+    # Optionally include RD expense if available (research and development)
+    if 'rd_exp' in df.columns:
+        total_expenses += df['rd_exp'].fillna(0)
+
     df['calc_expense_of_sales'] = np.where(
-        df['revenue'] > 0, (df['sell_exp'] + df['admin_exp'] + df['fin_exp']) / df['revenue'] * 100, np.nan
+        df['revenue'] > 0, total_expenses / df['revenue'] * 100, np.nan
     )
     
     # 11. Asset structure
