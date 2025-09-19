@@ -234,21 +234,24 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     if income_df.empty or balance_df.empty or cashflow_df.empty:
         return pd.DataFrame()
 
-    # Add report_period column if it doesn't exist
-    for df_name, df in [('income', income_df), ('balance', balance_df), ('cashflow', cashflow_df)]:
-        if 'report_period' not in df.columns and 'end_date' in df.columns:
-            df = df.copy()
-            df['report_period'] = df['end_date'].str.replace('-', '')
+    # Ensure all dataframes have report_period column
+    income_df['report_period'] = income_df['end_date'].str.replace('-', '')
+    balance_df['report_period'] = balance_df['end_date'].str.replace('-', '')
+    cashflow_df['report_period'] = cashflow_df['end_date'].str.replace('-', '')
 
-    # Ensure all dataframes have consistent report_period format
-    for df_name, df in [('income', income_df), ('balance', balance_df), ('cashflow', cashflow_df)]:
-        if 'report_period' not in df.columns and 'end_date' in df.columns:
-            df = df.copy()
-            df['report_period'] = df['end_date'].str.replace('-', '')
+    # Check if we have the required columns for merge
+    merge_keys = ['ts_code', 'report_period']
 
-    # Merge using report_period for consistency (handles both YYYY-MM-DD and YYYYMMDD)
-    df = pd.merge(pd.merge(income_df, balance_df, on=['ts_code', 'report_period'], how='inner'),
-                  cashflow_df, on=['ts_code', 'report_period'], how='inner')
+    # Merge dataframes
+    try:
+        df = pd.merge(pd.merge(income_df, balance_df, on=merge_keys, how='inner'),
+                      cashflow_df, on=merge_keys, how='inner')
+    except KeyError as e:
+        print(f"Merge failed due to missing key: {e}")
+        print(f"Available columns in income_df: {list(income_df.columns)}")
+        print(f"Available columns in balance_df: {list(balance_df.columns)}")
+        print(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
+        return pd.DataFrame()
     df = df.copy()
     
     # 1. Gross profit and margin
@@ -375,12 +378,30 @@ def cross_validate_indicators(computed_df, fina_df):
     if computed_df.empty or fina_df.empty:
         return pd.DataFrame(), {}
 
-    # Align: end_date to report_period
-    if 'end_date' in fina_df.columns:
+    # Ensure fina_df has report_period column
+    if not fina_df.empty and 'report_period' not in fina_df.columns and 'end_date' in fina_df.columns:
         fina_df = fina_df.copy()
         fina_df['report_period'] = fina_df['end_date'].str.replace('-', '')
 
-    merged = pd.merge(computed_df, fina_df, on=['ts_code', 'report_period'], how='inner', suffixes=('_calc', '_api'))
+    # Determine merge keys based on available columns
+    merge_keys = []
+    if 'ts_code' in computed_df.columns and 'ts_code' in fina_df.columns:
+        merge_keys.append('ts_code')
+    if 'report_period' in computed_df.columns and 'report_period' in fina_df.columns:
+        merge_keys.append('report_period')
+    elif 'end_date' in computed_df.columns and 'end_date' in fina_df.columns:
+        merge_keys.append('end_date')
+
+    if not merge_keys:
+        print("Warning: No common merge keys found between computed and fina dataframes")
+        return pd.DataFrame(), {}
+
+    try:
+        merged = pd.merge(computed_df, fina_df, on=merge_keys, how='inner', suffixes=('_calc', '_api'))
+    except KeyError as e:
+        print(f"Cross-validation merge failed: {e}")
+        print(f"Available merge keys: {merge_keys}")
+        return pd.DataFrame(), {}
     
     if merged.empty:
         return pd.DataFrame(), {}
