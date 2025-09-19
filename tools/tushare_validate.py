@@ -609,19 +609,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = run_validation(args.stocks, args.start_date, args.end_date, args.period)
 
-    # Return summary dictionary
+    # Print summary
     if isinstance(result, dict) and result:
         total_stocks = len(result)
         successful_stocks = sum(1 for r in result.values() if 'error' not in r)
-        summary = {
-            'total_stocks': total_stocks,
-            'successful_stocks': successful_stocks,
-            'failed_stocks': total_stocks - successful_stocks,
-            'success_rate': successful_stocks / total_stocks * 100 if total_stocks > 0 else 0,
-            'results': result
-        }
-        print(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({summary['success_rate']:.1f}% success rate)")
+        success_rate = successful_stocks / total_stocks * 100 if total_stocks > 0 else 0
+        print(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({success_rate:.1f}% success rate)")
     else:
-        summary = {'total_stocks': 0, 'successful_stocks': 0, 'results': {}}
         print("Validation completed: No results to display")
-    return summary
