@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import tushare as ts
-import datetime
+from datetime import datetime
 import argparse
 from typing import List
 
@@ -112,7 +112,7 @@ def generate_periods(start_date: str, end_date: str, period: str = "annual") -> 
     if period == "annual":
         # Generate all annual report dates (12-31) within the date range
         for year in range(start_dt.year, end_dt.year + 1):
-            annual_date = datetime.datetime(year, 12, 31)
+            annual_date = datetime(year, 12, 31)
 
             # Include if the annual date falls within our date range
             # or if it's the annual date for years that overlap with our range
@@ -126,7 +126,7 @@ def generate_periods(start_date: str, end_date: str, period: str = "annual") -> 
         # Iterate through each year in the range
         for year in range(start_dt.year, end_dt.year + 1):
             for month, day in quarters:
-                quarter_date = datetime.datetime(year, month, day)
+                quarter_date = datetime(year, month, day)
 
                 # Check if this quarter date falls within our date range
                 if start_dt <= quarter_date <= end_dt:
