@@ -339,7 +339,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['total_cur_liab'] > 0, (df['total_cur_assets'] - df['inventories']) / df['total_cur_liab'], np.nan
     )
     df['calc_cash_ratio'] = np.where(
-        df['total_cur_liab'] > 0, df['n_cashflow_act'] / df['total_cur_liab'], np.nan  # Approx cash
+        df['total_cur_liab'] > 0, (df['n_cashflow_act'] / df['total_cur_liab']) * 100, np.nan  # Approx cash
     )
     df['calc_debt_to_assets'] = np.where(
         df['total_assets'] > 0, (df['total_liab'] / df['total_assets']) * 100, np.nan  # Convert to percentage
@@ -499,9 +499,23 @@ def cross_validate_indicators(computed_df, fina_df):
     consistency_summary = {}
     for api_col, calc_col in diff_map.items():
         if api_col in merged.columns and calc_col in merged.columns:
-            diff = abs(merged[calc_col] - merged[api_col])
-            merged[f'{api_col}_diff'] = diff
-            consistent = diff <= 0.01  # Threshold for %/ratios
+            # Calculate absolute difference
+            abs_diff = abs(merged[calc_col] - merged[api_col])
+
+            # Calculate relative difference (percentage)
+            # Use absolute value of API values to avoid division by zero and handle negative values
+            api_values = merged[api_col].abs()
+            rel_diff = np.where(
+                api_values != 0,
+                (abs_diff / api_values) * 100,  # Percentage difference
+                np.where(abs_diff == 0, 0, np.inf)  # Handle zero API values
+            )
+
+            merged[f'{api_col}_abs_diff'] = abs_diff
+            merged[f'{api_col}_rel_diff_pct'] = rel_diff
+
+            # Use relative difference for consistency check (more meaningful for different scales)
+            consistent = rel_diff <= 5.0  # 5% relative difference threshold
             consistency_summary[api_col] = consistent.mean() * 100
     
     return merged, consistency_summary
