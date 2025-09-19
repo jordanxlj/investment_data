@@ -5,7 +5,15 @@ import tushare as ts
 from datetime import datetime
 import argparse
 import time
+import logging
 from typing import List
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Tushare init with error handling
 if "TUSHARE" not in os.environ:
@@ -28,11 +36,11 @@ def retry_api_call(func, *args, **kwargs):
             last_exception = e
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAY * (2 ** attempt)  # Exponential backoff
-                print(f"API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-                print(f"Retrying in {delay} seconds...")
+                logger.warning(f"API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+                logger.info(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                print(f"API call failed after {MAX_RETRIES} attempts: {e}")
+                logger.error(f"API call failed after {MAX_RETRIES} attempts: {e}")
 
     # If all retries failed, raise the last exception
     raise last_exception
@@ -235,6 +243,7 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     income_df = retry_api_call(
                         pro.income_vip,
                         period=period,
+                        limit=100,  # Limit to 100 stocks to avoid rate limits
                         fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
                     )
                     if not income_df.empty:
@@ -244,6 +253,7 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     balance_df = retry_api_call(
                         pro.balancesheet_vip,
                         period=period,
+                        limit=100,
                         fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
                     )
                     if not balance_df.empty:
@@ -253,6 +263,7 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     cashflow_df = retry_api_call(
                         pro.cashflow_vip,
                         period=period,
+                        limit=100,
                         fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
                     )
                     if not cashflow_df.empty:
@@ -263,6 +274,7 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
                     fina_df = retry_api_call(
                         pro.fina_indicator_vip,
                         period=period,
+                        limit=100,
                         fields=','.join(indicator_fields)
                     )
                     if not fina_df.empty:
@@ -315,7 +327,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     
     # 2. Net margin
     df['calc_netprofit_margin'] = np.where(
-        df['total_revenue'] > 0, (df['n_income_attr_p'] / df['total_revenue']) * 100, np.nan
+        df['revenue'] > 0, (df['n_income_attr_p'] / df['revenue']) * 100, np.nan
     )
     
     # 3. EBITDA margin
@@ -334,7 +346,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['total_cur_liab'] > 0, df['n_cashflow_act'] / df['total_cur_liab'], np.nan  # Approx cash
     )
     df['calc_debt_to_assets'] = np.where(
-        df['total_assets'] > 0, df['total_liab'] / df['total_assets'], np.nan
+        df['total_assets'] > 0, (df['total_liab'] / df['total_assets']) * 100, np.nan  # Convert to percentage
     )
     df['calc_assets_to_eqt'] = np.where(
         df['total_hldr_eqy_inc_min_int'] > 0, df['total_assets'] / df['total_hldr_eqy_inc_min_int'], np.nan
@@ -344,26 +356,26 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['ebit'] = df['operate_profit']  # Approximation: EBIT ≈ Operating Profit
 
     df['calc_ebit_to_interest'] = np.where(
-        df['int_exp'] > 0, df['ebit'] / df['int_exp'], np.nan
+        df['int_exp'] > 0, (df['ebit'] / df['int_exp']) * 100, np.nan  # Convert to ratio (times)
     )
     
     # 5. Operating efficiency
     df['calc_inv_turn'] = np.where(
-        df['inventories'] > 0, df['revenue'] / df['inventories'], np.nan
+        df['inventories'] > 0, (df['oper_cost'] / df['inventories']) * 100, np.nan  # Use oper_cost for inventory turnover
     )
     df['calc_ar_turn'] = np.where(
-        df['accounts_receiv'] > 0, df['revenue'] / df['accounts_receiv'], np.nan
+        df['accounts_receiv'] > 0, (df['revenue'] / df['accounts_receiv']) * 100, np.nan  # Convert to percentage
     )
     df['calc_assets_turn'] = np.where(
-        df['total_assets'] > 0, df['revenue'] / df['total_assets'], np.nan
+        df['total_assets'] > 0, (df['revenue'] / df['total_assets']) * 100, np.nan  # Convert to percentage
     )
     
     # 6. Profitability
     df['calc_roe_waa'] = np.where(  # Simplified; real waa needs avg equity
-        df['total_hldr_eqy_inc_min_int'] > 0, (df['n_income_attr_p'] / df['total_hldr_eqy_inc_min_int']) * 100, np.nan
+        df['total_hldr_eqy_inc_min_int'] > 0, df['n_income_attr_p'] / df['total_hldr_eqy_inc_min_int'], np.nan
     )
     df['calc_roa'] = np.where(
-        df['total_assets'] > 0, (df['n_income_attr_p'] / df['total_assets']) * 100, np.nan
+        df['total_assets'] > 0, df['n_income_attr_p'] / df['total_assets'], np.nan
     )
     df['calc_npta'] = df['calc_roa']  # Often equivalent
     # Calculate ROIC with proper vectorization
@@ -381,7 +393,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
 
     df['calc_roic'] = np.where(
         invested_capital > 0,
-        (nopat / invested_capital) * 100,
+        nopat / invested_capital,
         np.nan
     )
     
@@ -403,8 +415,8 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     quarterly_endings = ['0331', '0630', '0930', '1231']
     has_quarterly = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
     periods_for_yoy = 4 if len(df) > 4 and has_quarterly else 1
-    df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=periods_for_yoy) * 100
-    df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=periods_for_yoy) * 100
+    df['calc_netprofit_yoy'] = df['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None)
+    df['calc_op_yoy'] = df['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None)
     
     # 10. Cost structure
     df['calc_cogs_of_sales'] = np.where(
@@ -590,10 +602,27 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate data from Tushare.")
     parser.add_argument("--start_date", type=str, help="Start date in YYYY-MM-DD or YYYYMMDD format.", default='20240101')
-    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD or YYYYMMDD format.", default='20241231')
+    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD or YYYYMMDD format.", default=datetime.now().strftime('%Y1231'))
     parser.add_argument("--stocks", type=str, help="Stocks to validate (comma-separated).", default='')
     parser.add_argument("--period", type=str, help="Period type: annual or quarter.", default='annual')
 
     args = parser.parse_args()
     result = run_validation(args.stocks, args.start_date, args.end_date, args.period)
-    print(f"Validation completed: {result}")
+
+    # Return summary dictionary
+    if isinstance(result, dict) and result:
+        total_stocks = len(result)
+        successful_stocks = sum(1 for r in result.values() if 'error' not in r)
+        summary = {
+            'total_stocks': total_stocks,
+            'successful_stocks': successful_stocks,
+            'failed_stocks': total_stocks - successful_stocks,
+            'success_rate': successful_stocks / total_stocks * 100 if total_stocks > 0 else 0,
+            'results': result
+        }
+        print(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({summary['success_rate']:.1f}% success rate)")
+        return summary
+    else:
+        summary = {'total_stocks': 0, 'successful_stocks': 0, 'results': {}}
+        print("Validation completed: No results to display")
+        return summary
