@@ -594,7 +594,7 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     
     print("\n=== Detailed Validation (Sample) ===")
     if not validation_df.empty:
-        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_diff', 'netprofit_margin_diff', 'current_ratio_diff', 'roe_waa_diff']  # Sample
+        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff', 'current_ratio_abs_diff', 'roe_waa_abs_diff']  # Sample
         print(validation_df[sample_cols].head().to_string(index=False))
     else:
         print("No overlapping periods for validation")
