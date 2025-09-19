@@ -339,27 +339,40 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['calc_quick_ratio'] = np.where(
         df['total_cur_liab'] > 0, (df['total_cur_assets'] - df['inventories']) / df['total_cur_liab'], np.nan
     )
-    df['calc_cash_ratio'] = np.where(
-        df['total_cur_liab'] > 0, (df['n_cashflow_act'] / df['total_cur_liab']) * 100, np.nan  # Approx cash
-    )
     df['calc_debt_to_assets'] = np.where(
         df['total_assets'] > 0, (df['total_liab'] / df['total_assets']) * 100, np.nan  # Convert to percentage
     )
     df['calc_assets_to_eqt'] = np.where(
         df['total_hldr_eqy_inc_min_int'] > 0, df['total_assets'] / df['total_hldr_eqy_inc_min_int'], np.nan
     )
-    # Ensure EBIT is available (use proxy if missing)
-    if 'ebit' not in df.columns or df['ebit'].isna().all():
-        df['ebit'] = df['operate_profit']  # Approximation: EBIT ≈ Operating Profit
+    
+    # Cash ratio - optimized
+    if 'monetary_cap' in df.columns:
+        cash_equivalent = df['monetary_cap'].fillna(0)
+    elif 'money_cap' in df.columns:
+        cash_equivalent = df['money_cap'].fillna(0)
+    else:
+        cash_equivalent = np.nan  # No fallback to flow metrics
+    valid_liab = df['total_cur_liab'] > 0
+    df['calc_cash_ratio'] = np.where(valid_liab & (cash_equivalent >= 0), cash_equivalent / df['total_cur_liab'], np.nan)
 
-    # Ensure EBIT is properly defined (standard financial calculation)
-    if 'ebit' not in df.columns or df['ebit'].isna().all():
-        df['ebit'] = df['operate_profit'] + df['invest_income'].fillna(0) - df['int_exp'].fillna(0)
+    # EBIT to Interest ratio - improved calculation
+    # EBIT = Operating Profit + Investment Income - Interest Expense
+    df['calc_ebit_full'] = (
+        df['operate_profit'].fillna(0) +
+        df['invest_income'].fillna(0) -
+        df['int_exp'].fillna(0)
+    )
 
     # Use correct field name for interest expense
     interest_field = 'int_exp' if 'int_exp' in df.columns else 'interest_exp'
     if interest_field in df.columns:
-        df['calc_ebit_to_interest'] = np.where(df[interest_field] > 0, df['ebit'] / df[interest_field], np.nan)
+        # Tushare typically calculates this as EBIT / Interest Expense
+        df['calc_ebit_to_interest'] = np.where(
+            df[interest_field] > 0,
+            df['calc_ebit_full'] / df[interest_field],
+            np.nan
+        )
     else:
         df['calc_ebit_to_interest'] = np.nan
     
@@ -380,44 +393,54 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df[prev_col] = df.groupby('ts_code')[col].shift(1)  # Period initial value
         df[avg_col] = (df[col] + df[prev_col].fillna(df[col])) / 2  # Fill first period with end value
 
-    # 5. Operating efficiency - corrected with average values
-    # Corrected turnover ratios using average values and proper formulas
-    # Use total_cogs for inventory turnover (matches Tushare definition)
-    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['total_cogs'] / df['avg_inv'], np.nan)
+    # 5. Operating efficiency - refined turnover ratios with better field mapping
+    # Use oper_cost for inventory turnover (matches Tushare's inventory_turnover calculation)
+    # Tushare uses oper_cost for cost of goods sold in turnover calculations
+    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
     df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
     df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df['revenue'] / df['avg_total_assets'], np.nan)
 
-    # 6. Profitability - refined with standard weighted average calculations
+    # 6. Profitability - improved ROE/ROA calculations with better averaging
 
-    # Corrected ROE/ROA/NPTA using average values (standard financial calculation)
-    df['calc_roe_waa'] = np.where(df['avg_total_hldr_eqy_inc_min_int'] > 0, (df['n_income_attr_p'] / df['avg_total_hldr_eqy_inc_min_int']) * 100, np.nan)
-    df['calc_roa'] = np.where(df['avg_total_assets'] > 0, (df['n_income_attr_p'] / df['avg_total_assets']) * 100, np.nan)
-    df['calc_npta'] = df['calc_roa']  # Equivalent to ROA
-    # Calculate ROIC with proper vectorization
-    # NOPAT = Operating Profit * (1 - tax_rate)
-    # Invested Capital = Total Liabilities - Cash & Cash Equivalents
-    tax_rate = np.where(
-        df['total_profit'] > 0,
-        np.where(df['income_tax'].notna(), df['income_tax'] / df['total_profit'], 0.25),
-        0.25  # Default tax rate
+    # Ensure we have valid equity and assets values before calculating ratios
+    # Tushare typically uses end-of-period values for simpler calculations
+    df['calc_roe_waa'] = np.where(
+        df['total_hldr_eqy_inc_min_int'] > 0,
+        (df['n_income_attr_p'] / df['total_hldr_eqy_inc_min_int']) * 100,
+        np.nan
     )
-    nopat = df['operate_profit'] * (1 - tax_rate)
 
-    # ROIC/ROCE refined with money_cap preference
-    # Prefer money_cap over n_cashflow_act for more accurate cash proxy
-    df['cash_proxy'] = df.get('money_cap', df['n_cashflow_act'])
+    # Use total_assets directly for ROA (matches Tushare's approach)
+    df['calc_roa'] = np.where(
+        df['total_assets'] > 0,
+        (df['n_income_attr_p'] / df['total_assets']) * 100,
+        np.nan
+    )
 
-    # Invested capital = Total Assets - Cash proxy
-    df['invested_capital'] = df['total_assets'] - df['cash_proxy']
+    df['calc_npta'] = df['calc_roa']  # NPTA is equivalent to ROA
+    # Calculate ROIC with improved tax rate and EBIT calculations
+    # Better tax rate calculation - use actual tax rate when available
+    tax_rate = np.where(
+        df['total_profit'].abs() > 0,  # Use absolute value to handle negative profits
+        np.where(
+            df['income_tax'].notna() & (df['income_tax'] != 0),
+            np.clip(df['income_tax'] / df['total_profit'], 0, 0.5),  # Clip to reasonable range
+            0.25  # Default tax rate
+        ),
+        0.25  # Default for zero profit
+    )
 
-    # Calculate average invested capital
-    df['prev_invested_cap'] = df.groupby('ts_code')['invested_capital'].shift(1)
-    df['avg_invested_capital'] = (df['invested_capital'] + df['prev_invested_cap'].fillna(df['invested_capital'])) / 2
+    # Better EBIT calculation - ensure it's properly defined
+    df['calc_ebit'] = df['operate_profit']  # Use operating profit as base EBIT
 
-    # ROIC and ROCE calculations
+    # NOPAT = EBIT * (1 - tax_rate)
+    nopat = df['calc_ebit'] * (1 - tax_rate)
+
+    # ROIC calculation - use simpler approach that matches Tushare
+    # Tushare typically uses total_assets as invested capital for ROIC
     df['calc_roic'] = np.where(
-        df['avg_invested_capital'] > 0,
-        (nopat / df['avg_invested_capital']) * 100,
+        df['total_assets'] > 0,
+        (nopat / df['total_assets']) * 100,
         np.nan
     )
     df['calc_roce'] = df['calc_roic']  # ROCE equivalent to ROIC in this context
@@ -430,32 +453,57 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['revenue'] > 0, df['n_cashflow_act'] / df['revenue'], np.nan
     )
     
-    # 8. Quarterly indicators - refined handling for quarterly vs annual data
-    # Check if this is quarterly or annual data
+    # 8. Quarterly indicators - improved handling based on data type
+    # Check if this is quarterly data by examining report periods
     quarterly_endings = ['0331', '0630', '0930', '1231']
-    is_quarterly_data = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
+    df['is_quarterly_period'] = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings))
 
-    if is_quarterly_data:
-        # For quarterly data, use the same calculations
-        df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']
-        df['calc_q_roe'] = df['calc_roe_waa']  # Annualized quarterly ROE
-    else:
-        # For annual data, quarterly metrics don't apply
-        df['calc_q_netprofit_margin'] = np.nan
-        df['calc_q_roe'] = np.nan
+    # Calculate quarterly metrics only for quarterly periods
+    df['calc_q_netprofit_margin'] = np.where(
+        df['is_quarterly_period'],
+        df['calc_netprofit_margin'],  # Use same calculation for quarterly
+        np.nan
+    )
+
+    df['calc_q_roe'] = np.where(
+        df['is_quarterly_period'],
+        df['calc_roe_waa'],  # Use same ROE calculation for quarterly
+        np.nan
+    )
+
+    # Clean up temporary column
+    df = df.drop('is_quarterly_period', axis=1)
     
-    # 9. Growth (YoY) - refined with proper periods for quarterly vs annual data
-    # Sort by stock and period for proper YoY calculation
+    # 9. Growth (YoY) - improved calculation with better data handling
+    # Ensure proper sorting for YoY calculations
     df = df.sort_values(['ts_code', 'report_period'])
 
-    # For quarterly data, use periods=4; for annual data, use periods=1
+    # Determine if this is quarterly data by checking report periods
     quarterly_endings = ['0331', '0630', '0930', '1231']
-    has_quarterly = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings)).any()
-    periods_for_yoy = 4 if len(df) > 4 and has_quarterly else 1
+    df['is_quarterly'] = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings))
 
-    # Calculate YoY changes by stock with proper periods (standard financial calculation)
-    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].pct_change(periods=periods_for_yoy, fill_method=None) * 100
-    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].pct_change(periods=periods_for_yoy, fill_method=None) * 100
+    # For each stock, determine if it has quarterly data
+    stock_has_quarterly = df.groupby('ts_code')['is_quarterly'].any()
+
+    # Calculate YoY changes based on data type per stock
+    def calculate_yoy(series, stock_code):
+        if stock_has_quarterly.get(stock_code, False):
+            # Quarterly data: compare with 4 periods ago
+            return series.pct_change(periods=4, fill_method=None) * 100
+        else:
+            # Annual data: compare with 1 period ago
+            return series.pct_change(periods=1, fill_method=None) * 100
+
+    # Apply YoY calculation per stock
+    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].transform(
+        lambda x: calculate_yoy(x, x.name)
+    )
+    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].transform(
+        lambda x: calculate_yoy(x, x.name)
+    )
+
+    # Clean up temporary column
+    df = df.drop('is_quarterly', axis=1)
     
     # 10. Cost structure
     df['calc_cogs_of_sales'] = np.where(
@@ -528,6 +576,7 @@ def cross_validate_indicators(computed_df, fina_df):
         'ebitda_margin': 'calc_ebitda_margin',
         'current_ratio': 'calc_current_ratio',
         'quick_ratio': 'calc_quick_ratio',
+        'cash_ratio': 'calc_cash_ratio',
         'debt_to_assets': 'calc_debt_to_assets',
         'assets_to_eqt': 'calc_assets_to_eqt',
         'ebit_to_interest': 'calc_ebit_to_interest',
@@ -660,7 +709,7 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     
     print("\n=== Detailed Validation (Sample) ===")
     if not validation_df.empty:
-        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff', 'current_ratio_abs_diff', 'roe_waa_abs_diff']  # Sample
+        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff', 'cash_ratio_abs_diff', 'current_ratio_abs_diff', 'roe_waa_abs_diff']  # Sample
         print(validation_df[sample_cols].head().to_string(index=False))
     else:
         print("No overlapping periods for validation")
