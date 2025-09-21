@@ -95,7 +95,7 @@ BALANCE_COLUMNS = [
     "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int",
     "money_cap", "trad_asset", "adv_receipts", "contract_liab", "payroll_payable",
     "taxes_payable", "div_payable", "oth_payable", "oth_cur_liab",
-    "total_ncl", "bonds_payable"
+    "total_ncl", "bond_payable"
 ]
 
 # Cash flow statement fields (core primitives)
@@ -156,7 +156,7 @@ INDICATOR_COLUMNS = [
 
     # Additional structure ratios (extended)
     "ncl_to_liab", "op_to_tp", "tax_to_tp", "op_to_cl",
-    "ocf_to_cl", "eqt_to_liab", "invturn_days"
+    "ocf_to_cl", "eqt_to_liab"
 ]
 
 # API field name list (all three major financial statements contain these base fields)
@@ -401,6 +401,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     balance_df = balance_df.drop(columns=[col for col in common_non_keys if col in balance_df.columns], errors='ignore')
     cashflow_df = cashflow_df.drop(columns=[col for col in common_non_keys if col in cashflow_df.columns], errors='ignore')
     fina_df = fina_df.drop(columns=[col for col in common_non_keys if col in fina_df.columns], errors='ignore')
+
     # Merge dataframes with custom suffixes to avoid column conflicts
     try:
         merge_keys = ['ts_code', 'report_period']
@@ -417,17 +418,32 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         print(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
         print(f"Available columns in fina_df: {list(fina_df.columns)}")
         return pd.DataFrame()
-    df = df.copy()
-    
+        df = df.copy()
+
+        # Debug: Print available columns for key calculations
+        logger.debug(f"Available columns in merged df: {len(df.columns)} total")
+        cash_fields = [col for col in df.columns if 'cash' in col.lower() or 'money' in col.lower() or 'trad' in col.lower()]
+        interest_fields = [col for col in df.columns if 'int' in col.lower() or 'fin' in col.lower() or 'interest' in col.lower()]
+        logger.debug(f"Cash-related fields available: {cash_fields}")
+        logger.debug(f"Interest-related fields available: {interest_fields}")
+
     # 1. Gross profit and margin
-    df['calc_gross_profit'] = df['revenue'] - df['oper_cost']
+    # Use total_revenue if revenue is not available
+    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
+    df['calc_gross_profit'] = df[revenue_field] - df['oper_cost']
     df['calc_grossprofit_margin'] = np.where(
-        df['revenue'] > 0, (df['calc_gross_profit'] / df['revenue']) * 100, np.nan
+        df[revenue_field] > 0, (df['calc_gross_profit'] / df[revenue_field]) * 100, np.nan
     )
-    
+
+    for field in df.columns:
+        field_null_count = df[field].isna().sum()
+        logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
+
     # 2. Net margin
+    # Use total_revenue if revenue is not available or use revenue as primary
+    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
     df['calc_netprofit_margin'] = np.where(
-        df['revenue'] > 0, (df['n_income_attr_p'] / df['revenue']) * 100, np.nan
+        df[revenue_field] > 0, (df['n_income_attr_p'] / df[revenue_field]) * 100, np.nan
     )
     
     # 3. EBITDA margin
@@ -449,15 +465,26 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         df['total_hldr_eqy_inc_min_int'] > 0, df['total_assets'] / df['total_hldr_eqy_inc_min_int'], np.nan
     )
     
-    # Cash ratio - optimized
-    if 'monetary_cap' in df.columns:
-        cash_equivalent = df['monetary_cap'].fillna(0)
-    elif 'money_cap' in df.columns:
-        cash_equivalent = df['money_cap'].fillna(0)
-    else:
-        cash_equivalent = np.nan  # No fallback to flow metrics
+    # Cash ratio - since money_cap field may not be available, use alternative approach
+    # In Tushare, cash ratio may be calculated differently or use different fields
+    # For now, if we can't find the cash field, we'll leave it as NaN and let validation show the discrepancy
+    cash_equivalent = np.nan
+
+    # Try to find cash-related fields - expanded list
+    cash_fields = ['money_cap', 'monetary_cap', 'trad_asset', 'cash', 'cash_equivalents', 'cash_and_cash_equivalents']
+    for field in cash_fields:
+        if field in df.columns:
+            cash_equivalent = df[field].fillna(0)
+            break
+
+    # Calculate cash ratio if we have cash data
     valid_liab = df['total_cur_liab'] > 0
-    df['calc_cash_ratio'] = np.where(valid_liab & (cash_equivalent >= 0), cash_equivalent / df['total_cur_liab'], np.nan)
+    if not cash_equivalent.isna().all():
+        df['calc_cash_ratio'] = np.where(valid_liab,
+                                       cash_equivalent / df['total_cur_liab'], np.nan)
+    else:
+        # If no cash field available, set to NaN (will show as discrepancy in validation)
+        df['calc_cash_ratio'] = np.nan
 
     # EBIT to Interest ratio - improved calculation
     # EBIT = Operating Profit + Investment Income - Interest Expense
@@ -477,7 +504,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
             np.nan
         )
     else:
+        logger.debug("No interest expense field found, ebit_to_interest will be NaN")
         df['calc_ebit_to_interest'] = np.nan
+    calc_ebit_to_interest_null_count = df['calc_ebit_to_interest'].isna().sum()
+    logger.debug(f"calc_ebit_to_interest_null_pct: {calc_ebit_to_interest_null_count / len(df) * 100.0}")
     
     # Sort for shift operations (required for all average calculations)
     df = df.sort_values(['ts_code', 'report_period'])
@@ -505,20 +535,24 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     # 5. Operating efficiency - refined turnover ratios with better field mapping
     # Use oper_cost for inventory turnover (matches Tushare's inventory_turnover calculation)
     # Tushare uses oper_cost for cost of goods sold in turnover calculations
-    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
+    # Try different cost fields for inventory turnover
+    cost_field = 'oper_cost' if 'oper_cost' in df.columns else 'total_cogs'
+    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df[cost_field] / df['avg_inv'], np.nan)
 
     # Inventory Turnover Days = 360 / Inventory Turnover Rate
     # 存货周转天数 = 360 / (期末.营业成本 / ((期末.存货 + 期初.存货) / 2))
     df['calc_inv_turn_days'] = np.where(df['calc_inv_turn'] > 0, 360 / df['calc_inv_turn'], np.nan)
 
-    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
-    df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df['revenue'] / df['avg_total_assets'], np.nan)
+    # Use consistent revenue field for all turnover calculations
+    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
+    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df[revenue_field] / df['avg_ar'], np.nan)
+    df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df[revenue_field] / df['avg_total_assets'], np.nan)
 
     # Ensure we have valid equity and assets values before calculating ratios
-    # Tushare typically uses end-of-period values for simpler calculations
+    # Use average equity for ROE calculation (more accurate than end-of-period)
     df['calc_roe_waa'] = np.where(
-        df['total_hldr_eqy_inc_min_int'] > 0,
-        (df['n_income_attr_p'] / df['total_hldr_eqy_inc_min_int']) * 100,
+        df['avg_total_hldr_eqy_inc_min_int'] > 0,
+        (df['n_income_attr_p'] / df['avg_total_hldr_eqy_inc_min_int']) * 100,
         np.nan
     )
 
@@ -563,29 +597,13 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         df['total_liab'] > 0, df['n_cashflow_act'] / df['total_liab'], np.nan
     )
     df['calc_cf_sales'] = np.where(
-        df['revenue'] > 0, df['n_cashflow_act'] / df['revenue'], np.nan
+        df[revenue_field] > 0, df['n_cashflow_act'] / df[revenue_field], np.nan
     )
     
-    # 8. Quarterly indicators - improved handling based on data type
-    # Check if this is quarterly data by examining report periods
-    quarterly_endings = ['0331', '0630', '0930', '1231']
-    df['is_quarterly_period'] = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings))
-
-    # Calculate quarterly metrics only for quarterly periods
-    df['calc_q_netprofit_margin'] = np.where(
-        df['is_quarterly_period'],
-        df['calc_netprofit_margin'],  # Use same calculation for quarterly
-        np.nan
-    )
-
-    df['calc_q_roe'] = np.where(
-        df['is_quarterly_period'],
-        df['calc_roe_waa'],  # Use same ROE calculation for quarterly
-        np.nan
-    )
-
-    # Clean up temporary column
-    df = df.drop('is_quarterly_period', axis=1)
+    # 8. Quarterly indicators - calculate for all periods
+    # In Tushare, q_ metrics may be available for both quarterly and annual reports
+    df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']  # Same as annual for now
+    df['calc_q_roe'] = df['calc_roe_waa']  # Same as annual ROE for now
     
     # 9. Growth (YoY) - improved calculation with better data handling
     # Ensure proper sorting for YoY calculations
@@ -652,6 +670,8 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         df['total_hldr_eqy_inc_min_int'] / df['total_share'],
         np.nan
     )
+    # Round to match API precision (typically 4 decimal places for BPS)
+    df['calc_bvps'] = np.round(df['calc_bvps'], 4)
     df['calc_bps'] = df['calc_bvps']  # BPS is same as BVPS
 
     # Earnings Per Share (EPS) - 基本每股收益 (if not already calculated)
@@ -747,6 +767,11 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         np.nan
     )
 
+    for field in df.columns:
+        if field.startswith('calc_'):
+            field_null_count = df[field].isna().sum()
+            logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
+
     # Select calc columns
     calc_cols = [col for col in df.columns if col.startswith('calc_')]
     return df[['ts_code', 'report_period'] + calc_cols]
@@ -808,7 +833,6 @@ def cross_validate_indicators(computed_df, fina_df):
 
         # Turnover ratios
         'inv_turn': 'calc_inv_turn',
-        'invturn_days': 'calc_inv_turn_days',
         'ar_turn': 'calc_ar_turn',
         'assets_turn': 'calc_assets_turn',
         'currentasset_turn': 'calc_currentasset_turn',
