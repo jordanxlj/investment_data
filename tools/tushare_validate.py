@@ -7,6 +7,7 @@ import argparse
 import time
 import logging
 from typing import List
+import hashlib
 
 # Setup logging
 logging.basicConfig(
@@ -24,6 +25,40 @@ pro = ts.pro_api()
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
+
+# Cache configuration
+CACHE_DIR = "cache"
+USE_CACHE = True  # Set to False to disable caching
+
+def get_cache_path(cache_file: str) -> str:
+    """Get the full path for a cache file"""
+    return os.path.join(CACHE_DIR, f"{cache_file}.parquet")
+
+def load_from_cache(cache_file: str) -> pd.DataFrame:
+    """Load data from cache if it exists"""
+    cache_path = get_cache_path(cache_file)
+    if os.path.exists(cache_path):
+        try:
+            logger.info(f"Loading {cache_file} from cache: {cache_path}")
+            return pd.read_parquet(cache_path)
+        except Exception as e:
+            logger.warning(f"Failed to load cache {cache_file}: {e}")
+    return pd.DataFrame()
+
+def save_to_cache(file_name: str, df: pd.DataFrame):
+    """Save data to cache"""
+    if df.empty:
+        return
+
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    cache_path = get_cache_path(file_name)
+    try:
+        df.to_parquet(cache_path, index=False)
+        logger.info(f"Saved to cache: {cache_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save cache {cache_path}: {e}")
 
 def retry_api_call(func, *args, **kwargs):
     """Retry API call with exponential backoff"""
@@ -58,7 +93,9 @@ BALANCE_COLUMNS = [
     "total_cur_liab", "accounts_receiv", "inventories", "acct_payable",
     "fix_assets", "lt_borr", "r_and_d", "goodwill", "intang_assets", "st_borr",
     "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int",
-    "money_cap"  # Currency funds for more accurate ROIC calculation
+    "money_cap", "trad_asset", "adv_receipts", "contract_liab", "payroll_payable",
+    "taxes_payable", "div_payable", "oth_payable", "oth_cur_liab",
+    "total_ncl", "bonds_payable"
 ]
 
 # Cash flow statement fields (core primitives)
@@ -75,6 +112,9 @@ INDICATOR_COLUMNS = [
     "eps", "dt_eps", "gross_margin", "netprofit_margin", "grossprofit_margin",
     "ebitda_margin", "extra_item", "profit_dedt", "op_income", "daa",
 
+    # Per-share indicators (extended)
+    "bvps", "bps", "ocfps", "cfps", "revenue_ps",
+
     # Solvency indicators (core)
     "current_ratio", "quick_ratio", "cash_ratio", "debt_to_assets", "assets_to_eqt",
     "dp_assets_to_eqt", "debt_to_eqt", "ebit_to_interest", "ebitda_to_debt",
@@ -82,6 +122,9 @@ INDICATOR_COLUMNS = [
     # Operating efficiency indicators (core)
     "inv_turn", "ar_turn", "ca_turn", "fa_turn", "assets_turn", "inventory_turnover",
     "currentasset_turnover", "arturnover",
+
+    # Additional turnover ratios (extended)
+    "currentasset_turn", "fix_assets_turn",
 
     # Profitability indicators (core)
     "roic", "roe_waa", "roe_dt", "roe_yearly", "roa", "npta", "npta_yearly",
@@ -109,7 +152,11 @@ INDICATOR_COLUMNS = [
     # Asset structure analysis (core)
     "ca_to_assets", "nca_to_assets", "tbassets_to_totalassets", "int_to_talcap",
     "eqt_to_talcapital", "currentdebt_to_debt", "longdeb_to_debt",
-    "longdebt_to_workingcapital"
+    "longdebt_to_workingcapital", "invest_capital",
+
+    # Additional structure ratios (extended)
+    "nca_to_assets", "ncl_to_liab", "op_to_tp", "tax_to_tp", "op_to_cl",
+    "ocf_to_cl", "eqt_to_liab"
 ]
 
 # API field name list (all three major financial statements contain these base fields)
@@ -174,8 +221,8 @@ def generate_periods(start_date: str, end_date: str, period: str = "annual") -> 
 
     return periods
 
-def fetch_tushare_data(stocks: str, periods: List[str]):
-    """Fetch data from multiple Tushare interfaces"""
+def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
+    """Fetch data from multiple Tushare interfaces (internal function without caching)"""
     try:
         # Handle stocks parameter
         if stocks:
@@ -291,7 +338,54 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
         print(f"Error fetching data: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-def compute_basic_indicators(income_df, balance_df, cashflow_df):
+def fetch_tushare_data(stocks: str, periods: List[str]):
+    """Fetch data from multiple Tushare interfaces with caching support"""
+    if not USE_CACHE:
+        logger.info("Cache disabled, fetching data from Tushare API")
+        return fetch_tushare_data_from_api(stocks, periods)
+
+    # Try to load from cache first
+    income_df = load_from_cache('income_data')
+    balance_df = load_from_cache('balance_data')
+    cashflow_df = load_from_cache('cashflow_data')
+    fina_df = load_from_cache('fina_data')
+
+    # Check if all data is available in cache
+    all_cached = not (income_df.empty or balance_df.empty or cashflow_df.empty or fina_df.empty)
+
+    if all_cached:
+        logger.info("All data loaded from cache successfully")
+        return income_df, balance_df, cashflow_df, fina_df
+    else:
+        logger.info("Some data missing from cache, fetching from Tushare API")
+
+        # Fetch missing data from API
+        api_income_df, api_balance_df, api_cashflow_df, api_fina_df = fetch_tushare_data_from_api(stocks, periods)
+
+        # Update cache with API data
+        if not api_income_df.empty:
+            save_to_cache("income_data", api_income_df)
+            if income_df.empty:
+                income_df = api_income_df
+
+        if not api_balance_df.empty:
+            save_to_cache("balance_data", api_balance_df)
+            if balance_df.empty:
+                balance_df = api_balance_df
+
+        if not api_cashflow_df.empty:
+            save_to_cache("cashflow_data", api_cashflow_df)
+            if cashflow_df.empty:
+                cashflow_df = api_cashflow_df
+
+        if not api_fina_df.empty:
+            save_to_cache("fina_data", api_fina_df)
+            if fina_df.empty:
+                fina_df = api_fina_df
+
+        return income_df, balance_df, cashflow_df, fina_df
+
+def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     """Compute extended basic indicators from primitives"""
     if income_df.empty or balance_df.empty or cashflow_df.empty:
         return pd.DataFrame()
@@ -300,19 +394,28 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     income_df['report_period'] = income_df['end_date'].str.replace('-', '')
     balance_df['report_period'] = balance_df['end_date'].str.replace('-', '')
     cashflow_df['report_period'] = cashflow_df['end_date'].str.replace('-', '')
+    fina_df['report_period'] = fina_df['end_date'].str.replace('-', '')
 
     # Check if we have the required columns for merge
-    merge_keys = ['ts_code', 'report_period']
-
-    # Merge dataframes
+    common_non_keys = ['ann_date', 'end_date', 'report_type']
+    balance_df = balance_df.drop(columns=[col for col in common_non_keys if col in balance_df.columns], errors='ignore')
+    cashflow_df = cashflow_df.drop(columns=[col for col in common_non_keys if col in cashflow_df.columns], errors='ignore')
+    fina_df = fina_df.drop(columns=[col for col in common_non_keys if col in fina_df.columns], errors='ignore')
+    # Merge dataframes with custom suffixes to avoid column conflicts
     try:
-        df = pd.merge(pd.merge(income_df, balance_df, on=merge_keys, how='inner'),
-                      cashflow_df, on=merge_keys, how='inner')
+        merge_keys = ['ts_code', 'report_period']
+        # First merge: income + balance
+        df = pd.merge(income_df, balance_df, on=merge_keys, how='inner', suffixes=('', ''))
+        # Second merge: + cashflow
+        df = pd.merge(df, cashflow_df, on=merge_keys, how='inner', suffixes=('', ''))
+        # Third merge: + fina indicators
+        df = pd.merge(df, fina_df, on=merge_keys, how='inner', suffixes=('', ''))
     except KeyError as e:
         print(f"Merge failed due to missing key: {e}")
         print(f"Available columns in income_df: {list(income_df.columns)}")
         print(f"Available columns in balance_df: {list(balance_df.columns)}")
         print(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
+        print(f"Available columns in fina_df: {list(fina_df.columns)}")
         return pd.DataFrame()
     df = df.copy()
     
@@ -385,9 +488,15 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     df['avg_inv'] = (df['inventories'] + df['prev_inv'].fillna(df['inventories'])) / 2
     df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
     df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
+    # Interest-Bearing Debt
+    # Non-Interest Current Liabilities (exclude interest_payable)
+    non_int_cur_liab = df.get('acct_payable', 0) + df.get('adv_receipts', 0) + df.get('contract_liab', 0) + df.get('payroll_payable', 0) + df.get('taxes_payable', 0) + df.get('div_payable', 0) + df.get('oth_payable', 0) + df.get('oth_cur_liab', 0)
+    # Non-Interest Non-Current Liabilities
+    non_int_non_cur_liab = df['total_ncl'] - df.get('lt_borr', 0) - df.get('bonds_payable', 0)
+    df['int_debt'] = df['total_liab'] - non_int_cur_liab - non_int_non_cur_liab
 
     # 2. Average values for profitability ratios
-    for col in ['total_hldr_eqy_inc_min_int', 'total_assets']:
+    for col in ['total_hldr_eqy_inc_min_int', 'total_assets', 'fix_assets', 'total_cur_assets', 'int_debt']:
         prev_col = f'prev_{col}'
         avg_col = f'avg_{col}'
         df[prev_col] = df.groupby('ts_code')[col].shift(1)  # Period initial value
@@ -431,18 +540,19 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
     )
 
     # Better EBIT calculation - ensure it's properly defined
-    df['calc_ebit'] = df['operate_profit']  # Use operating profit as base EBIT
+    df['calc_ebit'] = df['operate_profit'] + df['invest_income'] - df['fin_exp']
 
     # NOPAT = EBIT * (1 - tax_rate)
     nopat = df['calc_ebit'] * (1 - tax_rate)
 
-    # ROIC calculation - use simpler approach that matches Tushare
-    # Tushare typically uses total_assets as invested capital for ROIC
-    df['calc_roic'] = np.where(
-        df['total_assets'] > 0,
-        (nopat / df['total_assets']) * 100,
-        np.nan
-    )
+    cash = df.get('monetary_cap', df['n_cashflow_act'])  # Cash proxy
+    avg_equity = df['avg_total_hldr_eqy_inc_min_int']
+    df['invested_cap'] = avg_equity + df['avg_int_debt'] - cash
+    prev_invested_cap = df.groupby('ts_code')['invested_cap'].shift(1)
+    avg_invested_cap = (df['invested_cap'] + prev_invested_cap.fillna(df['invested_cap'])) / 2
+
+    # ROIC
+    df['calc_roic'] = np.where(avg_invested_cap > 0, (nopat / avg_invested_cap) * 100, np.nan)    
     df['calc_roce'] = df['calc_roic']  # ROCE equivalent to ROIC in this context
     
     # 7. Cash flow ratios
@@ -532,6 +642,108 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df):
         df['total_liab'] > 0, df['total_cur_liab'] / df['total_liab'] * 100, np.nan
     )
     
+    # 12. Per-share indicators (extended)
+    # Book Value Per Share (BVPS/BPS) - 每股净资产
+    df['calc_bvps'] = np.where(
+        df['total_share'] > 0,
+        df['total_hldr_eqy_inc_min_int'] / df['total_share'],
+        np.nan
+    )
+    df['calc_bps'] = df['calc_bvps']  # BPS is same as BVPS
+
+    # Earnings Per Share (EPS) - 基本每股收益 (if not already calculated)
+    if 'calc_eps' not in df.columns:
+        df['calc_eps'] = df['basic_eps']  # Use from API if available
+        df['calc_dt_eps'] = df['dt_eps']  # Diluted EPS
+
+    # Operating Cash Flow Per Share (OCFPS) - 每股经营现金流
+    df['calc_ocfps'] = np.where(
+        df['total_share'] > 0,
+        df['n_cashflow_act'] / df['total_share'],
+        np.nan
+    )
+
+    # Cash Flow Per Share (CFPS) - 每股现金流净额
+    df['calc_cfps'] = np.where(
+        df['total_share'] > 0,
+        df['n_incr_cash_cash_equ'] / df['total_share'],
+        np.nan
+    )
+
+    # Revenue Per Share - 每股营业收入
+    df['calc_revenue_ps'] = np.where(
+        df['total_share'] > 0,
+        df['total_revenue'] / df['total_share'],
+        np.nan
+    )
+
+    # 13. Additional turnover ratios (extended)
+    # Current Asset Turnover - 流动资产周转率
+    df['calc_currentasset_turn'] = np.where(
+        df['avg_total_cur_assets'] > 0,
+        df['revenue'] / df['avg_total_cur_assets'],
+        np.nan
+    )
+
+    # Fixed Assets Turnover - 固定资产周转率
+    df['calc_fix_assets_turn'] = np.where(
+        df['avg_fix_assets'] > 0,
+        df['revenue'] / df['avg_fix_assets'],
+        np.nan
+    )
+
+    # 14. Additional structure ratios (extended)
+    # Non-current Assets to Total Assets - 非流动资产/总资产
+    non_current_assets = df['total_assets'] - df['total_cur_assets']
+    df['calc_nca_to_assets'] = np.where(
+        df['total_assets'] > 0,
+        non_current_assets / df['total_assets'] * 100,
+        np.nan
+    )
+
+    # Non-current Liabilities to Total Liabilities - 非流动负债/负债合计
+    non_current_liab = df['total_liab'] - df['total_cur_liab']
+    df['calc_ncl_to_liab'] = np.where(
+        df['total_liab'] > 0,
+        non_current_liab / df['total_liab'] * 100,
+        np.nan
+    )
+
+    # Operating Profit to Total Profit - 营业利润/利润总额
+    df['calc_op_to_tp'] = np.where(
+        df['total_profit'] != 0,
+        df['operate_profit'] / df['total_profit'] * 100,
+        np.nan
+    )
+
+    # Tax to Total Profit - 税项/利润总额
+    df['calc_tax_to_tp'] = np.where(
+        df['total_profit'] != 0,
+        df['income_tax'] / df['total_profit'] * 100,
+        np.nan
+    )
+
+    # Operating Profit to Current Liabilities - 营业利润/流动负债
+    df['calc_op_to_cl'] = np.where(
+        df['total_cur_liab'] > 0,
+        df['operate_profit'] / df['total_cur_liab'],
+        np.nan
+    )
+
+    # Operating Cash Flow to Current Liabilities - 经营现金流/流动负债
+    df['calc_ocf_to_cl'] = np.where(
+        df['total_cur_liab'] > 0,
+        df['n_cashflow_act'] / df['total_cur_liab'],
+        np.nan
+    )
+
+    # Equity to Total Liabilities - 归母权益/负债合计
+    df['calc_eqt_to_liab'] = np.where(
+        df['total_liab'] > 0,
+        df['total_hldr_eqy_inc_min_int'] / df['total_liab'] * 100,
+        np.nan
+    )
+
     # Select calc columns
     calc_cols = [col for col in df.columns if col.startswith('calc_')]
     return df[['ts_code', 'report_period'] + calc_cols]
@@ -571,32 +783,67 @@ def cross_validate_indicators(computed_df, fina_df):
     
     # Differences (absolute, threshold 0.01 for % fields)
     diff_map = {
+        # Basic margins and ratios
         'grossprofit_margin': 'calc_grossprofit_margin',
         'netprofit_margin': 'calc_netprofit_margin',
         'ebitda_margin': 'calc_ebitda_margin',
+
+        # Per-share indicators
+        'bvps': 'calc_bvps',
+        'bps': 'calc_bps',
+        'ocfps': 'calc_ocfps',
+        'cfps': 'calc_cfps',
+        'revenue_ps': 'calc_revenue_ps',
+
+        # Solvency ratios
         'current_ratio': 'calc_current_ratio',
         'quick_ratio': 'calc_quick_ratio',
         'cash_ratio': 'calc_cash_ratio',
         'debt_to_assets': 'calc_debt_to_assets',
         'assets_to_eqt': 'calc_assets_to_eqt',
         'ebit_to_interest': 'calc_ebit_to_interest',
+
+        # Turnover ratios
         'inv_turn': 'calc_inv_turn',
         'ar_turn': 'calc_ar_turn',
         'assets_turn': 'calc_assets_turn',
+        'currentasset_turn': 'calc_currentasset_turn',
+        'fix_assets_turn': 'calc_fix_assets_turn',
+
+        # Profitability ratios
         'roe_waa': 'calc_roe_waa',
         'roa': 'calc_roa',
         'npta': 'calc_npta',
         'roic': 'calc_roic',
+
+        # Cash flow ratios
         'ocf_to_debt': 'calc_ocf_to_debt',
         'cf_sales': 'calc_cf_sales',
+
+        # Quarterly ratios
         'q_netprofit_margin': 'calc_q_netprofit_margin',
         'q_roe': 'calc_q_roe',
+
+        # Growth ratios
         'netprofit_yoy': 'calc_netprofit_yoy',
         'op_yoy': 'calc_op_yoy',
+
+        # Cost and expense ratios
         'cogs_of_sales': 'calc_cogs_of_sales',
         'expense_of_sales': 'calc_expense_of_sales',
+
+        # Asset structure ratios
         'ca_to_assets': 'calc_ca_to_assets',
-        'currentdebt_to_debt': 'calc_currentdebt_to_debt'
+        'nca_to_assets': 'calc_nca_to_assets',
+        'currentdebt_to_debt': 'calc_currentdebt_to_debt',
+
+        # Additional structure ratios
+        'ncl_to_liab': 'calc_ncl_to_liab',
+        'op_to_tp': 'calc_op_to_tp',
+        'tax_to_tp': 'calc_tax_to_tp',
+        'op_to_cl': 'calc_op_to_cl',
+        'ocf_to_cl': 'calc_ocf_to_cl',
+        'eqt_to_liab': 'calc_eqt_to_liab'
     }
     
     consistency_summary = {}
@@ -684,7 +931,7 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     
     # Compute (extended)
     print("2. Computing extended indicators...")
-    computed_df = compute_basic_indicators(income_df, balance_df, cashflow_df)
+    computed_df = compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df)
     
     # Validate (extended)
     print("3. Cross-validating consistency...")
@@ -709,8 +956,12 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     
     print("\n=== Detailed Validation (Sample) ===")
     if not validation_df.empty:
-        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff', 'cash_ratio_abs_diff', 'current_ratio_abs_diff', 'roe_waa_abs_diff']  # Sample
-        print(validation_df[sample_cols].head().to_string(index=False))
+        sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff',
+                      'bvps_abs_diff', 'ocfps_abs_diff', 'currentasset_turn_abs_diff', 'fix_assets_turn_abs_diff',
+                      'nca_to_assets_abs_diff', 'op_to_tp_abs_diff', 'eqt_to_liab_abs_diff']  # Extended sample
+        available_cols = [col for col in sample_cols if col in validation_df.columns]
+        if available_cols:
+            print(validation_df[available_cols].head().to_string(index=False))
     else:
         print("No overlapping periods for validation")
     
@@ -732,6 +983,7 @@ if __name__ == "__main__":
     parser.add_argument("--period", type=str, help="Period type: annual or quarter.", default='annual')
 
     args = parser.parse_args()
+
     result = run_validation(args.stocks, args.start_date, args.end_date, args.period)
 
     # Print summary
