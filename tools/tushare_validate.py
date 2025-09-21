@@ -11,7 +11,7 @@ import hashlib
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -155,8 +155,8 @@ INDICATOR_COLUMNS = [
     "longdebt_to_workingcapital", "invest_capital",
 
     # Additional structure ratios (extended)
-    "nca_to_assets", "ncl_to_liab", "op_to_tp", "tax_to_tp", "op_to_cl",
-    "ocf_to_cl", "eqt_to_liab"
+    "ncl_to_liab", "op_to_tp", "tax_to_tp", "op_to_cl",
+    "ocf_to_cl", "eqt_to_liab", "invturn_days"
 ]
 
 # API field name list (all three major financial statements contain these base fields)
@@ -506,10 +506,13 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     # Use oper_cost for inventory turnover (matches Tushare's inventory_turnover calculation)
     # Tushare uses oper_cost for cost of goods sold in turnover calculations
     df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df['oper_cost'] / df['avg_inv'], np.nan)
+
+    # Inventory Turnover Days = 360 / Inventory Turnover Rate
+    # 存货周转天数 = 360 / (期末.营业成本 / ((期末.存货 + 期初.存货) / 2))
+    df['calc_inv_turn_days'] = np.where(df['calc_inv_turn'] > 0, 360 / df['calc_inv_turn'], np.nan)
+
     df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df['revenue'] / df['avg_ar'], np.nan)
     df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df['revenue'] / df['avg_total_assets'], np.nan)
-
-    # 6. Profitability - improved ROE/ROA calculations with better averaging
 
     # Ensure we have valid equity and assets values before calculating ratios
     # Tushare typically uses end-of-period values for simpler calculations
@@ -519,10 +522,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         np.nan
     )
 
-    # Use total_assets directly for ROA (matches Tushare's approach)
+    # Use average total assets for ROA calculation
     df['calc_roa'] = np.where(
-        df['total_assets'] > 0,
-        (df['n_income_attr_p'] / df['total_assets']) * 100,
+        df['avg_total_assets'] > 0,
+        (df['n_income_attr_p'] / np.abs(df['avg_total_assets'])) * 100,
         np.nan
     )
 
@@ -545,14 +548,14 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     # NOPAT = EBIT * (1 - tax_rate)
     nopat = df['calc_ebit'] * (1 - tax_rate)
 
-    cash = df.get('monetary_cap', df['n_cashflow_act'])  # Cash proxy
-    avg_equity = df['avg_total_hldr_eqy_inc_min_int']
-    df['invested_cap'] = avg_equity + df['avg_int_debt'] - cash
-    prev_invested_cap = df.groupby('ts_code')['invested_cap'].shift(1)
-    avg_invested_cap = (df['invested_cap'] + prev_invested_cap.fillna(df['invested_cap'])) / 2
+    # ROIC calculation - use simpler approach that matches Tushare
+    # Tushare typically uses total_assets as invested capital for ROIC
+    df['calc_roic'] = np.where(
+        df['total_assets'] > 0,
+        (nopat / df['total_assets']) * 100,
+        np.nan
+    )
 
-    # ROIC
-    df['calc_roic'] = np.where(avg_invested_cap > 0, (nopat / avg_invested_cap) * 100, np.nan)    
     df['calc_roce'] = df['calc_roic']  # ROCE equivalent to ROIC in this context
     
     # 7. Cash flow ratios
@@ -805,6 +808,7 @@ def cross_validate_indicators(computed_df, fina_df):
 
         # Turnover ratios
         'inv_turn': 'calc_inv_turn',
+        'invturn_days': 'calc_inv_turn_days',
         'ar_turn': 'calc_ar_turn',
         'assets_turn': 'calc_assets_turn',
         'currentasset_turn': 'calc_currentasset_turn',
@@ -848,6 +852,7 @@ def cross_validate_indicators(computed_df, fina_df):
     
     consistency_summary = {}
     for api_col, calc_col in diff_map.items():
+        logger.debug(f"Comparing {api_col} and {calc_col}")
         if api_col in merged.columns and calc_col in merged.columns:
             # Calculate absolute difference and handle NaN values
             # Ensure both columns are properly handled for NaN values
