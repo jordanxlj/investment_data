@@ -455,7 +455,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     cash_equivalent = np.nan
 
     # Try to find cash-related fields - expanded list
-    cash_fields = ['money_cap', 'monetary_cap', 'trad_asset', 'cash', 'cash_equivalents', 'cash_and_cash_equivalents']
+    cash_fields = ['money_cap']
     for field in cash_fields:
         if field in df.columns:
             cash_equivalent = df[field].fillna(0)
@@ -552,13 +552,13 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     )
 
     # EBIT不变，但填充NaN
-    df['calc_ebit'] = (df['operate_profit'] + df['invest_income'] - df['fin_exp']).fillna(0)
-
+    df['calc_ebit'] = df.get('ebit', (df['operate_profit'] + df['invest_income'] - df['fin_exp'])).fillna(0)
     # NOPAT
     nopat = df['calc_ebit'] * (1 - tax_rate)
 
-    # 优化invested capital: 优先total_assets，fallback到avg_total_assets
-    invested_capital = df['total_assets'].fillna(df['avg_total_assets'].fillna(0))
+    # 优化 invested_capital：扣除非利息负债（更标准）
+    non_interest_liab = df.get('acct_payable', 0) + df.get('taxes_payable', 0) + df.get('oth_payable', 0)
+    invested_capital = (df['total_liab'] + df['total_hldr_eqy_inc_min_int'] - df.get('money_cap', 0) - non_interest_liab).clip(lower=1e-6)
 
     # ROIC
     df['calc_roic'] = np.where(
@@ -641,9 +641,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     
     # 12. Per-share indicators (extended)
     # Book Value Per Share (BVPS/BPS) - 每股净资产
+    equity_field = 'total_hldr_eqy_exc_min_int' if 'total_hldr_eqy_exc_min_int' in df.columns else 'total_hldr_eqy_inc_min_int'
     df['calc_bvps'] = np.where(
         df['total_share'] > 0,
-        df['total_hldr_eqy_inc_min_int'] / df['total_share'],
+        df[equity_field] / df['total_share'],
         np.nan
     )
     # Round to match API precision (typically 4 decimal places for BPS)
