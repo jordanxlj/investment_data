@@ -138,7 +138,7 @@ INDICATOR_COLUMNS = [
     'debt_to_eqt', 'eqt_to_debt', 'tangibleasset_to_debt', 'ocf_to_debt', 'ebitda_to_debt', 
     'turn_days', 'roa_yearly', 'roa_dp', 'fixed_assets', 'profit_prefin_exp', 'non_op_profit', 
     'cash_to_liqdebt', 'op_to_liqdebt', 'op_to_debt', 'roic_yearly', 'total_fa_trun', 
-    'profit_to_op', 'q_investincome_to_ebt', 'basic_eps_yoy', 'dt_eps_yoy', 'cfps_yoy', 
+    'profit_to_op', 'basic_eps_yoy', 'dt_eps_yoy', 'cfps_yoy', 
     'op_yoy', 'ebt_yoy', 'netprofit_yoy', 'dt_netprofit_yoy', 'ocf_yoy', 'roe_yoy', 
     'bps_yoy', 'assets_yoy', 'eqt_yoy', 'tr_yoy', 'or_yoy', 'equity_yoy', 'rd_exp'
 ]
@@ -424,10 +424,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     )
 
     # 2. Net margin
-    # Use total_revenue if revenue is not available or use revenue as primary
+    profit_field = 'n_income' if 'n_income' in df.columns else 'n_income_attr_p'    
     revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
     df['calc_netprofit_margin'] = np.where(
-        df[revenue_field] > 0, (df['n_income_attr_p'] / df[revenue_field]) * 100, np.nan
+        df[revenue_field] > 0, (df[profit_field] / df[revenue_field]) * 100, np.nan
     )
     
     # 3. EBITDA margin
@@ -543,12 +543,11 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
 
     df['calc_npta'] = df['calc_roa']  # NPTA is equivalent to ROA
 
-    # 优化tax_rate: 优先total_profit，fallback到operate_profit
-    tax_rate_base = df['total_profit'].abs().fillna(df['operate_profit'].abs().fillna(0))
+    # 简化 tax_rate：优先 income_tax / total_profit
     tax_rate = np.where(
-        tax_rate_base > 0,
-        np.clip(df['income_tax'].fillna(0) / tax_rate_base, 0, 0.5),
-        0.25  # 默认
+        df['total_profit'].abs() > 0,
+        df['income_tax'] / df['total_profit'].abs(),
+        0.25  # 默认 25%
     )
 
     # EBIT不变，但填充NaN
@@ -556,10 +555,8 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     # NOPAT
     nopat = df['calc_ebit'] * (1 - tax_rate)
 
-    # 优化 invested_capital：扣除非利息负债（更标准）
-    non_interest_liab = df.get('acct_payable', 0) + df.get('taxes_payable', 0) + df.get('oth_payable', 0)
-    invested_capital = (df['total_liab'] + df['total_hldr_eqy_inc_min_int'] - df.get('money_cap', 0) - non_interest_liab).clip(lower=1e-6)
-
+    # Invested Capital：优先 fina_df['invest_capital']，否则标准定义（total_liab + equity - cash）
+    invested_capital = df.get('invest_capital', (df['total_liab'] + df['total_hldr_eqy_inc_min_int'] - df.get('money_cap', 0))).clip(lower=1e-6)
     # ROIC
     df['calc_roic'] = np.where(
         invested_capital > 0,
