@@ -96,18 +96,17 @@ BALANCE_COLUMNS = [
     'accounts_receiv', 'oth_receiv', 'prepayment', 'inventories', 'premium_receiv', 
     'reinsur_receiv', 'oth_cur_assets', 'total_cur_assets', 'htm_invest', 
     'fix_assets', 'oil_and_gas_assets', 'intan_assets', 'defer_tax_assets', 
-    'total_nca', 'cash_reser_cb', 'depos_in_oth_bfi', 'total_assets', 'lt_borr', 
-    'depos_ib_deposits', 'acct_payable', 'comm_payable', 'payroll_payable', 
-    'taxes_payable', 'oth_payable', 'oth_cur_liab', 'total_cur_liab', 
-    'defer_inc_non_cur_liab', 'total_ncl', 'depos_oth_bfi', 'depos', 
+    'total_nca', 'cash_reser_cb', 'depos_in_oth_bfi', 'total_assets', 
+    'acct_payable', 'payroll_payable', 'taxes_payable', 'oth_payable', 
+    'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl',  
     'total_liab', 'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int', 
-    'total_liab_hldr_eqy', 'oth_comp_income', 'oth_pay_total', 
-    'accounts_receiv_bill', 'accounts_pay', 'oth_rcv_total', 'fix_assets_total'
+    'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill', 
+    'accounts_pay', 'oth_rcv_total', 'fix_assets_total'
 ]
 
 # Cash flow statement fields (core primitives)
 CASHFLOW_COLUMNS = [
-    'net_profit', 'finan_exp', 'c_fr_sale_sg', 'n_incr_loans_cb', 'n_cap_incr_repur', 
+    'net_profit', 'finan_exp', 'c_fr_sale_sg', 
     'c_fr_oth_operate_a', 'c_inf_fr_operate_a', 'c_paid_goods_s', 'c_paid_to_for_empl', 
     'c_paid_for_taxes', 'oth_cash_pay_oper_act', 'st_cash_out_act', 'n_cashflow_act', 
     'stot_inflows_inv_act', 'c_pay_acq_const_fiolta', 'stot_out_inv_act', 
@@ -116,7 +115,7 @@ CASHFLOW_COLUMNS = [
     'n_incr_cash_cash_equ', 'c_cash_equ_beg_period', 'c_cash_equ_end_period', 
     'c_recp_cap_contrib', 'prov_depr_assets', 'depr_fa_coga_dpba', 'amort_intang_assets', 
     'decr_def_inc_tax_assets', 'decr_inventories', 'decr_oper_payable', 'incr_oper_payable', 
-    'im_net_cashflow_oper_act', 'fa_fnc_leases', 'im_n_incr_cash_equ', 'net_dism_capital_add', 
+    'im_net_cashflow_oper_act', 'im_n_incr_cash_equ', 'net_dism_capital_add', 
     'credit_impa_loss', 'end_bal_cash', 'beg_bal_cash'
 ]
 
@@ -476,21 +475,15 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     df['calc_ebit_full'] = (
         df['operate_profit'].fillna(0) +
         df['invest_income'].fillna(0) -
-        df['int_exp'].fillna(0)
+        df['fin_exp'].fillna(0)
     )
 
-    # Use correct field name for interest expense
-    interest_field = 'int_exp' if 'int_exp' in df.columns else 'interest_exp'
-    if interest_field in df.columns:
-        # Tushare typically calculates this as EBIT / Interest Expense
-        df['calc_ebit_to_interest'] = np.where(
-            df[interest_field] > 0,
-            df['calc_ebit_full'] / df[interest_field],
-            np.nan
-        )
-    else:
-        logger.debug("No interest expense field found, ebit_to_interest will be NaN")
-        df['calc_ebit_to_interest'] = np.nan
+    # EBIT to Interest ratio - use fin_exp as interest expense
+    df['calc_ebit_to_interest'] = np.where(
+        df['fin_exp'].abs() > 0,
+        df['calc_ebit_full'] / df['fin_exp'].abs(),
+        np.nan
+    )
     calc_ebit_to_interest_null_count = df['calc_ebit_to_interest'].isna().sum()
     logger.debug(f"calc_ebit_to_interest_null_pct: {calc_ebit_to_interest_null_count / len(df) * 100.0}")
     
