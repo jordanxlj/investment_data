@@ -415,17 +415,19 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
         field_null_count = df[field].isna().sum()
         logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
 
-    # 1. Gross profit and margin
     # Use total_revenue if revenue is not available
     revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
+    profit_field = 'n_income' if 'n_income' in df.columns else 'n_income_attr_p'    
+    cost_field = 'oper_cost' if 'oper_cost' in df.columns else 'total_cogs'
+    equity_field = 'total_hldr_eqy_exc_min_int' if 'total_hldr_eqy_exc_min_int' in df.columns else 'total_hldr_eqy_inc_min_int'
+
+    # 1. Gross profit and margin
     df['calc_gross_profit'] = df[revenue_field] - df['oper_cost']
     df['calc_grossprofit_margin'] = np.where(
         df[revenue_field] > 0, (df['calc_gross_profit'] / df[revenue_field]) * 100, np.nan
     )
 
     # 2. Net margin
-    profit_field = 'n_income' if 'n_income' in df.columns else 'n_income_attr_p'    
-    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
     df['calc_netprofit_margin'] = np.where(
         df[revenue_field] > 0, (df[profit_field] / df[revenue_field]) * 100, np.nan
     )
@@ -514,21 +516,24 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     # Use oper_cost for inventory turnover (matches Tushare's inventory_turnover calculation)
     # Tushare uses oper_cost for cost of goods sold in turnover calculations
     # Try different cost fields for inventory turnover
-    cost_field = 'oper_cost' if 'oper_cost' in df.columns else 'total_cogs'
     df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df[cost_field] / df['avg_inv'], np.nan)
 
     # Inventory Turnover Days = 360 / Inventory Turnover Rate
     # 存货周转天数 = 360 / (期末.营业成本 / ((期末.存货 + 期初.存货) / 2))
     df['calc_inv_turn_days'] = np.where(df['calc_inv_turn'] > 0, 360 / df['calc_inv_turn'], np.nan)
 
-    # Use consistent revenue field for all turnover calculations
-    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
     df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df[revenue_field] / df['avg_ar'], np.nan)
     df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df[revenue_field] / df['avg_total_assets'], np.nan)
 
     # Ensure we have valid equity and assets values before calculating ratios
     # Use average equity for ROE calculation (more accurate than end-of-period)
     df['calc_roe_waa'] = np.where(
+        df['avg_total_hldr_eqy_inc_min_int'] > 0,
+        (df[profit_field] / df['avg_total_hldr_eqy_inc_min_int']) * 100,
+        np.nan
+    )
+
+    df['calc_roe'] = np.where(
         df['avg_total_hldr_eqy_inc_min_int'] > 0,
         (df['n_income_attr_p'] / df['avg_total_hldr_eqy_inc_min_int']) * 100,
         np.nan
@@ -638,7 +643,6 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     
     # 12. Per-share indicators (extended)
     # Book Value Per Share (BVPS/BPS) - 每股净资产
-    equity_field = 'total_hldr_eqy_exc_min_int' if 'total_hldr_eqy_exc_min_int' in df.columns else 'total_hldr_eqy_inc_min_int'
     df['calc_bvps'] = np.where(
         df['total_share'] > 0,
         df[equity_field] / df['total_share'],
@@ -814,6 +818,7 @@ def cross_validate_indicators(computed_df, fina_df):
 
         # Profitability ratios
         'roe_waa': 'calc_roe_waa',
+        'roe': 'calc_roe',
         'roa': 'calc_roa',
         'npta': 'calc_npta',
         'roic': 'calc_roic',
