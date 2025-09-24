@@ -555,8 +555,8 @@ def calculate_ttm_indicators(stock_df, report_period):
         if assets > 0:
             asset_values.append(assets)
 
-    roe_ttm = (ttm_net / equity_values[0] * 100) if equity_values[0] > 0 else 0
-    roa_ttm = (ttm_net / asset_values[0] * 100) if asset_values[0] > 0 else 0
+    roe_ttm = (ttm_net / equity_values[0] * 100) if equity_values and equity_values[0] > 0 else 0
+    roa_ttm = (ttm_net / asset_values[0] * 100) if asset_values and asset_values[0] > 0 else 0
     # Calculate margin ratios
     netprofit_margin_ttm = (ttm_net / ttm_rev * 100) if ttm_rev > 0 else 0
     logger.debug(f"ttm_gross: {ttm_gross}, ttm_rev: {ttm_rev}")
@@ -979,7 +979,9 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
 
     # Deduplicate dataframes to ensure data quality
     print("1.5. Deduplicating data...")
+    logger.info(f"income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
     income_df, balance_df, cashflow_df, fina_df = deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df)
+    logger.info(f"after deduplicate, income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
 
     # Compute (extended)
     print("2. Computing extended indicators...")
