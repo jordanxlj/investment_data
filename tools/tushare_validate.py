@@ -11,7 +11,7 @@ import hashlib
 
 # Setup logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -562,6 +562,62 @@ def calculate_ttm_indicators(stock_df, report_period):
     logger.debug(f"ttm_gross: {ttm_gross}, ttm_rev: {ttm_rev}")
     grossprofit_margin_ttm = (ttm_gross / ttm_rev * 100) if ttm_rev > 0 else 0
 
+    # Calculate 3-year CAGR (36 months) for revenue and net income
+    # Compare current period with the same period 3 years ago
+    revenue_cagr_3y = None
+    ni_cagr_3y = None
+
+    # Calculate the period 3 years ago (same quarter)
+    def get_period_3_years_ago(period):
+        """Get the same period 3 years ago"""
+        try:
+            year = int(period[:4]) - 3
+            month_day = period[4:]
+            return f"{year}{month_day}"
+        except (ValueError, IndexError):
+            return None
+
+    start_period = get_period_3_years_ago(report_period)
+
+    if start_period and start_period in data_dict:
+        # Get values for current period and 3 years ago
+        start_revenue = data_dict.get(start_period, {}).get('total_revenue', 0)
+        end_revenue = data_dict.get(report_period, {}).get('total_revenue', 0)
+
+        start_ni = data_dict.get(start_period, {}).get('n_income_attr_p', 0)
+        end_ni = data_dict.get(report_period, {}).get('n_income_attr_p', 0)
+
+        logger.debug(f"CAGR calculation: {start_period} -> {report_period}")
+        logger.debug(f"Revenue: {start_revenue} -> {end_revenue}")
+        logger.debug(f"NI: {start_ni} -> {end_ni}")
+
+        # Calculate 3-year CAGR for revenue
+        if start_revenue > 0 and end_revenue > 0:
+            try:
+                cagr_ratio = (end_revenue / start_revenue) ** (1/3) - 1
+                # Check if result is complex (shouldn't happen with positive inputs, but safety check)
+                if isinstance(cagr_ratio, complex):
+                    revenue_cagr_3y = None
+                else:
+                    revenue_cagr_3y = round(float(cagr_ratio) * 100, 4)  # Convert to percentage
+            except (ValueError, OverflowError, ZeroDivisionError):
+                revenue_cagr_3y = None
+
+        # Calculate 3-year CAGR for net income
+        if start_ni > 0 and end_ni > 0:  # Both must be positive for meaningful CAGR
+            try:
+                cagr_ratio = (end_ni / start_ni) ** (1/3) - 1
+                # Check if result is complex (shouldn't happen with positive inputs, but safety check)
+                if isinstance(cagr_ratio, complex):
+                    ni_cagr_3y = None
+                else:
+                    ni_cagr_3y = round(float(cagr_ratio) * 100, 4)  # Convert to percentage
+            except (ValueError, OverflowError, ZeroDivisionError):
+                ni_cagr_3y = None
+        else:
+            # If either value is not positive, CAGR calculation doesn't make sense
+            ni_cagr_3y = None
+
     return {
         'eps_ttm': round(eps_ttm, 4),
         'revenue_ps_ttm': round(revenue_ps_ttm, 4),
@@ -570,7 +626,9 @@ def calculate_ttm_indicators(stock_df, report_period):
         'roe_ttm': round(roe_ttm, 4),
         'roa_ttm': round(roa_ttm, 4),
         'netprofit_margin_ttm': round(netprofit_margin_ttm, 4),
-        'grossprofit_margin_ttm': round(grossprofit_margin_ttm, 4)
+        'grossprofit_margin_ttm': round(grossprofit_margin_ttm, 4),
+        'revenue_cagr_3y': revenue_cagr_3y,
+        'netincome_cagr_3y': ni_cagr_3y
     }
 
 
