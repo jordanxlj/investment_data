@@ -369,6 +369,156 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
 
         return income_df, balance_df, cashflow_df, fina_df
 
+def get_quarterly_value(data_dict, key, period):
+    """
+    Extract quarterly value from cumulative data.
+    This function calculates the actual quarterly value by subtracting previous cumulative values.
+    """
+    if period.endswith('0331'):  # Q1 is already quarterly
+        return data_dict.get(period, {}).get(key, 0)
+    elif period.endswith('0630'):  # H1 - Q1
+        current = data_dict.get(period, {}).get(key, 0)
+        q1_period = period[:4] + '0331'
+        q1_value = data_dict.get(q1_period, {}).get(key, 0)
+        return current - q1_value
+    elif period.endswith('0930'):  # Q1-Q3 - H1
+        current = data_dict.get(period, {}).get(key, 0)
+        h1_period = period[:4] + '0630'
+        h1_value = data_dict.get(h1_period, {}).get(key, 0)
+        return current - h1_value
+    elif period.endswith('1231'):  # Full year - Q1-Q3
+        current = data_dict.get(period, {}).get(key, 0)
+        q3_period = period[:4] + '0930'
+        q3_value = data_dict.get(q3_period, {}).get(key, 0)
+        return current - q3_value
+    return 0
+
+
+def calculate_ttm_indicators(stock_df, report_period):
+    """
+    Calculate TTM (Trailing Twelve Months) indicators for a given report period.
+    stock_df should contain data for a single stock.
+    Returns a dictionary of TTM indicators.
+    """
+    if stock_df.empty:
+        return {}
+
+    # stock_df is already filtered for a single stock
+    stock_data = stock_df.sort_values('report_period')
+
+    # Convert to data dict for easier access
+    data_dict = {}
+    for _, row in stock_data.iterrows():
+        period = row['report_period']
+        data_dict[period] = {
+            'n_income_attr_p': row.get('n_income_attr_p', 0),
+            'total_revenue': row.get('total_revenue', 0),
+            'revenue': row.get('revenue', row.get('total_revenue', 0)),
+            'im_net_cashflow_oper_act': row.get('im_net_cashflow_oper_act', row.get('n_cashflow_act', 0)),
+            'n_cashflow_act': row.get('n_cashflow_act', 0),
+            'total_cogs': row.get('total_cogs', 0),
+            'oper_cost': row.get('oper_cost', 0),
+            'total_hldr_eqy_exc_min_int': row.get('total_hldr_eqy_exc_min_int', 0),
+            'total_assets': row.get('total_assets', 0),
+            'total_share': row.get('total_share', 0)
+        }
+
+    # Calculate quarterly values
+    q_net = {}
+    q_rev = {}
+    q_ocf = {}
+    q_cogs = {}
+    q_oper_cost = {}
+
+    # Get periods for calculation (current and previous quarters)
+    periods = sorted([p for p in data_dict.keys() if p <= report_period], reverse=True)
+
+    for p in periods:
+        if p.endswith(('0630', '0331')):  # Q2 or Q1
+            q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
+            q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
+            q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
+            q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
+            q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
+        else:  # Q4 or Q3
+            q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
+            q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
+            q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
+            q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
+            q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
+
+    # Determine TTM periods: last 4 quarters
+    ttm_periods = []
+    current_periods = [p for p in periods if p <= report_period]
+
+    if current_periods:
+        # Sort and take the most recent 4 periods
+        sorted_periods = sorted(current_periods, reverse=True)
+        ttm_periods = sorted_periods[:4]
+
+    if len(ttm_periods) < 4:
+        # Not enough periods for TTM calculation
+        return {}
+
+    # Calculate TTM totals
+    ttm_net = sum(q_net.get(p, 0) for p in ttm_periods)
+    ttm_rev = sum(q_rev.get(p, 0) for p in ttm_periods)
+    ttm_ocf = sum(q_ocf.get(p, 0) for p in ttm_periods)
+    ttm_cogs = sum(q_cogs.get(p, 0) for p in ttm_periods)
+    ttm_oper_cost = sum(q_oper_cost.get(p, 0) for p in ttm_periods)
+    ttm_gross = ttm_rev - ttm_oper_cost
+    logger.debug(f"report_period: {report_period}, ttm_rev: {ttm_rev}, ttm_cogs: {ttm_cogs}")
+
+    # Get shares (use the most recent period's shares)
+    shares = data_dict.get(report_period, {}).get('total_share', 0)
+    if shares == 0:
+        # Fallback to other periods
+        for p in ttm_periods:
+            shares = data_dict.get(p, {}).get('total_share', 0)
+            if shares > 0:
+                break
+
+    if shares == 0:
+        return {}
+
+    # Calculate per-share TTM indicators
+    eps_ttm = ttm_net / shares if shares > 0 else 0
+    revenue_ps_ttm = ttm_rev / shares if shares > 0 else 0
+    ocfps_ttm = ttm_ocf / shares if shares > 0 else 0
+    cfps_ttm = ttm_ocf / shares if shares > 0 else 0  # Using OCF as CFPS
+
+    # Calculate ROE_TTM and ROA_TTM
+    # Use average equity/assets over the TTM period
+    equity_values = []
+    asset_values = []
+
+    for p in ttm_periods:
+        eq = data_dict.get(p, {}).get('total_hldr_eqy_exc_min_int', 0)
+        assets = data_dict.get(p, {}).get('total_assets', 0)
+        if eq > 0:
+            equity_values.append(eq)
+        if assets > 0:
+            asset_values.append(assets)
+
+    roe_ttm = (ttm_net / equity_values[0] * 100) if equity_values[0] > 0 else 0
+    roa_ttm = (ttm_net / asset_values[0] * 100) if asset_values[0] > 0 else 0
+    # Calculate margin ratios
+    netprofit_margin_ttm = (ttm_net / ttm_rev * 100) if ttm_rev > 0 else 0
+    logger.debug(f"ttm_gross: {ttm_gross}, ttm_rev: {ttm_rev}")
+    grossprofit_margin_ttm = (ttm_gross / ttm_rev * 100) if ttm_rev > 0 else 0
+
+    return {
+        'eps_ttm': round(eps_ttm, 4),
+        'revenue_ps_ttm': round(revenue_ps_ttm, 4),
+        'ocfps_ttm': round(ocfps_ttm, 4),
+        'cfps_ttm': round(cfps_ttm, 4),
+        'roe_ttm': round(roe_ttm, 4),
+        'roa_ttm': round(roa_ttm, 4),
+        'netprofit_margin_ttm': round(netprofit_margin_ttm, 4),
+        'grossprofit_margin_ttm': round(grossprofit_margin_ttm, 4)
+    }
+
+
 def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks):
     """Compute extended basic indicators from primitives"""
     if income_df.empty or balance_df.empty or cashflow_df.empty:
@@ -429,346 +579,36 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
         field_null_count = df[field].isna().sum()
         logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
 
-    df.to_csv('computed_indicators.csv', index=False)
+    # Calculate TTM indicators for each stock and period
+    print("Calculating TTM (Trailing Twelve Months) indicators...")
+    ttm_indicators = []
 
-    # Use total_revenue if revenue is not available
-    revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
-    profit_field = 'n_income' if 'n_income' in df.columns else 'n_income_attr_p'    
-    cost_field = 'oper_cost' if 'oper_cost' in df.columns else 'total_cogs'
-    equity_field = 'total_hldr_eqy_exc_min_int' if 'total_hldr_eqy_exc_min_int' in df.columns else 'total_hldr_eqy_inc_min_int'
+    # Group by stock to calculate TTM for each stock
+    for stock_code, stock_df in df.groupby('ts_code'):
+        stock_df = stock_df.sort_values('report_period')
 
-    # 1. Gross profit and margin
-    df['calc_gross_profit'] = df[revenue_field] - df['oper_cost']
-    df['calc_grossprofit_margin'] = np.where(
-        df[revenue_field] > 0, (df['calc_gross_profit'] / df[revenue_field]) * 100, np.nan
-    )
+        for _, row in stock_df.iterrows():
+            report_period = row['report_period']
+            ttm_result = calculate_ttm_indicators(stock_df, report_period)
 
-    # 2. Net margin
-    df['calc_netprofit_margin'] = np.where(
-        df[revenue_field] > 0, (df[profit_field] / df[revenue_field]) * 100, np.nan
-    )
-    
-    # 3. EBITDA margin
-    df['calc_ebitda_margin'] = np.where(
-        df['total_revenue'] > 0, (df['ebitda'] / df['total_revenue']) * 100, np.nan
-    )
-    
-    # 4. Solvency
-    df['calc_current_ratio'] = np.where(
-        df['total_cur_liab'] > 0, df['total_cur_assets'] / df['total_cur_liab'], np.nan
-    )
-    df['calc_quick_ratio'] = np.where(
-        df['total_cur_liab'] > 0, (df['total_cur_assets'] - df['inventories']) / df['total_cur_liab'], np.nan
-    )
-    df['calc_debt_to_assets'] = np.where(
-        df['total_assets'] > 0, (df['total_liab'] / df['total_assets']) * 100, np.nan  # Convert to percentage
-    )
-    df['calc_assets_to_eqt'] = np.where(
-        df['total_hldr_eqy_inc_min_int'] > 0, df['total_assets'] / df['total_hldr_eqy_inc_min_int'], np.nan
-    )
-    
-    # Cash ratio - since money_cap field may not be available, use alternative approach
-    # In Tushare, cash ratio may be calculated differently or use different fields
-    # For now, if we can't find the cash field, we'll leave it as NaN and let validation show the discrepancy
-    cash_equivalent = np.nan
+            if ttm_result:
+                ttm_row = {
+                    'ts_code': stock_code,
+                    'report_period': report_period,
+                    **ttm_result
+                }
+                ttm_indicators.append(ttm_row)
 
-    # Try to find cash-related fields - expanded list
-    cash_fields = ['money_cap']
-    for field in cash_fields:
-        if field in df.columns:
-            cash_equivalent = df[field].fillna(0)
-            break
-
-    # Calculate cash ratio if we have cash data
-    valid_liab = df['total_cur_liab'] > 0
-    if not cash_equivalent.isna().all():
-        df['calc_cash_ratio'] = np.where(valid_liab,
-                                       cash_equivalent / df['total_cur_liab'], np.nan)
+    # Convert TTM indicators to DataFrame and merge with main df
+    if ttm_indicators:
+        ttm_df = pd.DataFrame(ttm_indicators)
+        df = df.merge(ttm_df, on=['ts_code', 'report_period'], how='left')
+        print(f"Added TTM indicators for {len(ttm_df)} stock-period combinations")
     else:
-        # If no cash field available, set to NaN (will show as discrepancy in validation)
-        df['calc_cash_ratio'] = np.nan
+        print("No TTM indicators calculated (insufficient quarterly data)")
 
-    # EBIT to Interest ratio - improved calculation
-    # EBIT = Operating Profit + Investment Income - Interest Expense
-    df['calc_ebit_full'] = (
-        df['operate_profit'].fillna(0) +
-        df['invest_income'].fillna(0) -
-        df['fin_exp'].fillna(0)
-    )
-
-    # EBIT to Interest ratio - use fin_exp as interest expense
-    df['calc_ebit_to_interest'] = np.where(
-        df['fin_exp'].abs() > 0,
-        df['calc_ebit_full'] / df['fin_exp'].abs(),
-        np.nan
-    )
-    calc_ebit_to_interest_null_count = df['calc_ebit_to_interest'].isna().sum()
-    logger.debug(f"calc_ebit_to_interest_null_pct: {calc_ebit_to_interest_null_count / len(df) * 100.0}")
-    
-    # Sort for shift operations (required for all average calculations)
-    df = df.sort_values(['ts_code', 'report_period'])
-
-    # Calculate all average values first (before using them)
-    # 1. Average values for turnover ratios
-    df['prev_inv'] = df.groupby('ts_code')['inventories'].shift(1)
-    df['avg_inv'] = (df['inventories'] + df['prev_inv'].fillna(df['inventories'])) / 2
-    df['prev_ar'] = df.groupby('ts_code')['accounts_receiv'].shift(1)
-    df['avg_ar'] = (df['accounts_receiv'] + df['prev_ar'].fillna(df['accounts_receiv'])) / 2
-    # Interest-Bearing Debt
-    # Non-Interest Current Liabilities (exclude interest_payable)
-    non_int_cur_liab = df.get('acct_payable', 0) + df.get('adv_receipts', 0) + df.get('contract_liab', 0) + df.get('payroll_payable', 0) + df.get('taxes_payable', 0) + df.get('div_payable', 0) + df.get('oth_payable', 0) + df.get('oth_cur_liab', 0)
-    # Non-Interest Non-Current Liabilities
-    non_int_non_cur_liab = df['total_ncl'] - df.get('lt_borr', 0) - df.get('bonds_payable', 0)
-    df['int_debt'] = df['total_liab'] - non_int_cur_liab - non_int_non_cur_liab
-
-    # 2. Average values for profitability ratios
-    for col in ['total_hldr_eqy_inc_min_int', 'total_assets', 'fix_assets', 'total_cur_assets', 'int_debt']:
-        prev_col = f'prev_{col}'
-        avg_col = f'avg_{col}'
-        df[prev_col] = df.groupby('ts_code')[col].shift(1)  # Period initial value
-        df[avg_col] = (df[col] + df[prev_col].fillna(df[col])) / 2  # Fill first period with end value
-
-    # 5. Operating efficiency - refined turnover ratios with better field mapping
-    # Use oper_cost for inventory turnover (matches Tushare's inventory_turnover calculation)
-    # Tushare uses oper_cost for cost of goods sold in turnover calculations
-    # Try different cost fields for inventory turnover
-    df['calc_inv_turn'] = np.where(df['avg_inv'] > 0, df[cost_field] / df['avg_inv'], np.nan)
-
-    # Inventory Turnover Days = 360 / Inventory Turnover Rate
-    # 存货周转天数 = 360 / (期末.营业成本 / ((期末.存货 + 期初.存货) / 2))
-    df['calc_inv_turn_days'] = np.where(df['calc_inv_turn'] > 0, 360 / df['calc_inv_turn'], np.nan)
-
-    df['calc_ar_turn'] = np.where(df['avg_ar'] > 0, df[revenue_field] / df['avg_ar'], np.nan)
-    df['calc_assets_turn'] = np.where(df['avg_total_assets'] > 0, df[revenue_field] / df['avg_total_assets'], np.nan)
-
-    # Ensure we have valid equity and assets values before calculating ratios
-    # Use average equity for ROE calculation (more accurate than end-of-period)
-    df['calc_roe_waa'] = np.where(
-        df['avg_total_hldr_eqy_inc_min_int'] > 0,
-        (df[profit_field] / df['avg_total_hldr_eqy_inc_min_int']) * 100,
-        np.nan
-    )
-
-    df['calc_roe'] = np.where(
-        df['avg_total_hldr_eqy_inc_min_int'] > 0,
-        (df['n_income_attr_p'] / df['avg_total_hldr_eqy_inc_min_int']) * 100,
-        np.nan
-    )
-
-    # Use average total assets for ROA calculation
-    df['calc_roa'] = np.where(
-        df['avg_total_assets'] > 0,
-        (df['n_income_attr_p'] / np.abs(df['avg_total_assets'])) * 100,
-        np.nan
-    )
-
-    df['calc_npta'] = df['calc_roa']  # NPTA is equivalent to ROA
-
-    # 简化 tax_rate：优先 income_tax / total_profit
-    tax_rate = np.where(
-        df['total_profit'].abs() > 0,
-        df['income_tax'] / df['total_profit'].abs(),
-        0.25  # 默认 25%
-    )
-
-    # EBIT不变，但填充NaN
-    df['calc_ebit'] = df.get('ebit', (df['operate_profit'] + df['invest_income'] - df['fin_exp'])).fillna(0)
-    # NOPAT
-    nopat = df['calc_ebit'] * (1 - tax_rate)
-
-    # Invested Capital：优先 fina_df['invest_capital']，否则标准定义（total_liab + equity - cash）
-    invested_capital = df.get('invest_capital', (df['total_liab'] + df['total_hldr_eqy_inc_min_int'] - df.get('money_cap', 0))).clip(lower=1e-6)
-    # ROIC
-    df['calc_roic'] = np.where(
-        invested_capital > 0,
-        (nopat / invested_capital) * 100,
-        np.nan
-    )
-    df['calc_roce'] = df['calc_roic']    
-
-    # 7. Cash flow ratios
-    df['calc_ocf_to_debt'] = np.where(
-        df['total_liab'] > 0, df['n_cashflow_act'] / df['total_liab'], np.nan
-    )
-    df['calc_cf_sales'] = np.where(
-        df[revenue_field] > 0, df['n_cashflow_act'] / df[revenue_field], np.nan
-    )
-    
-    # 8. Quarterly indicators - calculate for all periods
-    # In Tushare, q_ metrics may be available for both quarterly and annual reports
-    df['calc_q_netprofit_margin'] = df['calc_netprofit_margin']  # Same as annual for now
-    df['calc_q_roe'] = df['calc_roe_waa']  # Same as annual ROE for now
-    
-    # 9. Growth (YoY) - improved calculation with better data handling
-    # Ensure proper sorting for YoY calculations
-    df = df.sort_values(['ts_code', 'report_period'])
-
-    # Determine if this is quarterly data by checking report periods
-    quarterly_endings = ['0331', '0630', '0930', '1231']
-    df['is_quarterly'] = df['report_period'].astype(str).str.endswith(tuple(quarterly_endings))
-
-    # For each stock, determine if it has quarterly data
-    stock_has_quarterly = df.groupby('ts_code')['is_quarterly'].any()
-
-    # Calculate YoY changes based on data type per stock
-    def calculate_yoy(series, stock_code):
-        if stock_has_quarterly.get(stock_code, False):
-            # Quarterly data: compare with 4 periods ago
-            return series.pct_change(periods=4, fill_method=None) * 100
-        else:
-            # Annual data: compare with 1 period ago
-            return series.pct_change(periods=1, fill_method=None) * 100
-
-    # Apply YoY calculation per stock
-    df['calc_netprofit_yoy'] = df.groupby('ts_code')['n_income_attr_p'].transform(
-        lambda x: calculate_yoy(x, x.name)
-    )
-    df['calc_op_yoy'] = df.groupby('ts_code')['operate_profit'].transform(
-        lambda x: calculate_yoy(x, x.name)
-    )
-
-    # Clean up temporary column
-    df = df.drop('is_quarterly', axis=1)
-    
-    # 10. Cost structure
-    df['calc_cogs_of_sales'] = np.where(
-        df['revenue'] > 0, df['oper_cost'] / df['revenue'] * 100, np.nan
-    )
-    # Expense of sales - include more expense items for comprehensive calculation
-    total_expenses = (
-        df['sell_exp'].fillna(0) +
-        df['admin_exp'].fillna(0) +
-        df['fin_exp'].fillna(0)
-    )
-
-    # Optionally include RD expense if available (research and development)
-    if 'rd_exp' in df.columns:
-        total_expenses += df['rd_exp'].fillna(0)
-
-    df['calc_expense_of_sales'] = np.where(
-        df['revenue'] > 0, total_expenses / df['revenue'] * 100, np.nan
-    )
-    
-    # 11. Asset structure
-    df['calc_ca_to_assets'] = np.where(
-        df['total_assets'] > 0, df['total_cur_assets'] / df['total_assets'] * 100, np.nan
-    )
-    df['calc_currentdebt_to_debt'] = np.where(
-        df['total_liab'] > 0, df['total_cur_liab'] / df['total_liab'] * 100, np.nan
-    )
-    
-    # 12. Per-share indicators (extended)
-    # Book Value Per Share (BVPS/BPS) - 每股净资产
-    df['calc_bvps'] = np.where(
-        df['total_share'] > 0,
-        df[equity_field] / df['total_share'],
-        np.nan
-    )
-    # Round to match API precision (typically 4 decimal places for BPS)
-    df['calc_bvps'] = np.round(df['calc_bvps'], 4)
-    df['calc_bps'] = df['calc_bvps']  # BPS is same as BVPS
-
-    # Earnings Per Share (EPS) - 基本每股收益 (if not already calculated)
-    if 'calc_eps' not in df.columns:
-        df['calc_eps'] = df['basic_eps']  # Use from API if available
-        df['calc_dt_eps'] = df['dt_eps']  # Diluted EPS
-
-    # Operating Cash Flow Per Share (OCFPS) - 每股经营现金流
-    df['calc_ocfps'] = np.where(
-        df['total_share'] > 0,
-        df['n_cashflow_act'] / df['total_share'],
-        np.nan
-    )
-
-    # Cash Flow Per Share (CFPS) - 每股现金流净额
-    df['calc_cfps'] = np.where(
-        df['total_share'] > 0,
-        df['n_incr_cash_cash_equ'] / df['total_share'],
-        np.nan
-    )
-
-    # Revenue Per Share - 每股营业收入
-    df['calc_revenue_ps'] = np.where(
-        df['total_share'] > 0,
-        df['total_revenue'] / df['total_share'],
-        np.nan
-    )
-
-    # 13. Additional turnover ratios (extended)
-    # Current Asset Turnover - 流动资产周转率
-    df['calc_currentasset_turn'] = np.where(
-        df['avg_total_cur_assets'] > 0,
-        df['revenue'] / df['avg_total_cur_assets'],
-        np.nan
-    )
-
-    # Fixed Assets Turnover - 固定资产周转率
-    df['calc_fix_assets_turn'] = np.where(
-        df['avg_fix_assets'] > 0,
-        df['revenue'] / df['avg_fix_assets'],
-        np.nan
-    )
-
-    # 14. Additional structure ratios (extended)
-    # Non-current Assets to Total Assets - 非流动资产/总资产
-    non_current_assets = df['total_assets'] - df['total_cur_assets']
-    df['calc_nca_to_assets'] = np.where(
-        df['total_assets'] > 0,
-        non_current_assets / df['total_assets'] * 100,
-        np.nan
-    )
-
-    # Non-current Liabilities to Total Liabilities - 非流动负债/负债合计
-    non_current_liab = df['total_liab'] - df['total_cur_liab']
-    df['calc_ncl_to_liab'] = np.where(
-        df['total_liab'] > 0,
-        non_current_liab / df['total_liab'] * 100,
-        np.nan
-    )
-
-    # Operating Profit to Total Profit - 营业利润/利润总额
-    df['calc_op_to_tp'] = np.where(
-        df['total_profit'] != 0,
-        df['operate_profit'] / df['total_profit'] * 100,
-        np.nan
-    )
-
-    # Tax to Total Profit - 税项/利润总额
-    df['calc_tax_to_tp'] = np.where(
-        df['total_profit'] != 0,
-        df['income_tax'] / df['total_profit'] * 100,
-        np.nan
-    )
-
-    # Operating Profit to Current Liabilities - 营业利润/流动负债
-    df['calc_op_to_cl'] = np.where(
-        df['total_cur_liab'] > 0,
-        df['operate_profit'] / df['total_cur_liab'],
-        np.nan
-    )
-
-    # Operating Cash Flow to Current Liabilities - 经营现金流/流动负债
-    df['calc_ocf_to_cl'] = np.where(
-        df['total_cur_liab'] > 0,
-        df['n_cashflow_act'] / df['total_cur_liab'],
-        np.nan
-    )
-
-    # Equity to Total Liabilities - 归母权益/负债合计
-    df['calc_eqt_to_liab'] = np.where(
-        df['total_liab'] > 0,
-        df['total_hldr_eqy_inc_min_int'] / df['total_liab'] * 100,
-        np.nan
-    )
-
-    for field in df.columns:
-        if field.startswith('calc_'):
-            field_null_count = df[field].isna().sum()
-            logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
-
-    # Select calc columns
-    calc_cols = [col for col in df.columns if col.startswith('calc_')]
-    return df[['ts_code', 'report_period'] + calc_cols]
+    df.to_csv('computed_indicators.csv', index=False)
+    return df
 
 def deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df):
     """
