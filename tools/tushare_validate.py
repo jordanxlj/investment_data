@@ -394,11 +394,79 @@ def get_quarterly_value(data_dict, key, period):
     return 0
 
 
+def check_consecutive_quarters(periods, target_period):
+    """
+    Check if we have 4 consecutive quarters ending with target_period.
+    Returns the 4 consecutive quarters if available, otherwise empty list.
+    """
+    if not periods:
+        return []
+
+    # Convert all periods to quarter tuples for easier processing
+    def period_to_quarter(period):
+        year = int(period[:4])
+        month_day = period[4:]
+        if month_day == '0331':
+            return (year, 1)
+        elif month_day == '0630':
+            return (year, 2)
+        elif month_day == '0930':
+            return (year, 3)
+        elif month_day == '1231':
+            return (year, 4)
+        return None
+
+    # Get target quarter
+    target_quarter = period_to_quarter(target_period)
+    if not target_quarter:
+        return []
+
+    # Convert all available periods to quarters and sort chronologically
+    available_quarters = []
+    period_to_quarter_map = {}
+
+    for p in periods:
+        q = period_to_quarter(p)
+        if q:
+            available_quarters.append(q)
+            period_to_quarter_map[q] = p
+
+    available_quarters.sort()  # Sort chronologically (earliest first)
+
+    # Find target quarter in available quarters
+    if target_quarter not in available_quarters:
+        return []
+
+    target_idx = available_quarters.index(target_quarter)
+
+    # Need 4 consecutive quarters ending with target quarter
+    # So we need quarters: target_idx-3, target_idx-2, target_idx-1, target_idx
+    if target_idx < 3:
+        return []  # Not enough previous quarters
+
+    candidate_quarters = available_quarters[target_idx-3:target_idx+1]
+
+    # Check if these 4 quarters are consecutive
+    for i in range(3):
+        curr_year, curr_q = candidate_quarters[i]
+        next_year, next_q = candidate_quarters[i + 1]
+
+        # Check consecutive quarters
+        if not ((next_year == curr_year and next_q == curr_q + 1) or
+                (next_year == curr_year + 1 and curr_q == 4 and next_q == 1)):
+            return []
+
+    # Return the corresponding periods in reverse chronological order (most recent first)
+    result_periods = [period_to_quarter_map[q] for q in candidate_quarters[::-1]]
+    return result_periods
+
+
 def calculate_ttm_indicators(stock_df, report_period):
     """
     Calculate TTM (Trailing Twelve Months) indicators for a given report period.
     stock_df should contain data for a single stock.
-    Returns a dictionary of TTM indicators.
+    Only calculates if we have complete consecutive quarterly data for the past 4 quarters.
+    Returns a dictionary of TTM indicators, or empty dict if data is incomplete.
     """
     if stock_df.empty:
         return {}
@@ -423,42 +491,29 @@ def calculate_ttm_indicators(stock_df, report_period):
             'total_share': row.get('total_share', 0)
         }
 
-    # Calculate quarterly values
+    # Get all available periods up to report_period
+    available_periods = [p for p in data_dict.keys() if p <= report_period]
+
+    # Check for consecutive quarters
+    ttm_periods = check_consecutive_quarters(available_periods, report_period)
+
+    if len(ttm_periods) != 4:
+        # Not enough consecutive quarterly data for TTM calculation
+        return {}
+
+    # Calculate quarterly values for the TTM periods
     q_net = {}
     q_rev = {}
     q_ocf = {}
     q_cogs = {}
     q_oper_cost = {}
 
-    # Get periods for calculation (current and previous quarters)
-    periods = sorted([p for p in data_dict.keys() if p <= report_period], reverse=True)
-
-    for p in periods:
-        if p.endswith(('0630', '0331')):  # Q2 or Q1
-            q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
-            q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
-            q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
-            q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
-            q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
-        else:  # Q4 or Q3
-            q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
-            q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
-            q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
-            q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
-            q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
-
-    # Determine TTM periods: last 4 quarters
-    ttm_periods = []
-    current_periods = [p for p in periods if p <= report_period]
-
-    if current_periods:
-        # Sort and take the most recent 4 periods
-        sorted_periods = sorted(current_periods, reverse=True)
-        ttm_periods = sorted_periods[:4]
-
-    if len(ttm_periods) < 4:
-        # Not enough periods for TTM calculation
-        return {}
+    for p in ttm_periods:
+        q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
+        q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
+        q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
+        q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
+        q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
 
     # Calculate TTM totals
     ttm_net = sum(q_net.get(p, 0) for p in ttm_periods)
@@ -607,6 +662,14 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
     else:
         print("No TTM indicators calculated (insufficient quarterly data)")
 
+    df['equity_growth_yoy'] = df['equity_yoy'].fillna(0)
+    df['oper_rev_yoy'] = df['or_yoy'].fillna(0)
+    df['debt_to_assets'] = df['debt_to_assets'].fillna(0)
+    df['debt_to_equity'] = df['debt_to_eqt'].fillna(0)
+    df['current_ratio'] = df['current_ratio'].fillna(0)
+    df['quick_ratio'] = df['quick_ratio'].fillna(0)
+    df['cash_ratio'] = df['cash_ratio'].fillna(0)
+    df['ca_turn'] = df['ca_turn'].fillna(0)
     df.to_csv('computed_indicators.csv', index=False)
     return df
 
