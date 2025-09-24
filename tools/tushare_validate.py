@@ -369,10 +369,24 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
 
         return income_df, balance_df, cashflow_df, fina_df
 
-def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
+def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks):
     """Compute extended basic indicators from primitives"""
     if income_df.empty or balance_df.empty or cashflow_df.empty:
         return pd.DataFrame()
+
+    # Filter by stocks if specified
+    if stocks is not None:
+        stock_list = [s.strip() for s in stocks.split(',') if s.strip()]
+        if stock_list:
+            logger.info(f"Filtering data for stocks: {stock_list}")
+            if not income_df.empty and 'ts_code' in income_df.columns:
+                income_df = income_df[income_df['ts_code'].isin(stock_list)].copy()
+            if not balance_df.empty and 'ts_code' in balance_df.columns:
+                balance_df = balance_df[balance_df['ts_code'].isin(stock_list)].copy()
+            if not cashflow_df.empty and 'ts_code' in cashflow_df.columns:
+                cashflow_df = cashflow_df[cashflow_df['ts_code'].isin(stock_list)].copy()
+            if not fina_df.empty and 'ts_code' in fina_df.columns:
+                fina_df = fina_df[fina_df['ts_code'].isin(stock_list)].copy()
 
     # Ensure all dataframes have report_period column
     income_df['report_period'] = income_df['end_date'].str.replace('-', '')
@@ -414,6 +428,8 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     for field in df.columns:
         field_null_count = df[field].isna().sum()
         logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
+
+    df.to_csv('computed_indicators.csv', index=False)
 
     # Use total_revenue if revenue is not available
     revenue_field = 'revenue' if 'revenue' in df.columns and not df['revenue'].isna().all() else 'total_revenue'
@@ -754,6 +770,69 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df):
     calc_cols = [col for col in df.columns if col.startswith('calc_')]
     return df[['ts_code', 'report_period'] + calc_cols]
 
+def deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df):
+    """
+    Remove duplicates from dataframes based on primary key (ts_code, report_period).
+    This ensures that for each stock and period combination, only the last (most recent/corrected) record is kept.
+    This follows the same pattern as update_a_stock_financial_profile.py
+    """
+    # Add report_period column to all dataframes if not present
+    dataframes = [
+        ("income_df", income_df),
+        ("balance_df", balance_df),
+        ("cashflow_df", cashflow_df),
+        ("fina_df", fina_df)
+    ]
+
+    for name, df in dataframes:
+        if not df.empty and len(df) > 0:
+            # Add report_period column if not present
+            if 'report_period' not in df.columns and 'end_date' in df.columns:
+                df = df.copy()
+                df['report_period'] = df['end_date'].str.replace('-', '')
+                if name == "income_df":
+                    income_df = df
+                elif name == "balance_df":
+                    balance_df = df
+                elif name == "cashflow_df":
+                    cashflow_df = df
+                elif name == "fina_df":
+                    fina_df = df
+
+    # Now deduplicate based on (ts_code, report_period)
+    for name, df in [("income_df", income_df), ("balance_df", balance_df), ("cashflow_df", cashflow_df), ("fina_df", fina_df)]:
+        if not df.empty and len(df) > 0 and 'ts_code' in df.columns and 'report_period' in df.columns:
+            initial_count = len(df)
+
+            # Debug: Check for duplicates before removal
+            duplicate_check = df.groupby(['ts_code', 'report_period']).size()
+            duplicates_found = duplicate_check[duplicate_check > 1]
+
+            if len(duplicates_found) > 0:
+                print(f"Found {len(duplicates_found)} duplicate groups in {name} before removal:")
+                for (ts_code, report_period), count in duplicates_found.items():
+                    print(f"  {ts_code} {report_period}: {count} duplicates")
+
+                # Remove duplicates, keeping the last record (potentially more updated/corrected data)
+                df = df.drop_duplicates(subset=['ts_code', 'report_period'], keep='last')
+                final_count = len(df)
+
+                if final_count < initial_count:
+                    print(f"Removed {initial_count - final_count} duplicates from {name}, kept {final_count} unique records (latest)")
+
+                # Update the dataframe variable
+                if name == "income_df":
+                    income_df = df
+                elif name == "balance_df":
+                    balance_df = df
+                elif name == "cashflow_df":
+                    cashflow_df = df
+                elif name == "fina_df":
+                    fina_df = df
+
+    return income_df, balance_df, cashflow_df, fina_df
+
+
 def cross_validate_indicators(computed_df, fina_df):
     """Cross-validate: computed vs API (extended)"""
     if computed_df.empty or fina_df.empty:
@@ -936,10 +1015,14 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     print("1. Fetching data...")
     periods = generate_periods(start_date, end_date, period)
     income_df, balance_df, cashflow_df, fina_df = fetch_tushare_data(stocks, periods)
-    
+
+    # Deduplicate dataframes to ensure data quality
+    print("1.5. Deduplicating data...")
+    income_df, balance_df, cashflow_df, fina_df = deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df)
+
     # Compute (extended)
     print("2. Computing extended indicators...")
-    computed_df = compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df)
+    computed_df = compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks)
     
     # Validate (extended)
     print("3. Cross-validating consistency...")
@@ -986,7 +1069,7 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate data from Tushare.")
     parser.add_argument("--start_date", type=str, help="Start date in YYYY-MM-DD or YYYYMMDD format.", default='20240101')
-    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD or YYYYMMDD format.", default=datetime.now().strftime('%Y1231'))
+    parser.add_argument("--end_date", type=str, help="End date in YYYY-MM-DD or YYYYMMDD format.", default=datetime.now().strftime('%Y-12-31'))
     parser.add_argument("--stocks", type=str, help="Stocks to validate (comma-separated).", default='')
     parser.add_argument("--period", type=str, help="Period type: annual or quarter.", default='annual')
 
