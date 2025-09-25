@@ -740,23 +740,6 @@ def calculate_ttm_indicators(df):
         (df.loc[mask_both_positive_ni, 'n_income_attr_p'] / df.loc[mask_both_positive_ni, 'ni_3y_ago']) ** (1/3) - 1
     ) * 100
 
-    # Calculate additional TTM efficiency and quality indicators
-
-    # ROIC TTM (Return on Invested Capital)
-    # ROIC = (Net Operating Profit After Tax) / (Total Debt + Total Equity - Cash)
-    # Using EBIT(1-tax_rate) / Invested Capital approximation
-    if 'ebit' in df.columns and 'income_tax' in df.columns:
-        # Estimate tax rate and NOPAT
-        tax_rate = df['income_tax'] / df['ebit'].where(df['ebit'] != 0, 1)
-        tax_rate = tax_rate.fillna(0.25)  # Default 25% tax rate
-        nopat = df['ebit'] * (1 - tax_rate)
-
-        # Invested capital = Total debt + Total equity
-        invested_capital = df['total_liab'] + df['total_hldr_eqy_inc_min_int']
-        df['roic_ttm'] = np.where(invested_capital > 0, (nopat / invested_capital) * 100, np.nan)
-    else:
-        df['roic_ttm'] = np.nan
-
     # FCF TTM (Free Cash Flow) - approximation using available data
     # FCF = Operating Cash Flow - CapEx
     if 'n_cashflow_act' in df.columns and 'c_pay_acq_const_fiolta' in df.columns:
@@ -779,7 +762,7 @@ def calculate_ttm_indicators(df):
     # Round results
     round_cols = ['eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm', 'roe_ttm', 'roa_ttm',
                   'netprofit_margin_ttm', 'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y',
-                  'roic_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm']
+                  'fcf_margin_ttm', 'debt_to_ebitda_ttm']
     df[round_cols] = df[round_cols].round(4)
 
     # Remove filled rows (missing=1) after calculations are complete
