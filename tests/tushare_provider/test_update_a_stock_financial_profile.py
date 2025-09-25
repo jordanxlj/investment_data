@@ -50,7 +50,7 @@ class TestTTMCalculation:
             expected_ttm_cols = [
                 'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
                 'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
-                'roic_ttm', 'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+                'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
             ]
 
             existing_cols = [col for col in expected_ttm_cols if col in result.columns]
@@ -88,7 +88,7 @@ class TestTTMCalculation:
             'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
             'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
             'revenue_cagr_3y', 'netincome_cagr_3y',
-            'roic_ttm', 'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+            'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
         ]
 
         assert len(TTM_COLUMNS) == len(expected_cols)
@@ -208,7 +208,8 @@ class TestSchemaCoercion:
             'period': ['annual'],
             'currency': ['CNY'],
             'total_revenue': [1000.0],
-            'eps_ttm': [1.5]
+            'eps_ttm': [1.5],
+            'roe': [15.5]  # Add a unique field to avoid conflicts
         })
 
         result = _coerce_schema(test_df)

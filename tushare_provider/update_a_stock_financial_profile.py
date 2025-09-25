@@ -87,251 +87,125 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ann_date                  DATE         NULL,
 
   -- Income statement fields (万元存储 - converted from 元)
+  basic_eps                 FLOAT NULL COMMENT '基本每股收益(元)',
+  diluted_eps               FLOAT NULL COMMENT '稀释每股收益(元)',
   total_revenue             DECIMAL(16,4) NULL COMMENT '总营收(万元)',
   revenue                   DECIMAL(16,4) NULL COMMENT '营业收入(万元)',
-  operate_profit            DECIMAL(16,4) NULL COMMENT '营业利润(万元)',
-  total_profit              DECIMAL(16,4) NULL COMMENT '利润总额(万元)',
-  n_income_attr_p           DECIMAL(16,4) NULL COMMENT '净利润(万元)',
-  basic_eps                 FLOAT NULL COMMENT '基本每股收益(元)',
   total_cogs                DECIMAL(16,4) NULL COMMENT '营业总成本(万元)',
   oper_cost                 DECIMAL(16,4) NULL COMMENT '营业成本(万元)',
   sell_exp                  DECIMAL(16,4) NULL COMMENT '销售费用(万元)',
   admin_exp                 DECIMAL(16,4) NULL COMMENT '管理费用(万元)',
   fin_exp                   DECIMAL(16,4) NULL COMMENT '财务费用(万元)',
+  assets_impair_loss        DECIMAL(16,4) NULL COMMENT '资产减值损失(万元)',
+  operate_profit            DECIMAL(16,4) NULL COMMENT '营业利润(万元)',
+  non_oper_income           DECIMAL(16,4) NULL COMMENT '营业外收入(万元)',
+  non_oper_exp              DECIMAL(16,4) NULL COMMENT '营业外支出(万元)',
+  total_profit              DECIMAL(16,4) NULL COMMENT '利润总额(万元)',
+  income_tax                DECIMAL(16,4) NULL COMMENT '所得税(万元)',
+  n_income                  DECIMAL(16,4) NULL COMMENT '净利润(万元)',
+  n_income_attr_p           DECIMAL(16,4) NULL COMMENT '净利润(万元)',
+  ebit                      DECIMAL(16,4) NULL COMMENT '息税前利润(万元)',
+  ebitda                    DECIMAL(16,4) NULL COMMENT 'EBITDA(万元)',
   invest_income             DECIMAL(16,4) NULL COMMENT '投资收益(万元)',
   interest_exp              DECIMAL(16,4) NULL COMMENT '利息支出(万元)',
   oper_exp                  DECIMAL(16,4) NULL COMMENT '营业支出(万元)',
-  ebit                      DECIMAL(16,4) NULL COMMENT '息税前利润(万元)',
-  ebitda                    DECIMAL(16,4) NULL COMMENT 'EBITDA(万元)',
-  income_tax                DECIMAL(16,4) NULL COMMENT '所得税(万元)',
   comshare_payable_dvd      DECIMAL(16,4) NULL COMMENT '应付股利(万元)',
-
+ 
   -- Balance sheet fields (万元存储 - converted from 元)
-  total_assets              DECIMAL(16,4) NULL COMMENT '总资产(万元)',
-  total_liab                DECIMAL(16,4) NULL COMMENT '总负债(万元)',
-  total_equity              DECIMAL(16,4) NULL COMMENT '股东权益(万元)',
-  total_hldr_eqy_exc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(不含少数股东权益)(万元)',
-  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL COMMENT '股东权益(含少数股东权益)(万元)',
-  total_cur_assets          DECIMAL(16,4) NULL COMMENT '流动资产(万元)',
-  total_cur_liab            DECIMAL(16,4) NULL COMMENT '流动负债(万元)',
+  total_share               DECIMAL(16,4) NULL COMMENT '股本(万元)',
+  cap_rese                  DECIMAL(16,4) NULL COMMENT '资本公积(万元)',
+  undistr_porfit            DECIMAL(16,4) NULL COMMENT '未分配利润(万元)',
+  surplus_rese              DECIMAL(16,4) NULL COMMENT '盈余公积(万元)',
+  money_cap                 DECIMAL(16,4) NULL COMMENT '货币资金(万元)',
   accounts_receiv           DECIMAL(16,4) NULL COMMENT '应收账款(万元)',
+  oth_receiv                DECIMAL(16,4) NULL COMMENT '其他应收款(万元)',
+  prepayment                DECIMAL(16,4) NULL COMMENT '预付款项(万元)',
   inventories               DECIMAL(16,4) NULL COMMENT '存货(万元)',
-  acct_payable              DECIMAL(16,4) NULL COMMENT '应付账款(万元)',
+  oth_cur_assets            DECIMAL(16,4) NULL COMMENT '其他流动资产(万元)',
+  total_cur_assets          DECIMAL(16,4) NULL COMMENT '流动资产合计(万元)',
+  htm_invest                DECIMAL(16,4) NULL COMMENT '可供出售金融资产(万元)',
   fix_assets                DECIMAL(16,4) NULL COMMENT '固定资产(万元)',
+  intan_assets              DECIMAL(16,4) NULL COMMENT '无形资产(万元)',
+  defer_tax_assets          DECIMAL(16,4) NULL COMMENT '递延所得税资产(万元)',
+  total_nca                 DECIMAL(16,4) NULL COMMENT '非流动资产合计(万元)',
+  total_assets              DECIMAL(16,4) NULL COMMENT '资产总计(万元)',
+  acct_payable              DECIMAL(16,4) NULL COMMENT '应付账款(万元)',
+  payroll_payable           DECIMAL(16,4) NULL COMMENT '应付职工薪酬(万元)',
+  taxes_payable             DECIMAL(16,4) NULL COMMENT '应交税费(万元)',
+  oth_payable               DECIMAL(16,4) NULL COMMENT '其他应付款(万元)',
+  total_cur_liab            DECIMAL(16,4) NULL COMMENT '流动负债合计(万元)',
+  defer_inc_non_cur_liab    DECIMAL(16,4) NULL COMMENT '递延收益-非流动负债(万元)',
+  total_ncl                 DECIMAL(16,4) NULL COMMENT '非流动负债合计(万元)',
+  total_liab                DECIMAL(16,4) NULL COMMENT '负债合计(万元)',
+  total_hldr_eqy_exc_min_int DECIMAL(16,4) NULL COMMENT '股东权益合计(万元)',
+  total_hldr_eqy_inc_min_int DECIMAL(16,4) NULL COMMENT '股东权益合计(含少数股东)(万元)',
+  total_liab_hldr_eqy       DECIMAL(16,4) NULL COMMENT '负债和股东权益总计(万元)',
+  oth_pay_total             DECIMAL(16,4) NULL COMMENT '其他应付款总计(万元)',
+  accounts_receiv_bill      DECIMAL(16,4) NULL COMMENT '应收票据(万元)',
+  accounts_pay              DECIMAL(16,4) NULL COMMENT '应付账款(万元)',
+  oth_rcv_total             DECIMAL(16,4) NULL COMMENT '其他应收款总计(万元)',
+  fix_assets_total          DECIMAL(16,4) NULL COMMENT '固定资产总计(万元)',
   lt_borr                   DECIMAL(16,4) NULL COMMENT '长期借款(万元)',
+  st_borr                   DECIMAL(16,4) NULL COMMENT '短期借款(万元)',
+  oth_eqt_tools_p_shr       DECIMAL(16,4) NULL COMMENT '其他权益工具(万元)',
   r_and_d                   DECIMAL(16,4) NULL COMMENT '研发支出(万元)',
   goodwill                  DECIMAL(16,4) NULL COMMENT '商誉(万元)',
-  intang_assets             DECIMAL(16,4) NULL COMMENT '无形资产(万元)',
-  st_borr                   DECIMAL(16,4) NULL COMMENT '短期借款(万元)',
-  total_share               DECIMAL(16,4) NULL COMMENT '股本(万元)',
-  oth_eqt_tools_p_shr       DECIMAL(16,4) NULL COMMENT '其他权益工具(万元)',
 
   -- Cash flow statement fields (万元存储 - converted from 元)
-  n_cashflow_act            DECIMAL(16,4) NULL COMMENT '经营现金流(万元)',
-  n_cashflow_inv_act        DECIMAL(16,4) NULL COMMENT '投资现金流(万元)',
-  n_cash_flows_fnc_act      DECIMAL(16,4) NULL COMMENT '融资现金流(万元)',
-  free_cashflow             DECIMAL(16,4) NULL COMMENT '自由现金流(万元)',
-  c_pay_acq_const_fiolta    DECIMAL(16,4) NULL COMMENT '购建固定资产(万元)',
+  net_profit                DECIMAL(16,4) NULL COMMENT '净利润(万元)',
+  finan_exp                 DECIMAL(16,4) NULL COMMENT '财务费用(万元)',
   c_fr_sale_sg              DECIMAL(16,4) NULL COMMENT '销售商品收款(万元)',
+  c_inf_fr_operate_a        DECIMAL(16,4) NULL COMMENT '经营活动现金流入小计(万元)',
   c_paid_goods_s            DECIMAL(16,4) NULL COMMENT '购买商品付款(万元)',
   c_paid_to_for_empl        DECIMAL(16,4) NULL COMMENT '支付职工薪酬(万元)',
   c_paid_for_taxes          DECIMAL(16,4) NULL COMMENT '支付税费(万元)',
-  n_incr_cash_cash_equ      DECIMAL(16,4) NULL COMMENT '现金等价物净增加(万元)',
-  c_disp_withdrwl_invest    DECIMAL(16,4) NULL COMMENT '处置投资收款(万元)',
-  c_pay_dist_dpcp_int_exp   DECIMAL(16,4) NULL COMMENT '分配股利利息(万元)',
-  c_cash_equ_end_period     DECIMAL(16,4) NULL COMMENT '期末现金余额(万元)',
+  n_cashflow_act            DECIMAL(16,4) NULL COMMENT '经营活动现金流量净额(万元)',
+  n_cashflow_inv_act        DECIMAL(16,4) NULL COMMENT '投资活动现金流量净额(万元)',
+  free_cashflow             DECIMAL(16,4) NULL COMMENT '自由现金流(万元)',
+  n_cash_flows_fnc_act      DECIMAL(16,4) NULL COMMENT '融资活动现金流量净额(万元)',
+  n_incr_cash_cash_equ      DECIMAL(16,4) NULL COMMENT '现金及现金等价物净增加额(万元)',
+  c_cash_equ_beg_period     DECIMAL(16,4) NULL COMMENT '期初现金及现金等价物余额(万元)',
+  c_cash_equ_end_period     DECIMAL(16,4) NULL COMMENT '期末现金及现金等价物余额(万元)',
+  im_net_cashflow_oper_act  DECIMAL(16,4) NULL COMMENT '经营活动产生的现金流量净额(万元)',
+  end_bal_cash              DECIMAL(16,4) NULL COMMENT '期末现金余额(万元)',
+  beg_bal_cash              DECIMAL(16,4) NULL COMMENT '期初现金余额(万元)',
+  c_pay_acq_const_fiolta    DECIMAL(16,4) NULL COMMENT '购建固定资产、无形资产和其他长期资产支付的现金(万元)',
+  c_disp_withdrwl_invest    DECIMAL(16,4) NULL COMMENT '处置固定资产、无形资产和其他长期资产收回的现金净额(万元)',
+  c_pay_dist_dpcp_int_exp   DECIMAL(16,4) NULL COMMENT '分配股利、利润或偿付利息支付的现金(万元)',
 
-  -- === Financial indicator fields (grouped by relevance) ===
-
-  -- 1. Basic financial indicators
+  -- Financial indicator fields (synchronized with tushare_validate.py + TTM extensions)
   eps                       FLOAT NULL COMMENT '每股收益(元)',
   dt_eps                    FLOAT NULL COMMENT '稀释每股收益(元)',
+  revenue_ps                FLOAT NULL COMMENT '每股营收(元)',
+  bps                       FLOAT NULL COMMENT '每股净资产(元)',
+  cfps                      FLOAT NULL COMMENT '每股现金流(元)',
+  gross_margin              FLOAT NULL COMMENT '毛利率(%)',
   netprofit_margin          FLOAT NULL COMMENT '净利率(%)',
   grossprofit_margin        FLOAT NULL COMMENT '毛利润率(%)',
-  ebitda_margin             FLOAT NULL COMMENT 'EBITDA利润率(%)',
-  gross_margin              DECIMAL(16,4) NULL COMMENT '毛利(元)',
-  extra_item                DECIMAL(16,4) NULL COMMENT '其他项目(万元)',
-  profit_dedt               DECIMAL(16,4) NULL COMMENT '扣除非经常性损益后的净利润(万元)',
-  op_income                 DECIMAL(16,4) NULL COMMENT '营业收入(万元)',
-  daa                       DECIMAL(16,4) NULL COMMENT '折旧和摊销(万元)',
-  rd_exp                    DECIMAL(16,4) NULL COMMENT '研发费用(万元)',
-
-  -- 2. Solvency indicators (ratios - no unit conversion needed)
   current_ratio             FLOAT NULL COMMENT '流动比率',
   quick_ratio               FLOAT NULL COMMENT '速动比率',
   cash_ratio                FLOAT NULL COMMENT '现金比率',
+  inv_turn                  FLOAT NULL COMMENT '存货周转率',
+  ar_turn                   FLOAT NULL COMMENT '应收账款周转率',
+  ca_turn                   FLOAT NULL COMMENT '流动资产周转率',
+  fa_turn                   FLOAT NULL COMMENT '固定资产周转率',
+  assets_turn               FLOAT NULL COMMENT '总资产周转率',
   debt_to_assets            FLOAT NULL COMMENT '资产负债率',
-  assets_to_eqt             FLOAT NULL COMMENT '权益乘数',
-  dp_assets_to_eqt          FLOAT NULL COMMENT '有形资产权益乘数',
   debt_to_eqt               FLOAT NULL COMMENT '产权比率',
-  eqt_to_debt               FLOAT NULL COMMENT '净资产负债率倒数',
-  eqt_to_interestdebt       FLOAT NULL COMMENT '净资产利息负担率倒数',
-  ebit_to_interest          FLOAT NULL COMMENT '利息保障倍数',
-  ebitda_to_debt            FLOAT NULL COMMENT 'EBITDA对债务比率',
-  debt_to_assets_2          FLOAT NULL COMMENT '资产负债率(备选)',
-  assets_to_eqt_2           FLOAT NULL COMMENT '权益乘数(备选)',
-  dp_assets_to_eqt_2        FLOAT NULL COMMENT '有形资产权益乘数(备选)',
-  tangibleasset_to_debt     FLOAT NULL COMMENT '有形资产债务率',
-  tangasset_to_intdebt      FLOAT NULL COMMENT '有形资产利息债务率',
-  tangibleasset_to_netdebt  FLOAT NULL COMMENT '有形资产净债务率',
+  roe                       FLOAT NULL COMMENT '净资产收益率(%)',
+  roa                       FLOAT NULL COMMENT '总资产报酬率(%)',
+  roic                      FLOAT NULL COMMENT '投资回报率(%)',
+  netprofit_yoy             FLOAT NULL COMMENT '净利润同比增长率(%)',
+  or_yoy                    FLOAT NULL COMMENT '营业收入同比增长率(%)',
+  basic_eps_yoy             FLOAT NULL COMMENT '基本每股收益同比增长率(%)',
+  assets_yoy                FLOAT NULL COMMENT '资产同比增长率(%)',
+  eqt_yoy                   FLOAT NULL COMMENT '净资产同比增长率(%)',
+  ocf_yoy                   FLOAT NULL COMMENT '经营现金流同比增长率(%)',
+  roe_yoy                   FLOAT NULL COMMENT '净资产收益率同比增长率(%)',
+  equity_yoy                FLOAT NULL COMMENT '股东权益同比增长率(%)',
+  rd_exp                    FLOAT NULL COMMENT '研发支出(万元)',
 
-  -- 3. Operating efficiency indicators
-  invturn_days              FLOAT NULL,
-  arturn_days               FLOAT NULL,
-  turn_days                 FLOAT NULL,
-  inv_turn                  FLOAT NULL,
-  ar_turn                   FLOAT NULL,
-  ca_turn                   FLOAT NULL,
-  fa_turn                   FLOAT NULL,
-  assets_turn               FLOAT NULL,
-  inventory_turnover        FLOAT NULL,
-  inventory_days            FLOAT NULL,
-  currentasset_turnover     FLOAT NULL,
-  currentasset_days         FLOAT NULL,
-  arturnover                FLOAT NULL,
-  arturndays                FLOAT NULL,
-
-  -- 4. Profitability indicators (ROE/ROA etc.)
-  roic                      FLOAT NULL,
-  roe_waa                   FLOAT NULL,
-  roe_dt                    FLOAT NULL,
-  roe_yearly                FLOAT NULL,
-  roa                       FLOAT NULL,
-  npta                      FLOAT NULL,
-  npta_yearly               FLOAT NULL,
-  roa_yearly                FLOAT NULL,
-  roa_dp                    FLOAT NULL,
-  roa_yearly_2              FLOAT NULL,
-  roa_dp_2                  FLOAT NULL,
-  roa_yearly_3              FLOAT NULL,
-  roa_dp_3                  FLOAT NULL,
-
-  -- 5. DuPont analysis indicators
-  equity_multiplier         FLOAT NULL,
-  roe_waa_2                 FLOAT NULL,
-  roe_avg                   FLOAT NULL,
-  roe_waa_2_dedt            FLOAT NULL,
-  roe_avg_dedt              FLOAT NULL,
-  roe_waa_2_nonr            FLOAT NULL,
-  roe_avg_nonr              FLOAT NULL,
-  roe_waa_2_dedt_ttm        FLOAT NULL,
-  roe_dt_2                  FLOAT NULL,
-  debt_to_equity_1          FLOAT NULL,
-  equity_ratio              FLOAT NULL,
-
-  -- 6. Per share indicators
-  total_revenue_ps          FLOAT NULL,
-  revenue_ps                FLOAT NULL,
-  capital_rese_ps           FLOAT NULL,
-  surplus_rese_ps           FLOAT NULL,
-  undist_profit_ps          FLOAT NULL,
-  bps                       FLOAT NULL,
-  ocfps                     FLOAT NULL,
-  retainedps                FLOAT NULL,
-  cfps                      FLOAT NULL,
-  ebit_ps                   FLOAT NULL,
-  fcff_ps                   FLOAT NULL,
-  fcfe_ps                   FLOAT NULL,
-  q_eps                     FLOAT NULL,
-
-  -- 7. Cash flow indicators
-  cf_sales                  FLOAT NULL,
-  cf_nm                     FLOAT NULL,
-  cf_liabs                  FLOAT NULL,
-  cashflow_m                FLOAT NULL,
-  op_of_gr                  FLOAT NULL,
-  ocf_to_debt               FLOAT NULL,
-  ocf_to_interestdebt       FLOAT NULL,
-  ocf_to_netdebt            FLOAT NULL,
-  ocf_to_shortdebt          FLOAT NULL,
-  ocf_to_or                 FLOAT NULL,
-  ocf_to_opincome           FLOAT NULL,
-  salescash_to_or           FLOAT NULL,
-  q_ocf_to_sales            FLOAT NULL,
-
-  -- 8. Growth indicators (YoY growth rates)
-  basic_eps_yoy             FLOAT NULL,
-  dt_eps_yoy                FLOAT NULL,
-  cfps_yoy                  FLOAT NULL,
-  op_yoy                    FLOAT NULL,
-  ebt_yoy                   FLOAT NULL,
-  netprofit_yoy             FLOAT NULL,
-  dt_netprofit_yoy          FLOAT NULL,
-  ocf_yoy                   FLOAT NULL,
-  roe_yoy                   FLOAT NULL,
-  bps_yoy                   FLOAT NULL,
-  assets_yoy                FLOAT NULL,
-  eqt_yoy                   FLOAT NULL,
-  tr_yoy                    FLOAT NULL,
-  or_yoy                    FLOAT NULL,
-  equity_yoy                FLOAT NULL,
-
-  -- 9. Quarterly financial indicators
-  q_opincome                DECIMAL(16,4) NULL,
-  q_investincome            DECIMAL(16,4) NULL,
-  q_dtprofit                DECIMAL(16,4) NULL,
-  q_netprofit_margin        FLOAT NULL,
-  q_gsprofit_margin         FLOAT NULL,
-  q_exp_to_sales            FLOAT NULL,
-  q_profit_to_gr            FLOAT NULL,
-  q_saleexp_to_gr           FLOAT NULL,
-  q_adminexp_to_gr          FLOAT NULL,
-  q_finaexp_to_gr           FLOAT NULL,
-  q_impair_to_gr_ttm        FLOAT NULL,
-  q_gc_to_gr                FLOAT NULL,
-  q_op_to_gr                FLOAT NULL,
-  q_roe                     FLOAT NULL,
-  q_dt_roe                  FLOAT NULL,
-  q_npta                    FLOAT NULL,
-
-  -- 10. Quarterly sequential growth rates
-  q_gr_yoy                  FLOAT NULL,
-  q_gr_qoq                  FLOAT NULL,
-  q_sales_yoy               FLOAT NULL,
-  q_sales_qoq               FLOAT NULL,
-  q_op_yoy                  FLOAT NULL,
-  q_op_qoq                  FLOAT NULL,
-  q_profit_yoy              FLOAT NULL,
-  q_profit_qoq              FLOAT NULL,
-  q_netprofit_yoy           FLOAT NULL,
-  q_netprofit_qoq           FLOAT NULL,
-
-  -- 11. Cost and expense structure analysis
-  cogs_of_sales             FLOAT NULL,
-  expense_of_sales          FLOAT NULL,
-  profit_to_gr              FLOAT NULL,
-  saleexp_to_gr             FLOAT NULL,
-  adminexp_to_gr            FLOAT NULL,
-  finaexp_to_gr             FLOAT NULL,
-  impair_to_gr_ttm          FLOAT NULL,
-  gc_of_gr                  FLOAT NULL,
-  op_to_ebt                 FLOAT NULL,
-  tax_to_ebt                FLOAT NULL,
-  dtprofit_to_profit        FLOAT NULL,
-  profit_to_op              FLOAT NULL,
-  profit_prefin_exp         DECIMAL(16,4) NULL,
-  non_op_profit             DECIMAL(16,4) NULL,
-
-  -- 12. Asset structure analysis
-  ca_to_assets              FLOAT NULL,
-  nca_to_assets             FLOAT NULL,
-  tbassets_to_totalassets   FLOAT NULL,
-  fixed_assets              DECIMAL(16,4) NULL,
-  int_to_talcap             FLOAT NULL,
-  eqt_to_talcapital         FLOAT NULL,
-  currentdebt_to_debt       FLOAT NULL,
-  longdeb_to_debt           FLOAT NULL,
-  longdebt_to_workingcapital FLOAT NULL,
-  capitalized_to_da         FLOAT NULL,
-
-  -- 13. Valuation indicators
-  current_exint             DECIMAL(16,4) NULL,
-  non_current_exint         DECIMAL(16,4) NULL,
-  intrinsicvalue            DECIMAL(16,4) NULL,
-  tmv                       DECIMAL(16,4) NULL,
-  lmv                       DECIMAL(16,4) NULL,
-
-  -- TTM (Trailing Twelve Months) indicators
+  -- TTM (Trailing Twelve Months) indicators - our key additions
   eps_ttm                   FLOAT NULL COMMENT 'TTM每股收益(元)',
   revenue_ps_ttm            FLOAT NULL COMMENT 'TTM每股营收(元)',
   ocfps_ttm                 FLOAT NULL COMMENT 'TTM每股经营现金流(元)',
@@ -361,100 +235,55 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
 # Base fields (shared by all data sources)
 BASE_COLUMNS = ["ts_code", "ann_date", "report_period", "period", "currency"]
 
-# Income statement fields
+# Income statement fields (synchronized with tushare_validate.py)
 INCOME_COLUMNS = [
-    "total_revenue", "revenue", "operate_profit", "total_profit", "n_income_attr_p", "basic_eps",
-    "total_cogs", "oper_cost", "sell_exp", "admin_exp", "fin_exp", "invest_income", "interest_exp",
-    "oper_exp", "ebit", "ebitda", "income_tax", "comshare_payable_dvd", "rd_exp"
+    'basic_eps', 'diluted_eps', 'total_revenue', 'revenue',
+    'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp',
+    'assets_impair_loss', 'operate_profit', 'non_oper_income', 'non_oper_exp',
+    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'ebit',
+    'ebitda', 'invest_income', 'interest_exp', 'oper_exp', 'comshare_payable_dvd'
 ]
 
-# Balance sheet fields
+# Balance sheet fields (synchronized with tushare_validate.py)
 BALANCE_COLUMNS = [
-    "total_assets", "total_liab", "total_hldr_eqy_inc_min_int", "total_cur_assets",
-    "total_cur_liab", "accounts_receiv", "inventories", "acct_payable",
-    "fix_assets", "lt_borr", "r_and_d", "goodwill", "intang_assets", "st_borr",
-    "total_share", "oth_eqt_tools_p_shr", "total_hldr_eqy_exc_min_int"
+    'total_share', 'cap_rese', 'undistr_porfit', 'surplus_rese', 'money_cap',
+    'accounts_receiv', 'oth_receiv', 'prepayment', 'inventories',
+    'oth_cur_assets', 'total_cur_assets', 'htm_invest', 'fix_assets',
+    'intan_assets', 'defer_tax_assets', 'total_nca', 'total_assets',
+    'acct_payable', 'payroll_payable', 'taxes_payable', 'oth_payable',
+    'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl', 'total_liab',
+    'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int',
+    'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill',
+    'accounts_pay', 'oth_rcv_total', 'fix_assets_total', 'lt_borr', 'st_borr',
+    'oth_eqt_tools_p_shr', 'r_and_d', 'goodwill'
 ]
 
-# Cash flow statement fields
+# Cash flow statement fields (synchronized with tushare_validate.py)
 CASHFLOW_COLUMNS = [
-    "n_cashflow_act", "n_cashflow_inv_act", "n_cash_flows_fnc_act",
-    "free_cashflow", "c_pay_acq_const_fiolta", "c_fr_sale_sg", "c_paid_goods_s",
-    "c_paid_to_for_empl", "c_paid_for_taxes", "n_incr_cash_cash_equ",
-    "c_disp_withdrwl_invest", "c_pay_dist_dpcp_int_exp", "c_cash_equ_end_period"
+    'net_profit', 'finan_exp', 'c_fr_sale_sg', 'c_inf_fr_operate_a',
+    'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
+    'n_cashflow_act', 'n_cashflow_inv_act', 'free_cashflow',
+    'n_cash_flows_fnc_act', 'n_incr_cash_cash_equ', 'c_cash_equ_beg_period',
+    'c_cash_equ_end_period', 'im_net_cashflow_oper_act', 'end_bal_cash',
+    'beg_bal_cash', 'c_pay_acq_const_fiolta', 'c_disp_withdrwl_invest',
+    'c_pay_dist_dpcp_int_exp'
 ]
 
-# Financial indicator fields (grouped by relevance)
+# Financial indicator fields (synchronized with tushare_validate.py + TTM extensions)
 INDICATOR_COLUMNS = [
-    # Basic financial indicators
-    "eps", "dt_eps", "gross_margin", "netprofit_margin", "grossprofit_margin",
-    "ebitda_margin", "extra_item", "profit_dedt", "op_income", "daa",
+    # Core indicators from tushare_validate.py
+    'eps', 'dt_eps', 'revenue_ps', 'bps', 'cfps', 'gross_margin',
+    'netprofit_margin', 'grossprofit_margin', 'current_ratio', 'quick_ratio',
+    'cash_ratio', 'inv_turn', 'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn',
+    'debt_to_assets', 'debt_to_eqt', 'roe', 'roa', 'roic', 'netprofit_yoy',
+    'or_yoy', 'basic_eps_yoy', 'assets_yoy', 'eqt_yoy', 'ocf_yoy', 'roe_yoy',
+    'equity_yoy', 'rd_exp',
 
-    # Solvency indicators
-    "current_ratio", "quick_ratio", "cash_ratio", "debt_to_assets", "assets_to_eqt",
-    "dp_assets_to_eqt", "debt_to_eqt", "eqt_to_debt", "eqt_to_interestdebt",
-    "ebit_to_interest", "ebitda_to_debt", "debt_to_assets_2", "assets_to_eqt_2",
-    "dp_assets_to_eqt_2", "tangibleasset_to_debt", "tangasset_to_intdebt",
-    "tangibleasset_to_netdebt",
-
-    # Operating efficiency indicators
-    "invturn_days", "arturn_days", "turn_days", "inv_turn", "ar_turn", "ca_turn",
-    "fa_turn", "assets_turn", "inventory_turnover", "inventory_days",
-    "currentasset_turnover", "currentasset_days", "arturnover", "arturndays",
-
-    # Profitability indicators (ROE/ROA etc.)
-    "roic", "roe_waa", "roe_dt", "roe_yearly", "roa", "npta", "npta_yearly",
-    "roa_yearly", "roa_dp", "roa_yearly_2", "roa_dp_2", "roa_yearly_3", "roa_dp_3",
-
-    # DuPont analysis indicators
-    "equity_multiplier", "roe_waa_2", "roe_avg", "roe_waa_2_dedt", "roe_avg_dedt",
-    "roe_waa_2_nonr", "roe_avg_nonr", "roe_waa_2_dedt_ttm", "roe_dt_2",
-    "debt_to_equity_1", "equity_ratio",
-
-    # Per share indicators
-    "total_revenue_ps", "revenue_ps", "capital_rese_ps", "surplus_rese_ps",
-    "undist_profit_ps", "bps", "ocfps", "retainedps", "cfps", "ebit_ps",
-    "fcff_ps", "fcfe_ps", "q_eps",
-
-    # Cash flow indicators
-    "cf_sales", "cf_nm", "cf_liabs", "cashflow_m", "op_of_gr", "ocf_to_debt",
-    "ocf_to_interestdebt", "ocf_to_netdebt", "ocf_to_shortdebt", "ocf_to_or",
-    "ocf_to_opincome", "salescash_to_or", "q_ocf_to_sales",
-
-    # Growth indicators (YoY growth rates)
-    "basic_eps_yoy", "dt_eps_yoy", "cfps_yoy", "op_yoy", "ebt_yoy", "netprofit_yoy",
-    "dt_netprofit_yoy", "ocf_yoy", "roe_yoy", "bps_yoy", "assets_yoy", "eqt_yoy",
-    "tr_yoy", "or_yoy", "equity_yoy",
-
-    # Quarterly financial indicators
-    "q_opincome", "q_investincome", "q_dtprofit", "q_netprofit_margin",
-    "q_gsprofit_margin", "q_exp_to_sales", "q_profit_to_gr", "q_saleexp_to_gr",
-    "q_adminexp_to_gr", "q_finaexp_to_gr", "q_impair_to_gr_ttm", "q_gc_to_gr",
-    "q_op_to_gr", "q_roe", "q_dt_roe", "q_npta",
-
-    # Quarterly sequential growth rates
-    "q_gr_yoy", "q_gr_qoq", "q_sales_yoy", "q_sales_qoq", "q_op_yoy", "q_op_qoq",
-    "q_profit_yoy", "q_profit_qoq", "q_netprofit_yoy", "q_netprofit_qoq",
-
-    # Cost and expense structure analysis
-    "cogs_of_sales", "expense_of_sales", "profit_to_gr", "saleexp_to_gr",
-    "adminexp_to_gr", "finaexp_to_gr", "impair_to_gr_ttm", "gc_of_gr",
-    "op_to_ebt", "tax_to_ebt", "dtprofit_to_profit", "profit_to_op",
-    "profit_prefin_exp", "non_op_profit",
-
-    # Asset structure analysis
-    "ca_to_assets", "nca_to_assets", "tbassets_to_totalassets", "fixed_assets",
-    "int_to_talcap", "eqt_to_talcapital", "currentdebt_to_debt", "longdeb_to_debt",
-    "longdebt_to_workingcapital", "capitalized_to_da",
-
-    # Valuation indicators
-    "current_exint", "non_current_exint", "intrinsicvalue", "tmv", "lmv",
-
-    # TTM (Trailing Twelve Months) indicators
-    "eps_ttm", "revenue_ps_ttm", "ocfps_ttm", "cfps_ttm",
-    "roe_ttm", "roa_ttm", "netprofit_margin_ttm", "grossprofit_margin_ttm",
-    "revenue_cagr_3y", "netincome_cagr_3y",
-    "roic_ttm", "fcf_ttm", "fcf_margin_ttm", "debt_to_ebitda_ttm"
+    # TTM (Trailing Twelve Months) indicators - our key additions
+    'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
+    'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
+    'revenue_cagr_3y', 'netincome_cagr_3y',
+    'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
 ]
 
 # === Data source field configuration ===
@@ -473,24 +302,32 @@ ALL_COLUMNS: List[str] = BASE_COLUMNS + INCOME_COLUMNS + BALANCE_COLUMNS + CASHF
 # These are monetary amount fields (not ratios or per-share metrics)
 YUAN_TO_WAN_FIELDS = [
     # Income statement - main monetary amounts
-    'total_revenue', 'revenue', 'operate_profit', 'total_profit', 'n_income_attr_p',
-    'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp', 'invest_income',
-    'interest_exp', 'oper_exp', 'ebit', 'ebitda', 'income_tax',
-    'comshare_payable_dvd', 'rd_exp',
+    'total_revenue', 'revenue',
+    'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp',
+    'assets_impair_loss', 'operate_profit', 'non_oper_income', 'non_oper_exp',
+    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'ebit',
+    'ebitda', 'invest_income', 'interest_exp', 'oper_exp', 'comshare_payable_dvd', 'rd_exp',
 
     # Balance sheet - main monetary amounts
-    'total_assets', 'total_liab', 'total_cur_assets', 'total_cur_liab', 
-    'accounts_receiv', 'inventories', 'acct_payable', 'fix_assets', 
-    'lt_borr', 'r_and_d', 'goodwill', 'intang_assets', 'st_borr',
-    'total_share', 'oth_eqt_tools_p_shr', 'total_hldr_eqy_exc_min_int', 
-    'total_hldr_eqy_inc_min_int',
+    'total_share', 'cap_rese', 'undistr_porfit', 'surplus_rese', 'money_cap',
+    'accounts_receiv', 'oth_receiv', 'prepayment', 'inventories',
+    'oth_cur_assets', 'total_cur_assets', 'htm_invest', 'fix_assets',
+    'intan_assets', 'defer_tax_assets', 'total_nca', 'total_assets',
+    'acct_payable', 'payroll_payable', 'taxes_payable', 'oth_payable',
+    'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl', 'total_liab',
+    'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int',
+    'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill',
+    'accounts_pay', 'oth_rcv_total', 'fix_assets_total', 'lt_borr', 'st_borr',
+    'oth_eqt_tools_p_shr', 'r_and_d', 'goodwill',
 
     # Cash flow statement - main monetary amounts
-    'n_cashflow_act', 'n_cashflow_inv_act', 'n_cash_flows_fnc_act',
-    'free_cashflow', 'c_pay_acq_const_fiolta', 'c_fr_sale_sg',
+    'net_profit', 'finan_exp', 'c_fr_sale_sg', 'c_inf_fr_operate_a',
     'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
-    'n_incr_cash_cash_equ', 'c_disp_withdrwl_invest',
-    'c_pay_dist_dpcp_int_exp', 'c_cash_equ_end_period',
+    'n_cashflow_act', 'n_cashflow_inv_act', 'free_cashflow',
+    'n_cash_flows_fnc_act', 'n_incr_cash_cash_equ', 'c_cash_equ_beg_period',
+    'c_cash_equ_end_period', 'im_net_cashflow_oper_act', 'end_bal_cash',
+    'beg_bal_cash', 'c_pay_acq_const_fiolta', 'c_disp_withdrwl_invest',
+    'c_pay_dist_dpcp_int_exp',
 
     # Financial indicators - monetary amounts (not ratios)
     'extra_item', 'profit_dedt', 'op_income', 'daa', 'gross_margin',
@@ -510,7 +347,7 @@ YUAN_TO_WAN_FIELDS = [
 
 # Per-share metrics that should remain in 元 (not converted)
 PER_SHARE_FIELDS = [
-    'eps', 'dt_eps', 'basic_eps', 'q_eps',
+    'eps', 'dt_eps', 'basic_eps', 'diluted_eps', 'q_eps',
     'bps', 'ocfps', 'retainedps', 'cfps', 'ebit_ps', 'fcff_ps', 'fcfe_ps'
 ]
 
@@ -524,7 +361,7 @@ TTM_COLUMNS = [
     'revenue_cagr_3y', 'netincome_cagr_3y',
 
     # TTM efficiency and quality indicators
-    'roic_ttm', 'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+    'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
 ]
 
 
