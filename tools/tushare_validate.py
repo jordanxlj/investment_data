@@ -7,7 +7,6 @@ import argparse
 import time
 import logging
 from typing import List
-import hashlib
 
 # Setup logging
 logging.basicConfig(
@@ -211,105 +210,61 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
         # Handle stocks parameter
         if stocks:
             stocks_list = [s.strip() for s in stocks.split(',') if s.strip()]
+            ts_codes_str = ','.join(stocks_list)
         else:
             stocks_list = []
+            ts_codes_str = ''
 
         income_dfs = []
         balance_dfs = []
         cashflow_dfs = []
         fina_dfs = []
 
-        if stocks_list:
-            for ts_code in stocks_list:
-                for period in periods:
-                    try:
-                        # Income statement (doc_id=33) - focus on basics
-                        income_df = retry_api_call(
-                            pro.income_vip,
-                            ts_code=ts_code,
-                            period=period,
-                            fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
-                        )
-                        if not income_df.empty:
-                            income_dfs.append(income_df)
+        for period in periods:
+            try:
+                # Income statement (doc_id=33) - focus on basics
+                income_df = retry_api_call(
+                    pro.income_vip,
+                    ts_code=ts_codes_str,
+                    period=period,
+                    fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
+                )
+                if not income_df.empty:
+                    income_dfs.append(income_df)
 
-                        # Balance sheet (doc_id=36) - for equity/assets
-                        balance_df = retry_api_call(
-                            pro.balancesheet_vip,
-                            ts_code=ts_code,
-                            period=period,
-                            fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
-                        )
-                        if not balance_df.empty:
-                            balance_dfs.append(balance_df)
+                # Balance sheet (doc_id=36) - for equity/assets
+                balance_df = retry_api_call(
+                    pro.balancesheet_vip,
+                    ts_code=ts_codes_str,
+                    period=period,
+                    fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
+                )
+                if not balance_df.empty:
+                    balance_dfs.append(balance_df)
 
-                        # Cash flow (doc_id=44) - basic for completeness
-                        cashflow_df = retry_api_call(
-                            pro.cashflow_vip,
-                            ts_code=ts_code,
-                            period=period,
-                            fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
-                        )
-                        if not cashflow_df.empty:
-                            cashflow_dfs.append(cashflow_df)
+                # Cash flow (doc_id=44) - basic for completeness
+                cashflow_df = retry_api_call(
+                    pro.cashflow_vip,
+                    ts_code=ts_codes_str,
+                    period=period,
+                    fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
+                )
+                if not cashflow_df.empty:
+                    cashflow_dfs.append(cashflow_df)
 
-                        # Financial indicators (doc_id=79) - for validation (extended fields)
-                        indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                        fina_df = retry_api_call(
-                            pro.fina_indicator_vip,
-                            ts_code=ts_code,
-                            period=period,
-                            fields=','.join(indicator_fields)
-                        )
-                        if not fina_df.empty:
-                            fina_dfs.append(fina_df)
-                    except Exception as e:
-                        print(f"Error fetching data for {ts_code} period {period} after retries: {e}")
-                        continue
-        else:
-            # Fetch sample data for testing (limit periods to avoid rate limits)
-            print("Warning: No specific stocks provided, fetching sample data for testing")
-            for period in periods:  # Limit periods for testing
-                try:
-                    # Income statement
-                    income_df = retry_api_call(
-                        pro.income_vip,
-                        period=period,
-                        fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
-                    )
-                    if not income_df.empty:
-                        income_dfs.append(income_df)
-
-                    # Balance sheet
-                    balance_df = retry_api_call(
-                        pro.balancesheet_vip,
-                        period=period,
-                        fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
-                    )
-                    if not balance_df.empty:
-                        balance_dfs.append(balance_df)
-
-                    # Cash flow
-                    cashflow_df = retry_api_call(
-                        pro.cashflow_vip,
-                        period=period,
-                        fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
-                    )
-                    if not cashflow_df.empty:
-                        cashflow_dfs.append(cashflow_df)
-
-                    # Financial indicators
-                    indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                    fina_df = retry_api_call(
-                        pro.fina_indicator_vip,
-                        period=period,
-                        fields=','.join(indicator_fields)
-                    )
-                    if not fina_df.empty:
-                        fina_dfs.append(fina_df)
-                except Exception as e:
-                    print(f"Error fetching data for period {period} after retries: {e}")
-                    continue
+                # Financial indicators (doc_id=79) - for validation (extended fields)
+                indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
+                fina_df = retry_api_call(
+                    pro.fina_indicator_vip,
+                    ts_code=ts_codes_str,
+                    period=period,
+                    fields=','.join(indicator_fields)
+                )
+                if not fina_df.empty:
+                    fina_dfs.append(fina_df)
+            except Exception as e:
+                print(f"Error fetching data for period {period} after retries: {e}")
+                continue
 
         # Concatenate all dataframes
         income_df = pd.concat(income_dfs, ignore_index=True) if income_dfs else pd.DataFrame()
@@ -369,268 +324,131 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
 
         return income_df, balance_df, cashflow_df, fina_df
 
-def get_quarterly_value(data_dict, key, period):
+def calculate_quarterly_values(group, columns):
+    """Calculate quarterly values using vectorized operations within each year"""
+    group = group.sort_values('report_period')
+    group['year'] = group['report_period'].str[:4]
+    for col in columns:
+        group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
+    return group.drop(columns=['year'])
+
+def calculate_ttm_indicators(df):
     """
-    Extract quarterly value from cumulative data.
-    This function calculates the actual quarterly value by subtracting previous cumulative values.
+    Vectorized calculation of TTM indicators.
+    Assumes df has 'ts_code', 'report_period', and required columns.
+    Returns df with added TTM columns.
     """
-    if period.endswith('0331'):  # Q1 is already quarterly
-        return data_dict.get(period, {}).get(key, 0)
-    elif period.endswith('0630'):  # H1 - Q1
-        current = data_dict.get(period, {}).get(key, 0)
-        q1_period = period[:4] + '0331'
-        q1_value = data_dict.get(q1_period, {}).get(key, 0)
-        return current - q1_value
-    elif period.endswith('0930'):  # Q1-Q3 - H1
-        current = data_dict.get(period, {}).get(key, 0)
-        h1_period = period[:4] + '0630'
-        h1_value = data_dict.get(h1_period, {}).get(key, 0)
-        return current - h1_value
-    elif period.endswith('1231'):  # Full year - Q1-Q3
-        current = data_dict.get(period, {}).get(key, 0)
-        q3_period = period[:4] + '0930'
-        q3_value = data_dict.get(q3_period, {}).get(key, 0)
-        return current - q3_value
-    return 0
+    if df.empty:
+        return df
 
+    # 转换为datetime以便处理时间序列
+    df['report_date'] = pd.to_datetime(df['report_period'], format='%Y%m%d')
 
-def check_consecutive_quarters(periods, target_period):
-    """
-    Check if we have 4 consecutive quarters ending with target_period.
-    Returns the 4 consecutive quarters if available, otherwise empty list.
-    """
-    if not periods:
-        return []
+    # 为每个ts_code补全中间缺失的季度序列
+    def complete_quarters(group):
+        # 找到实际存在数据的日期范围
+        existing_dates = group['report_date'].dropna().sort_values()
 
-    # Convert all periods to quarter tuples for easier processing
-    def period_to_quarter(period):
-        year = int(period[:4])
-        month_day = period[4:]
-        if month_day == '0331':
-            return (year, 1)
-        elif month_day == '0630':
-            return (year, 2)
-        elif month_day == '0930':
-            return (year, 3)
-        elif month_day == '1231':
-            return (year, 4)
-        return None
+        if len(existing_dates) < 2:
+            # 如果数据点太少，无法确定补全范围，直接返回原数据
+            return group
 
-    # Get target quarter
-    target_quarter = period_to_quarter(target_period)
-    if not target_quarter:
-        return []
+        min_date = existing_dates.min()
+        max_date = existing_dates.max()
 
-    # Convert all available periods to quarters and sort chronologically
-    available_quarters = []
-    period_to_quarter_map = {}
+        # 生成从最早数据到最晚数据的完整季度末序列
+        full_dates = pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
+        full_df = pd.DataFrame({'report_date': full_dates})
+        full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
+        full_df['ts_code'] = group['ts_code'].iloc[0]  # 添加ts_code
 
-    for p in periods:
-        q = period_to_quarter(p)
-        if q:
-            available_quarters.append(q)
-            period_to_quarter_map[q] = p
+        # 左合并原数据，缺失处NA
+        merged = pd.merge(full_df, group, on=['ts_code', 'report_period', 'report_date'], how='left')
 
-    available_quarters.sort()  # Sort chronologically (earliest first)
+        # 只记录实际缺失的中间数据（不是两头的）
+        missing_periods = merged[merged['n_income_attr_p'].isna()]['report_period'].tolist()
 
-    # Find target quarter in available quarters
-    if target_quarter not in available_quarters:
-        return []
+        # 过滤掉两头的缺失数据：如果某个时期在现有数据的最小日期之前或最大日期之后，则不算作缺失
+        existing_periods = set(group['report_period'].dropna())
+        if existing_periods:
+            min_existing_period = min(existing_periods)
+            max_existing_period = max(existing_periods)
 
-    target_idx = available_quarters.index(target_quarter)
+            # 只保留在现有数据范围内的缺失时期
+            filtered_missing = [
+                period for period in missing_periods
+                if min_existing_period <= period <= max_existing_period
+            ]
 
-    # Need 4 consecutive quarters ending with target quarter
-    # So we need quarters: target_idx-3, target_idx-2, target_idx-1, target_idx
-    if target_idx < 3:
-        return []  # Not enough previous quarters
+            if filtered_missing:
+                logger.warning(f"Inserted NA for missing intermediate periods in {group['ts_code'].iloc[0]}: {filtered_missing}")
 
-    candidate_quarters = available_quarters[target_idx-3:target_idx+1]
+        return merged
+    df = df.groupby('ts_code').apply(complete_quarters).reset_index(drop=True)
+    # 填充NA：flow填0，stock ffill/bfill
+    flow_cols = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act', 'total_cogs', 'oper_cost']
+    stock_cols = ['total_hldr_eqy_exc_min_int', 'total_assets', 'total_share']
+    df[flow_cols] = df[flow_cols].fillna(0)
+    df[stock_cols] = df.groupby('ts_code')[stock_cols].ffill().bfill()
 
-    # Check if these 4 quarters are consecutive
-    for i in range(3):
-        curr_year, curr_q = candidate_quarters[i]
-        next_year, next_q = candidate_quarters[i + 1]
+    quarterly_columns = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act', 
+                         'total_cogs', 'oper_cost']
+    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, quarterly_columns)).reset_index(drop=True)
 
-        # Check consecutive quarters
-        if not ((next_year == curr_year and next_q == curr_q + 1) or
-                (next_year == curr_year + 1 and curr_q == 4 and next_q == 1)):
-            return []
+    # Sort by ts_code and report_period
+    df = df.sort_values(['ts_code', 'report_period'])
 
-    # Return the corresponding periods in reverse chronological order (most recent first)
-    result_periods = [period_to_quarter_map[q] for q in candidate_quarters[::-1]]
-    return result_periods
+    # Calculate rolling TTM sums for quarterly values
+    ttm_columns = {col: 'ttm_' + col for col in quarterly_columns}
+    for q_col, ttm_col in ttm_columns.items():
+        df[ttm_col] = df.groupby('ts_code')['q_' + q_col].rolling(window=4, min_periods=4).sum().reset_index(level=0, drop=True)
 
+    # Drop rows where TTM is NaN (insufficient history)
+    #df = df.dropna(subset=list(ttm_columns.values()))
 
-def calculate_ttm_indicators(stock_df, report_period):
-    """
-    Calculate TTM (Trailing Twelve Months) indicators for a given report period.
-    stock_df should contain data for a single stock.
-    Only calculates if we have complete consecutive quarterly data for the past 4 quarters.
-    Returns a dictionary of TTM indicators, or empty dict if data is incomplete.
-    """
-    if stock_df.empty:
-        return {}
+    # Calculate TTM gross
+    df['ttm_gross'] = df['ttm_total_revenue'] - df['ttm_oper_cost']
 
-    # stock_df is already filtered for a single stock
-    stock_data = stock_df.sort_values('report_period')
+    # Per-share calculations (vectorized)
+    df['eps_ttm'] = np.where(df['total_share'] > 0, df['ttm_n_income_attr_p'] / df['total_share'], 0)
+    df['revenue_ps_ttm'] = np.where(df['total_share'] > 0, df['ttm_total_revenue'] / df['total_share'], 0)
+    df['ocfps_ttm'] = np.where(df['total_share'] > 0, df['ttm_im_net_cashflow_oper_act'] / df['total_share'], 0)
+    df['cfps_ttm'] = df['ocfps_ttm']  # Assuming CFPS uses OCF
 
-    # Convert to data dict for easier access
-    data_dict = {}
-    for _, row in stock_data.iterrows():
-        period = row['report_period']
-        data_dict[period] = {
-            'n_income_attr_p': row.get('n_income_attr_p', 0),
-            'total_revenue': row.get('total_revenue', 0),
-            'revenue': row.get('revenue', row.get('total_revenue', 0)),
-            'im_net_cashflow_oper_act': row.get('im_net_cashflow_oper_act', row.get('n_cashflow_act', 0)),
-            'n_cashflow_act': row.get('n_cashflow_act', 0),
-            'total_cogs': row.get('total_cogs', 0),
-            'oper_cost': row.get('oper_cost', 0),
-            'total_hldr_eqy_exc_min_int': row.get('total_hldr_eqy_exc_min_int', 0),
-            'total_assets': row.get('total_assets', 0),
-            'total_share': row.get('total_share', 0)
-        }
+    # ROE and ROA (using period-end values)
+    df['roe_ttm'] = np.where(df['total_hldr_eqy_exc_min_int'] > 0, 
+                             (df['ttm_n_income_attr_p'] / df['total_hldr_eqy_exc_min_int']) * 100, 0)
+    df['roa_ttm'] = np.where(df['total_assets'] > 0, 
+                             (df['ttm_n_income_attr_p'] / df['total_assets']) * 100, 0)
 
-    # Get all available periods up to report_period
-    available_periods = [p for p in data_dict.keys() if p <= report_period]
+    # Margins
+    df['netprofit_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0, 
+                                          (df['ttm_n_income_attr_p'] / df['ttm_total_revenue']) * 100, 0)
+    df['grossprofit_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0, 
+                                            (df['ttm_gross'] / df['ttm_total_revenue']) * 100, 0)
 
-    # Check for consecutive quarters
-    ttm_periods = check_consecutive_quarters(available_periods, report_period)
+    # CAGR (3-year, same quarter)
+    df['revenue_3y_ago'] = df.groupby('ts_code')['total_revenue'].shift(12)
+    df['ni_3y_ago'] = df.groupby('ts_code')['n_income_attr_p'].shift(12)
+    
+    mask_rev = (df['revenue_3y_ago'] > 0) & (df['total_revenue'] > 0)
+    df['revenue_cagr_3y'] = np.where(mask_rev, 
+                                     ((df['total_revenue'] / df['revenue_3y_ago']) ** (1/3) - 1) * 100, np.nan)
+    
+    mask_ni = (df['ni_3y_ago'] > 0) & (df['n_income_attr_p'] > 0)
+    df['netincome_cagr_3y'] = np.where(mask_ni, 
+                                       ((df['n_income_attr_p'] / df['ni_3y_ago']) ** (1/3) - 1) * 100, np.nan)
 
-    if len(ttm_periods) != 4:
-        # Not enough consecutive quarterly data for TTM calculation
-        return {}
+    # Round results
+    round_cols = ['eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm', 'roe_ttm', 'roa_ttm', 
+                  'netprofit_margin_ttm', 'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y']
+    df[round_cols] = df[round_cols].round(4)
 
-    # Calculate quarterly values for the TTM periods
-    q_net = {}
-    q_rev = {}
-    q_ocf = {}
-    q_cogs = {}
-    q_oper_cost = {}
+    # Drop temporary columns
+    drop_cols = list(ttm_columns.values()) + ['ttm_gross', 'revenue_3y_ago', 'ni_3y_ago'] + ['q_' + col for col in quarterly_columns]
+    #df = df.drop(columns=drop_cols, errors='ignore')
 
-    for p in ttm_periods:
-        q_net[p] = get_quarterly_value(data_dict, 'n_income_attr_p', p)
-        q_rev[p] = get_quarterly_value(data_dict, 'total_revenue', p)
-        q_ocf[p] = get_quarterly_value(data_dict, 'im_net_cashflow_oper_act', p)
-        q_cogs[p] = get_quarterly_value(data_dict, 'total_cogs', p)
-        q_oper_cost[p] = get_quarterly_value(data_dict, 'oper_cost', p)
-
-    # Calculate TTM totals
-    ttm_net = sum(q_net.get(p, 0) for p in ttm_periods)
-    ttm_rev = sum(q_rev.get(p, 0) for p in ttm_periods)
-    ttm_ocf = sum(q_ocf.get(p, 0) for p in ttm_periods)
-    ttm_cogs = sum(q_cogs.get(p, 0) for p in ttm_periods)
-    ttm_oper_cost = sum(q_oper_cost.get(p, 0) for p in ttm_periods)
-    ttm_gross = ttm_rev - ttm_oper_cost
-    logger.debug(f"report_period: {report_period}, ttm_rev: {ttm_rev}, ttm_cogs: {ttm_cogs}")
-
-    # Get shares (use the most recent period's shares)
-    shares = data_dict.get(report_period, {}).get('total_share', 0)
-    if shares == 0:
-        # Fallback to other periods
-        for p in ttm_periods:
-            shares = data_dict.get(p, {}).get('total_share', 0)
-            if shares > 0:
-                break
-
-    if shares == 0:
-        return {}
-
-    # Calculate per-share TTM indicators
-    eps_ttm = ttm_net / shares if shares > 0 else 0
-    revenue_ps_ttm = ttm_rev / shares if shares > 0 else 0
-    ocfps_ttm = ttm_ocf / shares if shares > 0 else 0
-    cfps_ttm = ttm_ocf / shares if shares > 0 else 0  # Using OCF as CFPS
-
-    # Calculate ROE_TTM and ROA_TTM
-    # Use average equity/assets over the TTM period
-    equity_values = []
-    asset_values = []
-
-    for p in ttm_periods:
-        eq = data_dict.get(p, {}).get('total_hldr_eqy_exc_min_int', 0)
-        assets = data_dict.get(p, {}).get('total_assets', 0)
-        if eq > 0:
-            equity_values.append(eq)
-        if assets > 0:
-            asset_values.append(assets)
-
-    roe_ttm = (ttm_net / equity_values[0] * 100) if equity_values and equity_values[0] > 0 else 0
-    roa_ttm = (ttm_net / asset_values[0] * 100) if asset_values and asset_values[0] > 0 else 0
-    # Calculate margin ratios
-    netprofit_margin_ttm = (ttm_net / ttm_rev * 100) if ttm_rev > 0 else 0
-    logger.debug(f"ttm_gross: {ttm_gross}, ttm_rev: {ttm_rev}")
-    grossprofit_margin_ttm = (ttm_gross / ttm_rev * 100) if ttm_rev > 0 else 0
-
-    # Calculate 3-year CAGR (36 months) for revenue and net income
-    # Compare current period with the same period 3 years ago
-    revenue_cagr_3y = None
-    ni_cagr_3y = None
-
-    # Calculate the period 3 years ago (same quarter)
-    def get_period_3_years_ago(period):
-        """Get the same period 3 years ago"""
-        try:
-            year = int(period[:4]) - 3
-            month_day = period[4:]
-            return f"{year}{month_day}"
-        except (ValueError, IndexError):
-            return None
-
-    start_period = get_period_3_years_ago(report_period)
-
-    if start_period and start_period in data_dict:
-        # Get values for current period and 3 years ago
-        start_revenue = data_dict.get(start_period, {}).get('total_revenue', 0)
-        end_revenue = data_dict.get(report_period, {}).get('total_revenue', 0)
-
-        start_ni = data_dict.get(start_period, {}).get('n_income_attr_p', 0)
-        end_ni = data_dict.get(report_period, {}).get('n_income_attr_p', 0)
-
-        logger.debug(f"CAGR calculation: {start_period} -> {report_period}")
-        logger.debug(f"Revenue: {start_revenue} -> {end_revenue}")
-        logger.debug(f"NI: {start_ni} -> {end_ni}")
-
-        # Calculate 3-year CAGR for revenue
-        if start_revenue > 0 and end_revenue > 0:
-            try:
-                cagr_ratio = (end_revenue / start_revenue) ** (1/3) - 1
-                # Check if result is complex (shouldn't happen with positive inputs, but safety check)
-                if isinstance(cagr_ratio, complex):
-                    revenue_cagr_3y = None
-                else:
-                    revenue_cagr_3y = round(float(cagr_ratio) * 100, 4)  # Convert to percentage
-            except (ValueError, OverflowError, ZeroDivisionError):
-                revenue_cagr_3y = None
-
-        # Calculate 3-year CAGR for net income
-        if start_ni > 0 and end_ni > 0:  # Both must be positive for meaningful CAGR
-            try:
-                cagr_ratio = (end_ni / start_ni) ** (1/3) - 1
-                # Check if result is complex (shouldn't happen with positive inputs, but safety check)
-                if isinstance(cagr_ratio, complex):
-                    ni_cagr_3y = None
-                else:
-                    ni_cagr_3y = round(float(cagr_ratio) * 100, 4)  # Convert to percentage
-            except (ValueError, OverflowError, ZeroDivisionError):
-                ni_cagr_3y = None
-        else:
-            # If either value is not positive, CAGR calculation doesn't make sense
-            ni_cagr_3y = None
-
-    return {
-        'eps_ttm': round(eps_ttm, 4),
-        'revenue_ps_ttm': round(revenue_ps_ttm, 4),
-        'ocfps_ttm': round(ocfps_ttm, 4),
-        'cfps_ttm': round(cfps_ttm, 4),
-        'roe_ttm': round(roe_ttm, 4),
-        'roa_ttm': round(roa_ttm, 4),
-        'netprofit_margin_ttm': round(netprofit_margin_ttm, 4),
-        'grossprofit_margin_ttm': round(grossprofit_margin_ttm, 4),
-        'revenue_cagr_3y': revenue_cagr_3y,
-        'netincome_cagr_3y': ni_cagr_3y
-    }
-
+    return df
 
 def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks):
     """Compute extended basic indicators from primitives"""
@@ -638,7 +456,7 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
         return pd.DataFrame()
 
     # Filter by stocks if specified
-    if stocks is not None:
+    if stocks:
         stock_list = [s.strip() for s in stocks.split(',') if s.strip()]
         if stock_list:
             logger.info(f"Filtering data for stocks: {stock_list}")
@@ -679,47 +497,13 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
         print(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
         print(f"Available columns in fina_df: {list(fina_df.columns)}")
         return pd.DataFrame()
-        df = df.copy()
+    df = df.copy()
 
-        # Debug: Print available columns for key calculations
-        logger.debug(f"Available columns in merged df: {len(df.columns)} total")
-        cash_fields = [col for col in df.columns if 'cash' in col.lower() or 'money' in col.lower() or 'trad' in col.lower()]
-        interest_fields = [col for col in df.columns if 'int' in col.lower() or 'fin' in col.lower() or 'interest' in col.lower()]
-        logger.debug(f"Cash-related fields available: {cash_fields}")
-        logger.debug(f"Interest-related fields available: {interest_fields}")
-
-    for field in df.columns:
-        field_null_count = df[field].isna().sum()
-        logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
-
-    # Calculate TTM indicators for each stock and period
+    # Calculate TTM indicators vectorized
     print("Calculating TTM (Trailing Twelve Months) indicators...")
-    ttm_indicators = []
+    df = calculate_ttm_indicators(df)
 
-    # Group by stock to calculate TTM for each stock
-    for stock_code, stock_df in df.groupby('ts_code'):
-        stock_df = stock_df.sort_values('report_period')
-
-        for _, row in stock_df.iterrows():
-            report_period = row['report_period']
-            ttm_result = calculate_ttm_indicators(stock_df, report_period)
-
-            if ttm_result:
-                ttm_row = {
-                    'ts_code': stock_code,
-                    'report_period': report_period,
-                    **ttm_result
-                }
-                ttm_indicators.append(ttm_row)
-
-    # Convert TTM indicators to DataFrame and merge with main df
-    if ttm_indicators:
-        ttm_df = pd.DataFrame(ttm_indicators)
-        df = df.merge(ttm_df, on=['ts_code', 'report_period'], how='left')
-        print(f"Added TTM indicators for {len(ttm_df)} stock-period combinations")
-    else:
-        print("No TTM indicators calculated (insufficient quarterly data)")
-
+    df['netprofit_yoy'] = df['netprofit_yoy'].fillna(0)
     df['equity_growth_yoy'] = df['equity_yoy'].fillna(0)
     df['oper_rev_yoy'] = df['or_yoy'].fillna(0)
     df['debt_to_assets'] = df['debt_to_assets'].fillna(0)
@@ -765,34 +549,24 @@ def deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df):
         if not df.empty and len(df) > 0 and 'ts_code' in df.columns and 'report_period' in df.columns:
             initial_count = len(df)
 
-            # Debug: Check for duplicates before removal
-            duplicate_check = df.groupby(['ts_code', 'report_period']).size()
-            duplicates_found = duplicate_check[duplicate_check > 1]
+            # Remove duplicates using groupby and last
+            df = df.groupby(['ts_code', 'report_period'], as_index=False).last()
+            final_count = len(df)
 
-            if len(duplicates_found) > 0:
-                print(f"Found {len(duplicates_found)} duplicate groups in {name} before removal:")
-                for (ts_code, report_period), count in duplicates_found.items():
-                    print(f"  {ts_code} {report_period}: {count} duplicates")
+            if final_count < initial_count:
+                print(f"Removed {initial_count - final_count} duplicates from {name}, kept {final_count} unique records (latest)")
 
-                # Remove duplicates, keeping the last record (potentially more updated/corrected data)
-                df = df.drop_duplicates(subset=['ts_code', 'report_period'], keep='last')
-                final_count = len(df)
-
-                if final_count < initial_count:
-                    print(f"Removed {initial_count - final_count} duplicates from {name}, kept {final_count} unique records (latest)")
-
-                # Update the dataframe variable
-                if name == "income_df":
-                    income_df = df
-                elif name == "balance_df":
-                    balance_df = df
-                elif name == "cashflow_df":
-                    cashflow_df = df
-                elif name == "fina_df":
-                    fina_df = df
+            # Update the dataframe variable
+            if name == "income_df":
+                income_df = df
+            elif name == "balance_df":
+                balance_df = df
+            elif name == "cashflow_df":
+                cashflow_df = df
+            elif name == "fina_df":
+                fina_df = df
 
     return income_df, balance_df, cashflow_df, fina_df
-
 
 def cross_validate_indicators(computed_df, fina_df):
     """Cross-validate: computed vs API (extended)"""
@@ -978,7 +752,7 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
     income_df, balance_df, cashflow_df, fina_df = fetch_tushare_data(stocks, periods)
 
     # Deduplicate dataframes to ensure data quality
-    print("1.5. Deduplicating data...")
+    print("1. Deduplicating data...")
     logger.info(f"income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
     income_df, balance_df, cashflow_df, fina_df = deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df)
     logger.info(f"after deduplicate, income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
@@ -1025,8 +799,6 @@ def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '2
         validation_df.to_csv(f'{stock_name}_extended_validation.csv', index=False)
         computed_df.to_csv(f'{stock_name}_extended_computed.csv', index=False)
         print(f"\nSaved: {stock_name}_extended_validation.csv & {stock_name}_extended_computed.csv")
-
-
 
 # Example run and test
 if __name__ == "__main__":
