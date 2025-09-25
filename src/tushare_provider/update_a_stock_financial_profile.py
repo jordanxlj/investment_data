@@ -337,7 +337,7 @@ def calculate_ttm_indicators(df):
         # 生成从最早数据到最晚数据的完整季度末序列
         full_dates = pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
         full_df = pd.DataFrame({'report_date': full_dates})
-        full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
+        #full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
         full_df['ts_code'] = ts_code  # 添加ts_code
 
         # 左合并原数据，缺失处NA
