@@ -331,6 +331,22 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   tmv                       DECIMAL(16,4) NULL,
   lmv                       DECIMAL(16,4) NULL,
 
+  -- TTM (Trailing Twelve Months) indicators
+  eps_ttm                   FLOAT NULL COMMENT 'TTM每股收益(元)',
+  revenue_ps_ttm            FLOAT NULL COMMENT 'TTM每股营收(元)',
+  ocfps_ttm                 FLOAT NULL COMMENT 'TTM每股经营现金流(元)',
+  cfps_ttm                  FLOAT NULL COMMENT 'TTM每股现金流(元)',
+  roe_ttm                   FLOAT NULL COMMENT 'TTM净资产收益率(%)',
+  roa_ttm                   FLOAT NULL COMMENT 'TTM总资产报酬率(%)',
+  netprofit_margin_ttm      FLOAT NULL COMMENT 'TTM净利率(%)',
+  grossprofit_margin_ttm    FLOAT NULL COMMENT 'TTM毛利率(%)',
+  revenue_cagr_3y           FLOAT NULL COMMENT '营收三年复合增长率(%)',
+  netincome_cagr_3y         FLOAT NULL COMMENT '净利润三年复合增长率(%)',
+  roic_ttm                  FLOAT NULL COMMENT 'TTM投资回报率(%)',
+  fcf_ttm                   DECIMAL(16,4) NULL COMMENT 'TTM自由现金流(万元)',
+  fcf_margin_ttm            FLOAT NULL COMMENT 'TTM自由现金流率(%)',
+  debt_to_ebitda_ttm        FLOAT NULL COMMENT 'TTM债务/EBITDA比率',
+
   PRIMARY KEY (ts_code, report_period),
   INDEX idx_ann_date (ann_date),
   INDEX idx_report_period (report_period),
@@ -432,7 +448,13 @@ INDICATOR_COLUMNS = [
     "longdebt_to_workingcapital", "capitalized_to_da",
 
     # Valuation indicators
-    "current_exint", "non_current_exint", "intrinsicvalue", "tmv", "lmv"
+    "current_exint", "non_current_exint", "intrinsicvalue", "tmv", "lmv",
+
+    # TTM (Trailing Twelve Months) indicators
+    "eps_ttm", "revenue_ps_ttm", "ocfps_ttm", "cfps_ttm",
+    "roe_ttm", "roa_ttm", "netprofit_margin_ttm", "grossprofit_margin_ttm",
+    "revenue_cagr_3y", "netincome_cagr_3y",
+    "roic_ttm", "fcf_ttm", "fcf_margin_ttm", "debt_to_ebitda_ttm"
 ]
 
 # === Data source field configuration ===
@@ -479,6 +501,9 @@ YUAN_TO_WAN_FIELDS = [
     # Other monetary amounts
     'profit_prefin_exp', 'non_op_profit', 'fixed_assets',
 
+    # TTM monetary amounts
+    'fcf_ttm',
+
     # Valuation indicators
     'current_exint', 'non_current_exint', 'intrinsicvalue', 'tmv', 'lmv'
 ]
@@ -488,6 +513,285 @@ PER_SHARE_FIELDS = [
     'eps', 'dt_eps', 'basic_eps', 'q_eps',
     'bps', 'ocfps', 'retainedps', 'cfps', 'ebit_ps', 'fcff_ps', 'fcfe_ps'
 ]
+
+# TTM indicator fields to add to database schema
+TTM_COLUMNS = [
+    # TTM basic financial indicators
+    'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
+    'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
+
+    # TTM growth indicators
+    'revenue_cagr_3y', 'netincome_cagr_3y',
+
+    # TTM efficiency and quality indicators
+    'roic_ttm', 'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+]
+
+
+def calculate_quarterly_values(group, columns):
+    """Calculate quarterly values using vectorized operations within each year"""
+    group = group.sort_values('report_period')
+    group['year'] = group['report_period'].str[:4]
+    for col in columns:
+        group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
+    return group.drop(columns=['year'])
+
+
+def calculate_ttm_indicators(df):
+    """
+    Vectorized calculation of TTM indicators.
+    Assumes df has 'ts_code', 'report_period', and required columns.
+    Returns df with added TTM columns.
+    """
+    if df.empty:
+        return df
+
+    # 转换为datetime以便处理时间序列
+    df['report_date'] = pd.to_datetime(df['report_period'], format='%Y%m%d')
+
+    # 为每个ts_code补全中间缺失的季度序列
+    def complete_quarters(ts_code_group):
+        ts_code, group = ts_code_group
+
+        # 找到实际存在数据的日期范围
+        existing_dates = group['report_date'].dropna().sort_values()
+
+        if len(existing_dates) < 2:
+            # 如果数据点太少，无法确定补全范围，直接返回原数据
+            group_copy = group.copy()
+            group_copy['missing'] = 0  # 标记为非缺失
+            group_copy['missing_type'] = 'insufficient_data'
+            return group_copy
+
+        min_date = existing_dates.min()
+        max_date = existing_dates.max()
+
+        # 生成从最早数据到最晚数据的完整季度末序列
+        full_dates = pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
+        full_df = pd.DataFrame({'report_date': full_dates})
+        full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
+        full_df['ts_code'] = ts_code  # 添加ts_code
+
+        # 左合并原数据，缺失处NA
+        merged = pd.merge(full_df, group, on=['ts_code', 'report_period', 'report_date'], how='left')
+
+        # 分析缺失模式
+        missing_mask = merged['n_income_attr_p'].isna()
+        merged['missing'] = missing_mask.astype(int)
+
+        # 识别缺失类型
+        merged['missing_type'] = 'none'
+        merged.loc[missing_mask, 'missing_type'] = 'data_missing'
+
+        # 进一步分类缺失类型
+        existing_periods = set(group['report_period'].dropna())
+        if existing_periods:
+            min_existing_period = min(existing_periods)
+            max_existing_period = max(existing_periods)
+
+            # 两头缺失：数据范围外的缺失
+            outside_range = (merged['report_period'] < min_existing_period) | (merged['report_period'] > max_existing_period)
+            merged.loc[missing_mask & outside_range, 'missing_type'] = 'edge_missing'
+
+            # 中间缺失：数据范围内的缺失
+            inside_range = (merged['report_period'] >= min_existing_period) & (merged['report_period'] <= max_existing_period)
+            merged.loc[missing_mask & inside_range, 'missing_type'] = 'intermediate_missing'
+
+            # 记录不同类型的缺失
+            intermediate_missing = merged[(merged['missing_type'] == 'intermediate_missing')]
+            if not intermediate_missing.empty:
+                missing_periods = intermediate_missing['report_period'].tolist()
+                print(f"⚠️  {ts_code}: 中间数据缺失 {len(missing_periods)} 个季度: {missing_periods}")
+
+        # 统计缺失情况
+        missing_stats = merged['missing_type'].value_counts()
+        if missing_stats.get('intermediate_missing', 0) > 0:
+            print(f"📊 {ts_code}: 缺失统计 - 中间:{missing_stats.get('intermediate_missing', 0)}, 边缘:{missing_stats.get('edge_missing', 0)}, 数据:{missing_stats.get('data_missing', 0)}")
+
+        return merged
+
+    # 使用itertools.groupby来避免pandas groupby的FutureWarning
+    import itertools
+    df = df.sort_values(['ts_code', 'report_date'])
+    groups = []
+    for ts_code, group in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
+        group_df = pd.DataFrame([row[1] for row in group])
+        groups.append((ts_code, group_df))
+
+    completed_groups = [complete_quarters((ts_code, group)) for ts_code, group in groups]
+    df = pd.concat(completed_groups, ignore_index=True)
+
+    # 智能填充NA数据，根据缺失类型采用不同策略
+    print("🔄 开始智能数据填充...")
+
+    # 1. 流数据（flow data）：收入、成本、现金流等
+    # 中间缺失使用插值，两头缺失保持为0（表示该时期没有数据）
+    flow_cols = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act']
+    optional_flow_cols = ['total_cogs', 'oper_cost']
+    for col in optional_flow_cols:
+        if col in df.columns:
+            flow_cols.append(col)
+
+    for col in flow_cols:
+        if col in df.columns:
+            # 对于中间缺失，使用线性插值
+            intermediate_mask = df['missing_type'] == 'intermediate_missing'
+            if intermediate_mask.any():
+                # 对每个股票分别进行插值
+                df[col] = df.groupby('ts_code')[col].transform(lambda x: x.interpolate(method='linear', limit_direction='both'))
+
+            # 对于两头缺失和数据缺失，填充为0（表示该时期没有发生）
+            edge_data_mask = (df['missing_type'] == 'edge_missing') | (df['missing_type'] == 'data_missing')
+            df.loc[edge_data_mask, col] = df.loc[edge_data_mask, col].fillna(0)
+
+    # 2. 存量数据（stock data）：资产、负债、股权等
+    # 使用前向填充，然后后向填充，确保连续性
+    stock_cols = ['total_hldr_eqy_exc_min_int', 'total_assets', 'total_share']
+    for col in stock_cols:
+        if col in df.columns:
+            # 使用transform来避免groupby的FutureWarning
+            df[col] = df.groupby('ts_code')[col].transform(lambda x: x.ffill().bfill())
+
+    # 3. 特殊处理：某些关键指标如果仍然缺失，使用行业平均或其他方法
+    # 这里可以添加更复杂的填充逻辑
+
+    # 统计填充结果
+    remaining_na = df[flow_cols + stock_cols].isna().sum().sum()
+    if remaining_na > 0:
+        print(f"⚠️  仍有 {remaining_na} 个值未填充")
+    else:
+        print("✅ 数据填充完成，无剩余缺失值")
+
+    quarterly_columns = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act']
+    # Add optional quarterly columns that might not exist in all datasets
+    optional_quarterly_cols = ['total_cogs', 'oper_cost']
+    for col in optional_quarterly_cols:
+        if col in df.columns:
+            quarterly_columns.append(col)
+
+    # 使用itertools.groupby来避免pandas groupby的FutureWarning
+    df = df.sort_values(['ts_code', 'report_period'])
+    groups = []
+    for ts_code, group in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
+        group_df = pd.DataFrame([row[1] for row in group])
+        groups.append((ts_code, group_df))
+
+    processed_groups = [calculate_quarterly_values(group, quarterly_columns) for ts_code, group in groups]
+    df = pd.concat(processed_groups, ignore_index=True)
+
+    # Sort by ts_code and report_period
+    df = df.sort_values(['ts_code', 'report_period'])
+
+    # Calculate rolling TTM sums for quarterly values
+    ttm_columns = {col: 'ttm_' + col for col in quarterly_columns}
+    for q_col, ttm_col in ttm_columns.items():
+        df[ttm_col] = df.groupby('ts_code')['q_' + q_col].rolling(window=4, min_periods=4).sum().reset_index(level=0, drop=True)
+
+    # Drop rows where TTM is NaN (insufficient history)
+    #df = df.dropna(subset=list(ttm_columns.values()))
+
+    # Calculate TTM gross (only if oper_cost data is available)
+    if 'ttm_oper_cost' in df.columns:
+        df['ttm_gross'] = df['ttm_total_revenue'] - df['ttm_oper_cost']
+    else:
+        df['ttm_gross'] = df['ttm_total_revenue']  # Fallback if no cost data
+
+    # Per-share calculations (vectorized)
+    df['eps_ttm'] = np.where(df['total_share'] > 0, df['ttm_n_income_attr_p'] / df['total_share'], 0)
+    df['revenue_ps_ttm'] = np.where(df['total_share'] > 0, df['ttm_total_revenue'] / df['total_share'], 0)
+    df['ocfps_ttm'] = np.where(df['total_share'] > 0, df['ttm_im_net_cashflow_oper_act'] / df['total_share'], 0)
+    df['cfps_ttm'] = df['ocfps_ttm']  # Assuming CFPS uses OCF
+
+    # ROE and ROA (using period-end values)
+    df['roe_ttm'] = np.where(df['total_hldr_eqy_exc_min_int'] > 0,
+                             (df['ttm_n_income_attr_p'] / df['total_hldr_eqy_exc_min_int']) * 100, 0)
+    df['roa_ttm'] = np.where(df['total_assets'] > 0,
+                             (df['ttm_n_income_attr_p'] / df['total_assets']) * 100, 0)
+
+    # Margins
+    df['netprofit_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0,
+                                          (df['ttm_n_income_attr_p'] / df['ttm_total_revenue']) * 100, 0)
+    # Gross margin only if cost data is available
+    if 'ttm_oper_cost' in df.columns:
+        df['grossprofit_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0,
+                                                (df['ttm_gross'] / df['ttm_total_revenue']) * 100, 0)
+    else:
+        df['grossprofit_margin_ttm'] = np.nan
+
+    # CAGR (3-year, same quarter) with special handling for negative values
+    df['revenue_3y_ago'] = df.groupby('ts_code')['total_revenue'].shift(12)
+    df['ni_3y_ago'] = df.groupby('ts_code')['n_income_attr_p'].shift(12)
+
+    # Revenue CAGR calculation with negative value handling
+    df['revenue_cagr_3y'] = np.nan
+
+    # Both positive (normal CAGR)
+    mask_both_positive = (df['revenue_3y_ago'] > 0) & (df['total_revenue'] > 0)
+    df.loc[mask_both_positive, 'revenue_cagr_3y'] = (
+        (df.loc[mask_both_positive, 'total_revenue'] / df.loc[mask_both_positive, 'revenue_3y_ago']) ** (1/3) - 1
+    ) * 100
+
+    # Net Income CAGR calculation with similar logic
+    df['netincome_cagr_3y'] = np.nan
+
+    # Both positive (normal CAGR)
+    mask_both_positive_ni = (df['ni_3y_ago'] > 0) & (df['n_income_attr_p'] > 0)
+    df.loc[mask_both_positive_ni, 'netincome_cagr_3y'] = (
+        (df.loc[mask_both_positive_ni, 'n_income_attr_p'] / df.loc[mask_both_positive_ni, 'ni_3y_ago']) ** (1/3) - 1
+    ) * 100
+
+    # Calculate additional TTM efficiency and quality indicators
+
+    # ROIC TTM (Return on Invested Capital)
+    # ROIC = (Net Operating Profit After Tax) / (Total Debt + Total Equity - Cash)
+    # Using EBIT(1-tax_rate) / Invested Capital approximation
+    if 'ebit' in df.columns and 'income_tax' in df.columns:
+        # Estimate tax rate and NOPAT
+        tax_rate = df['income_tax'] / df['ebit'].where(df['ebit'] != 0, 1)
+        tax_rate = tax_rate.fillna(0.25)  # Default 25% tax rate
+        nopat = df['ebit'] * (1 - tax_rate)
+
+        # Invested capital = Total debt + Total equity
+        invested_capital = df['total_liab'] + df['total_hldr_eqy_inc_min_int']
+        df['roic_ttm'] = np.where(invested_capital > 0, (nopat / invested_capital) * 100, np.nan)
+    else:
+        df['roic_ttm'] = np.nan
+
+    # FCF TTM (Free Cash Flow) - approximation using available data
+    # FCF = Operating Cash Flow - CapEx
+    if 'n_cashflow_act' in df.columns and 'c_pay_acq_const_fiolta' in df.columns:
+        df['fcf_ttm'] = df['n_cashflow_act'] - df['c_pay_acq_const_fiolta'].fillna(0)
+    elif 'n_cashflow_act' in df.columns:
+        df['fcf_ttm'] = df['n_cashflow_act'] * 0.8  # Rough approximation
+    else:
+        df['fcf_ttm'] = np.nan
+
+    # FCF Margin TTM
+    df['fcf_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0,
+                                    (df['fcf_ttm'] / df['ttm_total_revenue']) * 100, np.nan)
+
+    # Debt to EBITDA TTM ratio
+    if 'total_liab' in df.columns and 'ebitda' in df.columns:
+        df['debt_to_ebitda_ttm'] = np.where(df['ebitda'] > 0, df['total_liab'] / df['ebitda'], np.nan)
+    else:
+        df['debt_to_ebitda_ttm'] = np.nan
+
+    # Round results
+    round_cols = ['eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm', 'roe_ttm', 'roa_ttm',
+                  'netprofit_margin_ttm', 'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y',
+                  'roic_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm']
+    df[round_cols] = df[round_cols].round(4)
+
+    # Remove filled rows (missing=1) after calculations are complete
+    if 'missing' in df.columns:
+        original_count = len(df)
+        df = df[df['missing'] != 1].copy()
+        removed_count = original_count - len(df)
+        if removed_count > 0:
+            print(f"Removed {removed_count} filled rows after TTM/CAGR calculations")
+        df = df.drop(columns=['missing'])
+
+    return df
 
 
 def convert_wan_to_yuan(df: pd.DataFrame) -> pd.DataFrame:
@@ -1135,7 +1439,10 @@ def update_a_stock_financial_profile(
         print("No valid periods found")
         return
 
-    total_written = 0
+    # Collect all data first for TTM calculations
+    all_data_frames = []
+    total_raw_records = 0
+
     for i, report_period in enumerate(periods):
         print(f"\nProcessing period {i+1}/{len(periods)}: {report_period}")
 
@@ -1148,20 +1455,36 @@ def update_a_stock_financial_profile(
 
         # Data normalization
         df = _coerce_schema(df)
+        all_data_frames.append(df)
+        total_raw_records += len(df)
 
         print(f"Retrieved {len(df)} financial profile records for period {report_period}")
-
-        # Immediately upsert to database
-        written = _upsert_batch(engine, df, chunksize=chunksize)
-        total_written += written
-
-        print(f"Period {report_period} processing completed, {written} records written")
 
         # Add delay to avoid API limits (already added in _fetch_single_period_data)
         if i < len(periods) - 1:  # Not the last period, add delay
             time.sleep(0.5)
 
-    print(f"\nUpdate completed, processed {len(periods)} periods, total {total_written} records written")
+    if not all_data_frames:
+        print("No data retrieved for any period")
+        return
+
+    # Combine all data for TTM calculations
+    combined_df = pd.concat(all_data_frames, ignore_index=True)
+    print(f"\nCombined {len(all_data_frames)} periods into {len(combined_df)} total records")
+
+    # Calculate TTM indicators
+    print("Calculating TTM (Trailing Twelve Months) indicators...")
+    combined_df = calculate_ttm_indicators(combined_df)
+    print(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
+
+    # Upsert to database in batches
+    total_written = _upsert_batch(engine, combined_df, chunksize=chunksize)
+
+    print(f"\nUpdate completed:")
+    print(f"- Processed {len(periods)} periods")
+    print(f"- Retrieved {total_raw_records} raw records")
+    print(f"- Final records after TTM calculation: {len(combined_df)}")
+    print(f"- Total records written to database: {total_written}")
 
 
 if __name__ == "__main__":
