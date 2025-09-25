@@ -161,8 +161,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   grossprofit_margin_ttm    FLOAT NULL COMMENT 'TTM毛利率(%)',
   revenue_cagr_3y           FLOAT NULL COMMENT '营收三年复合增长率(%)',
   netincome_cagr_3y         FLOAT NULL COMMENT '净利润三年复合增长率(%)',
-  roic_ttm                  FLOAT NULL COMMENT 'TTM投资回报率(%)',
-  fcf_ttm                   DECIMAL(16,4) NULL COMMENT 'TTM自由现金流(万元)',
   fcf_margin_ttm            FLOAT NULL COMMENT 'TTM自由现金流率(%)',
   debt_to_ebitda_ttm        FLOAT NULL COMMENT 'TTM债务/EBITDA比率',
 
@@ -228,7 +226,7 @@ INDICATOR_COLUMNS = [
     'eps_ttm', 'revenue_ps_ttm', 'cfps_ttm',
     'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
     'revenue_cagr_3y', 'netincome_cagr_3y',
-    'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+    'fcf_margin_ttm', 'debt_to_ebitda_ttm'
 ]
 
 # === Data source field configuration ===
