@@ -299,7 +299,7 @@ TTM_COLUMNS = [
 def calculate_quarterly_values(group, columns):
     """Calculate quarterly values using vectorized operations within each year"""
     group = group.sort_values('report_period')
-    group['year'] = group['report_period'].str[:4]
+    group['year'] = group['report_period'].astype(str).str[:4]
     for col in columns:
         group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
     return group.drop(columns=['year'])
