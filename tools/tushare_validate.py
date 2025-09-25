@@ -81,65 +81,44 @@ def retry_api_call(func, *args, **kwargs):
 
 # Income statement fields (core primitives for calculations)
 INCOME_COLUMNS = [
-    'basic_eps', 'diluted_eps', 'total_revenue', 'revenue', 'prem_earned', 
-    'ass_invest_income', 'total_cogs', 'oper_cost', 'biz_tax_surchg', 
-    'sell_exp', 'admin_exp', 'fin_exp', 'assets_impair_loss', 'operate_profit',
-    'non_oper_income', 'non_oper_exp', 'total_profit', 'income_tax', 'n_income', 
-    'n_income_attr_p', 'oth_compr_income', 't_compr_income', 'compr_inc_attr_p', 
-    'ebit', 'ebitda', 'total_opcost', 'invest_income'
+    'basic_eps', 'diluted_eps', 'total_revenue', 'revenue',
+    'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp',
+    'assets_impair_loss', 'operate_profit', 'non_oper_income', 'non_oper_exp',
+    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'ebit',
+    'ebitda', 'invest_income'
 ]
 
 # Balance sheet fields (core primitives)
 BALANCE_COLUMNS = [
-    'total_share', 'cap_rese', 'undistr_porfit', 'surplus_rese', 'money_cap', 
-    'accounts_receiv', 'oth_receiv', 'prepayment', 'inventories', 'premium_receiv', 
-    'reinsur_receiv', 'oth_cur_assets', 'total_cur_assets', 'htm_invest', 
-    'fix_assets', 'oil_and_gas_assets', 'intan_assets', 'defer_tax_assets', 
-    'total_nca', 'cash_reser_cb', 'depos_in_oth_bfi', 'total_assets', 
-    'acct_payable', 'payroll_payable', 'taxes_payable', 'oth_payable', 
-    'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl',  
-    'total_liab', 'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int', 
-    'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill', 
+    'total_share', 'cap_rese', 'undistr_porfit', 'surplus_rese', 'money_cap',
+    'accounts_receiv', 'oth_receiv', 'prepayment', 'inventories',
+    'oth_cur_assets', 'total_cur_assets', 'htm_invest', 'fix_assets',
+    'intan_assets', 'defer_tax_assets', 'total_nca', 'total_assets',
+    'acct_payable', 'payroll_payable', 'taxes_payable', 'oth_payable',
+    'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl', 'total_liab',
+    'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int',
+    'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill',
     'accounts_pay', 'oth_rcv_total', 'fix_assets_total'
 ]
 
 # Cash flow statement fields (core primitives)
 CASHFLOW_COLUMNS = [
-    'net_profit', 'finan_exp', 'c_fr_sale_sg', 
-    'c_fr_oth_operate_a', 'c_inf_fr_operate_a', 'c_paid_goods_s', 'c_paid_to_for_empl', 
-    'c_paid_for_taxes', 'oth_cash_pay_oper_act', 'st_cash_out_act', 'n_cashflow_act', 
-    'stot_inflows_inv_act', 'c_pay_acq_const_fiolta', 'stot_out_inv_act', 
-    'n_cashflow_inv_act', 'oth_cash_recp_ral_fnc_act', 'stot_cash_in_fnc_act', 
-    'free_cashflow', 'c_pay_dist_dpcp_int_exp', 'stot_cashout_fnc_act', 'n_cash_flows_fnc_act', 
-    'n_incr_cash_cash_equ', 'c_cash_equ_beg_period', 'c_cash_equ_end_period', 
-    'c_recp_cap_contrib', 'prov_depr_assets', 'depr_fa_coga_dpba', 'amort_intang_assets', 
-    'decr_def_inc_tax_assets', 'decr_inventories', 'decr_oper_payable', 'incr_oper_payable', 
-    'im_net_cashflow_oper_act', 'im_n_incr_cash_equ', 'net_dism_capital_add', 
-    'credit_impa_loss', 'end_bal_cash', 'beg_bal_cash'
+    'net_profit', 'finan_exp', 'c_fr_sale_sg', 'c_inf_fr_operate_a',
+    'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
+    'n_cashflow_act', 'n_cashflow_inv_act', 'free_cashflow',
+    'n_cash_flows_fnc_act', 'n_incr_cash_cash_equ', 'c_cash_equ_beg_period',
+    'c_cash_equ_end_period', 'im_net_cashflow_oper_act', 'end_bal_cash',
+    'beg_bal_cash'
 ]
 
 # Financial indicator fields to validate (extended core set)
 INDICATOR_COLUMNS = [
-    'eps', 'dt_eps', 'total_revenue_ps', 'revenue_ps', 'capital_rese_ps', 'surplus_rese_ps', 
-    'undist_profit_ps', 'extra_item', 'profit_dedt', 'gross_margin', 'current_ratio', 
-    'quick_ratio', 'cash_ratio', 'invturn_days', 'arturn_days', 'inv_turn', 'ar_turn', 
-    'ca_turn', 'fa_turn', 'assets_turn', 'op_income', 'valuechange_income', 'interst_income', 
-    'daa', 'fcff', 'fcfe', 'current_exint', 'noncurrent_exint', 
-    'interestdebt', 'netdebt', 'tangible_asset', 'working_capital', 'networking_capital', 
-    'invest_capital', 'retained_earnings', 'diluted2_eps', 'bps', 'ocfps', 'retainedps', 
-    'cfps', 'ebit_ps', 'fcff_ps', 'fcfe_ps', 'netprofit_margin', 'grossprofit_margin', 
-    'cogs_of_sales', 'expense_of_sales', 'profit_to_gr', 'saleexp_to_gr', 'adminexp_of_gr', 
-    'finaexp_of_gr', 'impai_ttm', 'gc_of_gr', 'op_of_gr', 'ebit_of_gr', 'roe', 'roe_waa', 
-    'roe_dt', 'roa', 'npta', 'roic', 'roe_yearly', 'roa2_yearly', 'roe_avg', 'salescash_to_or', 
-    'ocf_to_or', 'capitalized_to_da', 'debt_to_assets', 'assets_to_eqt', 'dp_assets_to_eqt', 
-    'ca_to_assets', 'nca_to_assets', 'tbassets_to_totalassets', 'int_to_talcap', 
-    'eqt_to_talcapital', 'currentdebt_to_debt', 'longdeb_to_debt', 'ocf_to_shortdebt', 
-    'debt_to_eqt', 'eqt_to_debt', 'tangibleasset_to_debt', 'ocf_to_debt', 'ebitda_to_debt', 
-    'turn_days', 'roa_yearly', 'roa_dp', 'fixed_assets', 'profit_prefin_exp', 'non_op_profit', 
-    'cash_to_liqdebt', 'op_to_liqdebt', 'op_to_debt', 'roic_yearly', 'total_fa_trun', 
-    'profit_to_op', 'basic_eps_yoy', 'dt_eps_yoy', 'cfps_yoy', 
-    'op_yoy', 'ebt_yoy', 'netprofit_yoy', 'dt_netprofit_yoy', 'ocf_yoy', 'roe_yoy', 
-    'bps_yoy', 'assets_yoy', 'eqt_yoy', 'tr_yoy', 'or_yoy', 'equity_yoy', 'rd_exp'
+    'eps', 'dt_eps', 'revenue_ps', 'bps', 'cfps', 'gross_margin',
+    'netprofit_margin', 'grossprofit_margin', 'current_ratio', 'quick_ratio',
+    'cash_ratio', 'inv_turn', 'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn',
+    'debt_to_assets', 'debt_to_eqt', 'roe', 'roa', 'roic', 'netprofit_yoy',
+    'or_yoy', 'basic_eps_yoy', 'assets_yoy', 'eqt_yoy', 'ocf_yoy', 'roe_yoy',
+    'equity_yoy', 'rd_exp'
 ]
 
 # API field name list (all three major financial statements contain these base fields)
@@ -365,6 +344,9 @@ def calculate_ttm_indicators(df):
         # 左合并原数据，缺失处NA
         merged = pd.merge(full_df, group, on=['ts_code', 'report_period', 'report_date'], how='left')
 
+        # 标记补全的行
+        merged['missing'] = merged['n_income_attr_p'].isna().astype(int)
+
         # 只记录实际缺失的中间数据（不是两头的）
         missing_periods = merged[merged['n_income_attr_p'].isna()]['report_period'].tolist()
 
@@ -447,6 +429,15 @@ def calculate_ttm_indicators(df):
     # Drop temporary columns
     drop_cols = list(ttm_columns.values()) + ['ttm_gross', 'revenue_3y_ago', 'ni_3y_ago'] + ['q_' + col for col in quarterly_columns]
     #df = df.drop(columns=drop_cols, errors='ignore')
+
+    # Remove filled rows (missing=1) after calculations are complete
+    if 'missing' in df.columns:
+        original_count = len(df)
+        df = df[df['missing'] != 1].copy()
+        removed_count = original_count - len(df)
+        if removed_count > 0:
+            logger.info(f"Removed {removed_count} filled rows after TTM/CAGR calculations")
+        df = df.drop(columns=['missing'])
 
     return df
 
