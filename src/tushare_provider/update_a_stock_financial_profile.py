@@ -457,11 +457,13 @@ def calculate_ttm_indicators(df):
     # First sort by ts_code and report_date to ensure proper rolling window
     df = df.sort_values(['ts_code', 'report_date'])
 
+    # For TTM calculation, we need to use the original quarterly values, not the differences
+    # TTM should be sum of last 4 quarters of actual reported values
     ttm_columns = {col: 'ttm_' + col for col in quarterly_columns}
-    for q_col, ttm_col in ttm_columns.items():
-        # Use vectorized rolling operation with min_periods=3 for more robust TTM calculation
+    for orig_col, ttm_col in ttm_columns.items():
+        # Use rolling sum on the original quarterly values with min_periods=3
         df[ttm_col] = (
-            df.groupby('ts_code')['q_' + q_col]
+            df.groupby('ts_code')[orig_col]  # Use original column, not q_ column
             .rolling(window=4, min_periods=3)  # Allow TTM with at least 3 quarters
             .sum()
             .reset_index(level=0, drop=True)
