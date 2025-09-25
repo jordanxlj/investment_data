@@ -168,7 +168,7 @@ def test_aggregate_forecasts(mock_data):
         'quarter': ['2024Q4', '2024Q4', '2024Q4', '2024Q4', '2024Q4']
     })
 
-    with patch('tushare_provider.evaluate_brokerage_report.get_report_weight') as mock_get_weight:
+    with patch('src.tushare_provider.evaluate_brokerage_report.get_report_weight') as mock_get_weight:
         mock_get_weight.side_effect = lambda rt: {'点评': 3.0, '一般': 2.0, '非个股': 1.0}.get(rt, 2.0)
 
         result_bullish = evaluate_brokerage_report.aggregate_forecasts(test_df, 'bullish')
@@ -232,7 +232,7 @@ def test_upsert_batch(mock_engine):
         'report_period': ['2024Q4'],
     }).reindex(columns=evaluate_brokerage_report.ALL_COLUMNS, fill_value=None)
 
-    with patch('tushare_provider.evaluate_brokerage_report.mysql_insert') as mock_insert:
+    with patch('src.tushare_provider.evaluate_brokerage_report.mysql_insert') as mock_insert:
         mock_conn = mock_engine.begin.return_value.__enter__.return_value
         mock_stmt = MagicMock()
 
@@ -275,11 +275,11 @@ def test_get_stocks_list_error(mock_engine, caplog):
 def test_evaluate_brokerage_report_dry_run(caplog):
     """Test evaluate_brokerage_report dry_run"""
     caplog.set_level(logging.INFO)
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 evaluate_brokerage_report.evaluate_brokerage_report(
                     start_date='20250101',
@@ -290,14 +290,14 @@ def test_evaluate_brokerage_report_dry_run(caplog):
 
 def test_evaluate_brokerage_report_invalid_date(caplog):
     """Test evaluate_brokerage_report invalid date"""
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
         evaluate_brokerage_report.evaluate_brokerage_report(start_date='invalid')
     assert "Invalid date" in caplog.text
 
 def test_evaluate_brokerage_report_no_stocks():
     """Test evaluate_brokerage_report no stocks"""
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_engine = MagicMock()
         mock_conn = MagicMock()
         mock_result = MagicMock()
@@ -306,30 +306,30 @@ def test_evaluate_brokerage_report_no_stocks():
         mock_engine.begin.return_value.__enter__.return_value = mock_conn
         mock_create_engine.return_value = mock_engine
 
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = []
                 evaluate_brokerage_report.evaluate_brokerage_report()
 
 def test_evaluate_brokerage_report_trade_cal_empty():
     """Test evaluate_brokerage_report with empty trade_cal"""
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal:
             mock_trade_cal.return_value = pd.DataFrame()
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250101', end_date='20250101')
 
 '''
 def test_evaluate_brokerage_report_processing_error(caplog):
     """Test evaluate_brokerage_report concurrent error"""
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_create_engine:
         mock_create_engine.return_value = MagicMock()
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
             mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
                     mock_future = MagicMock()
@@ -408,7 +408,7 @@ def test_categorize_report_type(report_type, expected_category):
 
 def test_get_trade_cal_error():
     """Test get_trade_cal error path"""
-    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+    with patch('src.tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
         mock_cal.side_effect = Exception("API error")
         result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
         assert result.empty
@@ -416,7 +416,7 @@ def test_get_trade_cal_error():
 def test_get_trade_cal_normal():
     """Test get_trade_cal normal path"""
     mock_df = pd.DataFrame({'cal_date': ['20250101']})
-    with patch('tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
+    with patch('src.tushare_provider.evaluate_brokerage_report.pro.trade_cal') as mock_cal:
         mock_cal.return_value = mock_df
         result = evaluate_brokerage_report.get_trade_cal('20250101', '20250101')
         pd.testing.assert_frame_equal(result, mock_df)
@@ -632,13 +632,13 @@ def test_vectorized_operations_performance(sample_bulk_data):
         check_names=False
     )
 
-@patch('tushare_provider.evaluate_brokerage_report.create_engine')
+@patch('src.tushare_provider.evaluate_brokerage_report.create_engine')
 def test_concurrent_processing_simulation(mock_create_engine):
     """Test concurrent processing simulation"""
     mock_engine = MagicMock()
     mock_create_engine.return_value = mock_engine
 
-    with patch('tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process:
+    with patch('src.tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process:
         mock_process.return_value = 30
 
         stocks = ['000001.SZ', '000002.SZ', '000003.SZ', '000004.SZ']
@@ -682,7 +682,7 @@ def test_error_handling_comprehensive(mock_engine):
     with patch.object(mock_engine, 'begin') as mock_begin:
         mock_begin.side_effect = Exception("Database connection error")
 
-        with patch('tushare_provider.evaluate_brokerage_report.logger') as mock_logger:
+        with patch('src.tushare_provider.evaluate_brokerage_report.logger') as mock_logger:
             result = evaluate_brokerage_report.process_stock_all_dates(
                 mock_engine, '000001.SZ', date_list, 1000
             )
@@ -808,16 +808,16 @@ def test_resource_cleanup_verification():
 
 # ===== INTEGRATION TESTS =====
 
-@patch('tushare_provider.evaluate_brokerage_report.create_engine')
+@patch('src.tushare_provider.evaluate_brokerage_report.create_engine')
 def test_full_processing_pipeline(mock_create_engine):
     """Test full processing pipeline from start to finish"""
     mock_engine = MagicMock()
     mock_create_engine.return_value = mock_engine
 
-    with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal, \
-         patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks, \
-         patch('tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process, \
-         patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+    with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_trade_cal, \
+         patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks, \
+         patch('src.tushare_provider.evaluate_brokerage_report.process_stock_all_dates') as mock_process, \
+         patch('src.tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
 
         mock_trade_cal.return_value = pd.DataFrame({'cal_date': ['2024-01-01', '2024-01-02']})
         mock_stocks.return_value = ['000001.SZ', '000002.SZ']
@@ -931,7 +931,7 @@ def test_process_stock_all_dates_with_brokerage(mock_engine):
     })
     with patch('pandas.read_sql') as mock_read_sql:
         mock_read_sql.return_value = brokerage_df
-        with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+        with patch('src.tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
             mock_upsert.return_value = 1
             result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
     assert result == 1
@@ -942,7 +942,7 @@ def test_process_stock_all_dates_error(caplog):
     mock_engine = MagicMock()
     with patch('pandas.read_sql') as mock_read_sql:
         mock_read_sql.return_value = pd.DataFrame()
-        with patch('tushare_provider.evaluate_brokerage_report.aggregate_consensus_from_df') as mock_agg:
+        with patch('src.tushare_provider.evaluate_brokerage_report.aggregate_consensus_from_df') as mock_agg:
             mock_agg.side_effect = Exception("agg error")
             result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
     assert result == 0
@@ -955,7 +955,7 @@ def test_process_stock_all_dates_upsert_error(caplog):
     mock_engine = MagicMock()
     with patch('pandas.read_sql') as mock_read_sql:
         mock_read_sql.return_value = pd.DataFrame({'ts_code': ['000001.SZ'], 'report_date': ['2024-12-31'], 'report_type': ['深度'], 'rating': ['买入'], 'quarter': ['2025Q1']})
-        with patch('tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
+        with patch('src.tushare_provider.evaluate_brokerage_report._upsert_batch') as mock_upsert:
             mock_upsert.side_effect = Exception("upsert error")
             result = evaluate_brokerage_report.process_stock_all_dates(mock_engine, '000001.SZ', date_list, 1000)
     assert result == 0
@@ -963,7 +963,7 @@ def test_process_stock_all_dates_upsert_error(caplog):
 
 def test_evaluate_brokerage_report_start_after_end(caplog):
     """Test evaluate_brokerage_report start > end"""
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
         mock_engine.return_value = MagicMock()
         result = evaluate_brokerage_report.evaluate_brokerage_report(start_date='20250102', end_date='20250101')
         assert result is None
@@ -972,11 +972,11 @@ def test_evaluate_brokerage_report_start_after_end(caplog):
 def test_evaluate_brokerage_report_normal(caplog):
     """Test evaluate_brokerage_report normal run"""
     caplog.set_level(logging.INFO)
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
         mock_engine.return_value = MagicMock()
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
             mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = ['000001.SZ']
                 with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
                     mock_future = MagicMock()
@@ -990,11 +990,11 @@ def test_evaluate_brokerage_report_normal(caplog):
 def test_evaluate_brokerage_report_progress_log(caplog):
     """Test evaluate_brokerage_report progress logging for many stocks"""
     caplog.set_level(logging.INFO)
-    with patch('tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
+    with patch('src.tushare_provider.evaluate_brokerage_report.create_engine') as mock_engine:
         mock_engine.return_value = MagicMock()
-        with patch('tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
+        with patch('src.tushare_provider.evaluate_brokerage_report.get_trade_cal') as mock_cal:
             mock_cal.return_value = pd.DataFrame({'cal_date': ['20250101']})
-            with patch('tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
+            with patch('src.tushare_provider.evaluate_brokerage_report.get_stocks_list') as mock_stocks:
                 mock_stocks.return_value = [f'{i:06d}.SZ' for i in range(100)]  # Enough for %50 log
                 with patch('concurrent.futures.ThreadPoolExecutor') as mock_exec:
                     mock_futures = [MagicMock() for _ in range(100)]

@@ -86,10 +86,10 @@ class TestTTMCalculation:
     def test_ttm_columns_definition(self):
         """Test TTM columns are properly defined"""
         expected_cols = [
-            'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
+            'eps_ttm', 'revenue_ps_ttm', 'cfps_ttm',
             'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
             'revenue_cagr_3y', 'netincome_cagr_3y',
-            'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+            'fcf_margin_ttm', 'debt_to_ebitda_ttm'
         ]
 
         assert len(TTM_COLUMNS) == len(expected_cols)
