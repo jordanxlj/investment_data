@@ -31,7 +31,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 try:
-    import tushare_provider.evaluate_brokerage_report as evaluate_brokerage_report
+    import src.tushare_provider.evaluate_brokerage_report as evaluate_brokerage_report
 except ImportError:
     try:
         import importlib.util

@@ -2,12 +2,13 @@ import pytest
 import pandas as pd
 import numpy as np
 import warnings
+import logging
 from unittest.mock import patch
 import io
 import sys
 from unittest.mock import patch, MagicMock
 
-from tushare_provider.update_a_stock_financial_profile import (
+from src.tushare_provider.update_a_stock_financial_profile import (
     calculate_ttm_indicators,
     TTM_COLUMNS,
     ALL_COLUMNS,
@@ -95,7 +96,7 @@ class TestTTMCalculation:
         for col in expected_cols:
             assert col in TTM_COLUMNS
 
-    def test_missing_data_handling_intermediate(self):
+    def test_missing_data_handling_intermediate(self, caplog):
         """Test handling of intermediate missing data (gaps in time series)"""
 
         # Create data with intermediate missing quarters
@@ -110,16 +111,13 @@ class TestTTMCalculation:
             'im_net_cashflow_oper_act': [200, 180, 250, 230]
         })
 
-        # Capture stdout to check for missing data warnings
-        captured_output = io.StringIO()
-        with patch('sys.stdout', captured_output):
+        # Capture log output to check for missing data warnings
+        with caplog.at_level(logging.WARNING):
             result = calculate_ttm_indicators(test_data.copy())
 
-        output = captured_output.getvalue()
-
-        # Should detect and report intermediate missing data
-        assert '中间数据缺失' in output, "Should report intermediate missing data"
-        assert '20230930' in output, "Should identify the missing quarter"
+        # Check that warning was logged about intermediate missing data
+        assert any('中间数据缺失' in record.message for record in caplog.records), "Should report intermediate missing data"
+        assert any('20230930' in record.message for record in caplog.records), "Should identify the missing quarter"
 
         # Should still calculate TTM values for available data
         valid_ttm = result.dropna(subset=['eps_ttm'])
@@ -128,7 +126,7 @@ class TestTTMCalculation:
         # Final result should not contain filled missing rows
         assert len(result) == 4, "Should keep only original data rows"
 
-    def test_missing_data_handling_edge(self):
+    def test_missing_data_handling_edge(self, caplog):
         """Test handling of edge missing data (data outside available range)"""
 
         # Create data that starts from a later quarter but has enough data for TTM
@@ -143,12 +141,9 @@ class TestTTMCalculation:
             'im_net_cashflow_oper_act': [220, 250, 230, 260, 280]
         })
 
-        # Capture stdout to check for missing data warnings
-        captured_output = io.StringIO()
-        with patch('sys.stdout', captured_output):
+        # Capture log output to check for missing data warnings
+        with caplog.at_level(logging.WARNING):
             result = calculate_ttm_indicators(test_data.copy())
-
-        output = captured_output.getvalue()
 
         # Should complete successfully and calculate TTM for available data
         valid_ttm = result.dropna(subset=['eps_ttm'])
@@ -156,7 +151,7 @@ class TestTTMCalculation:
 
         # Edge missing data should not trigger intermediate missing warnings
         # (since all data within the available range is consecutive)
-        assert '中间数据缺失' not in output, "Should not report intermediate missing for consecutive data"
+        assert not any('中间数据缺失' in record.message for record in caplog.records), "Should not report intermediate missing for consecutive data"
 
     def test_missing_data_handling_insufficient(self):
         """Test handling of insufficient data for TTM calculation"""

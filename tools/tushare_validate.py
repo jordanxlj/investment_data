@@ -1,83 +1,29 @@
 import os
 import pandas as pd
 import numpy as np
-import tushare as ts
 from datetime import datetime
+from typing import List
 import argparse
 import time
 import logging
-from typing import List
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+from util import (
+    setup_logging, CacheManager, init_tushare, retry_api_call
 )
+
+setup_logging(log_file='tushare_validate.log')
 logger = logging.getLogger(__name__)
 
-# Tushare init with error handling
-if "TUSHARE" not in os.environ:
-    raise ValueError("TUSHARE environment variable not set. Please set your Tushare token.")
-ts.set_token(os.environ["TUSHARE"])
-pro = ts.pro_api()
+cache_manager = CacheManager()
 
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+tushare_pro = init_tushare()
 
-# Cache configuration
-CACHE_DIR = "cache"
-USE_CACHE = True  # Set to False to disable caching
+# API field name list (all three major financial statements contain these base fields)
+# Note: API returns 'end_date' but database stores as 'ann_date'
+API_COMMON_FIELDS = ['ts_code', 'ann_date', 'end_date', 'report_type']
 
-def get_cache_path(cache_file: str) -> str:
-    """Get the full path for a cache file"""
-    return os.path.join(CACHE_DIR, f"{cache_file}.parquet")
-
-def load_from_cache(cache_file: str) -> pd.DataFrame:
-    """Load data from cache if it exists"""
-    cache_path = get_cache_path(cache_file)
-    if os.path.exists(cache_path):
-        try:
-            logger.info(f"Loading {cache_file} from cache: {cache_path}")
-            return pd.read_parquet(cache_path)
-        except Exception as e:
-            logger.warning(f"Failed to load cache {cache_file}: {e}")
-    return pd.DataFrame()
-
-def save_to_cache(file_name: str, df: pd.DataFrame):
-    """Save data to cache"""
-    if df.empty:
-        return
-
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-
-    cache_path = get_cache_path(file_name)
-    try:
-        df.to_parquet(cache_path, index=False)
-        logger.info(f"Saved to cache: {cache_path}")
-    except Exception as e:
-        logger.warning(f"Failed to save cache {cache_path}: {e}")
-
-def retry_api_call(func, *args, **kwargs):
-    """Retry API call with exponential backoff"""
-    last_exception = None
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            last_exception = e
-            if attempt < MAX_RETRIES - 1:
-                delay = RETRY_DELAY * (2 ** attempt)  # Exponential backoff
-                logger.warning(f"API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-                logger.info(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-            else:
-                logger.error(f"API call failed after {MAX_RETRIES} attempts: {e}")
-
-    # If all retries failed, raise the last exception
-    raise last_exception
+# Financial indicators base fields (does not include report_type)
+INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']  # Keep end_date for API call, will be mapped later
 
 # Income statement fields (core primitives for calculations)
 INCOME_COLUMNS = [
@@ -111,22 +57,15 @@ CASHFLOW_COLUMNS = [
     'beg_bal_cash'
 ]
 
-# Financial indicator fields to validate (extended core set)
+# Financial indicators fields (calculated metrics)
 INDICATOR_COLUMNS = [
     'eps', 'dt_eps', 'revenue_ps', 'bps', 'cfps', 'gross_margin',
     'netprofit_margin', 'grossprofit_margin', 'current_ratio', 'quick_ratio',
     'cash_ratio', 'inv_turn', 'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn',
     'debt_to_assets', 'debt_to_eqt', 'roe', 'roa', 'roic', 'netprofit_yoy',
     'or_yoy', 'basic_eps_yoy', 'assets_yoy', 'eqt_yoy', 'ocf_yoy', 'roe_yoy',
-    'equity_yoy', 'rd_exp'
+    'equity_yoy', 'rd_exp', 'fcff_ps'
 ]
-
-# API field name list (all three major financial statements contain these base fields)
-# Note: API returns 'end_date' but database stores as 'ann_date'
-API_COMMON_FIELDS = ['ts_code', 'ann_date', 'end_date', 'report_type']
-
-# Financial indicators base fields (does not include report_type)
-INDICATOR_BASE_FIELDS = ['ts_code', 'ann_date', 'end_date']  # Keep end_date for API call, will be mapped later
 
 def generate_periods(start_date: str, end_date: str, period: str = "annual") -> List[str]:
     """
@@ -202,8 +141,8 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
         for period in periods:
             try:
                 # Income statement (doc_id=33) - focus on basics
-                income_df = retry_api_call(
-                    pro.income_vip,
+                income_df = call_tushare_api_with_retry(
+                    tushare_pro.income_vip,
                     ts_code=ts_codes_str,
                     period=period,
                     fields=','.join(API_COMMON_FIELDS + INCOME_COLUMNS)
@@ -212,8 +151,8 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
                     income_dfs.append(income_df)
 
                 # Balance sheet (doc_id=36) - for equity/assets
-                balance_df = retry_api_call(
-                    pro.balancesheet_vip,
+                balance_df = call_tushare_api_with_retry(
+                    tushare_pro.balancesheet_vip,
                     ts_code=ts_codes_str,
                     period=period,
                     fields=','.join(API_COMMON_FIELDS + BALANCE_COLUMNS)
@@ -222,8 +161,8 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
                     balance_dfs.append(balance_df)
 
                 # Cash flow (doc_id=44) - basic for completeness
-                cashflow_df = retry_api_call(
-                    pro.cashflow_vip,
+                cashflow_df = call_tushare_api_with_retry(
+                    tushare_pro.cashflow_vip,
                     ts_code=ts_codes_str,
                     period=period,
                     fields=','.join(API_COMMON_FIELDS + CASHFLOW_COLUMNS)
@@ -233,8 +172,8 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
 
                 # Financial indicators (doc_id=79) - for validation (extended fields)
                 indicator_fields = INDICATOR_BASE_FIELDS + INDICATOR_COLUMNS
-                fina_df = retry_api_call(
-                    pro.fina_indicator_vip,
+                fina_df = call_tushare_api_with_retry(
+                    tushare_pro.fina_indicator_vip,
                     ts_code=ts_codes_str,
                     period=period,
                     fields=','.join(indicator_fields)
@@ -242,7 +181,7 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
                 if not fina_df.empty:
                     fina_dfs.append(fina_df)
             except Exception as e:
-                print(f"Error fetching data for period {period} after retries: {e}")
+                logger.error(f"Error fetching data for period {period} after retries: {e}")
                 continue
 
         # Concatenate all dataframes
@@ -253,20 +192,16 @@ def fetch_tushare_data_from_api(stocks: str, periods: List[str]):
 
         return income_df, balance_df, cashflow_df, fina_df
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        logger.error(f"Error fetching data: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def fetch_tushare_data(stocks: str, periods: List[str]):
     """Fetch data from multiple Tushare interfaces with caching support"""
-    if not USE_CACHE:
-        logger.info("Cache disabled, fetching data from Tushare API")
-        return fetch_tushare_data_from_api(stocks, periods)
-
     # Try to load from cache first
-    income_df = load_from_cache('income_data')
-    balance_df = load_from_cache('balance_data')
-    cashflow_df = load_from_cache('cashflow_data')
-    fina_df = load_from_cache('fina_data')
+    income_df = cache_manager.load_from_cache('income_data')
+    balance_df = cache_manager.load_from_cache('balance_data')
+    cashflow_df = cache_manager.load_from_cache('cashflow_data')
+    fina_df = cache_manager.load_from_cache('fina_data')
 
     # Check if all data is available in cache
     all_cached = not (income_df.empty or balance_df.empty or cashflow_df.empty or fina_df.empty)
@@ -282,22 +217,22 @@ def fetch_tushare_data(stocks: str, periods: List[str]):
 
         # Update cache with API data
         if not api_income_df.empty:
-            save_to_cache("income_data", api_income_df)
+            cache_manager.save_to_cache("income_data", api_income_df)
             if income_df.empty:
                 income_df = api_income_df
 
         if not api_balance_df.empty:
-            save_to_cache("balance_data", api_balance_df)
+            cache_manager.save_to_cache("balance_data", api_balance_df)
             if balance_df.empty:
                 balance_df = api_balance_df
 
         if not api_cashflow_df.empty:
-            save_to_cache("cashflow_data", api_cashflow_df)
+            cache_manager.save_to_cache("cashflow_data", api_cashflow_df)
             if cashflow_df.empty:
                 cashflow_df = api_cashflow_df
 
         if not api_fina_df.empty:
-            save_to_cache("fina_data", api_fina_df)
+            cache_manager.save_to_cache("fina_data", api_fina_df)
             if fina_df.empty:
                 fina_df = api_fina_df
 
@@ -482,16 +417,16 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
         # Third merge: + fina indicators
         df = pd.merge(df, fina_df, on=merge_keys, how='inner', suffixes=('', ''))
     except KeyError as e:
-        print(f"Merge failed due to missing key: {e}")
-        print(f"Available columns in income_df: {list(income_df.columns)}")
-        print(f"Available columns in balance_df: {list(balance_df.columns)}")
-        print(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
-        print(f"Available columns in fina_df: {list(fina_df.columns)}")
+        logger.error(f"Merge failed due to missing key: {e}")
+        logger.debug(f"Available columns in income_df: {list(income_df.columns)}")
+        logger.debug(f"Available columns in balance_df: {list(balance_df.columns)}")
+        logger.debug(f"Available columns in cashflow_df: {list(cashflow_df.columns)}")
+        logger.debug(f"Available columns in fina_df: {list(fina_df.columns)}")
         return pd.DataFrame()
     df = df.copy()
 
     # Calculate TTM indicators vectorized
-    print("Calculating TTM (Trailing Twelve Months) indicators...")
+    logger.info("Calculating TTM (Trailing Twelve Months) indicators...")
     df = calculate_ttm_indicators(df)
 
     df['netprofit_yoy'] = df['netprofit_yoy'].fillna(0)
@@ -545,7 +480,7 @@ def deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df):
             final_count = len(df)
 
             if final_count < initial_count:
-                print(f"Removed {initial_count - final_count} duplicates from {name}, kept {final_count} unique records (latest)")
+                logger.info(f"Removed {initial_count - final_count} duplicates from {name}, kept {final_count} unique records (latest)")
 
             # Update the dataframe variable
             if name == "income_df":
@@ -579,14 +514,14 @@ def cross_validate_indicators(computed_df, fina_df):
         merge_keys.append('end_date')
 
     if not merge_keys:
-        print("Warning: No common merge keys found between computed and fina dataframes")
+        logger.warning("No common merge keys found between computed and fina dataframes")
         return pd.DataFrame(), {}
 
     try:
         merged = pd.merge(computed_df, fina_df, on=merge_keys, how='inner', suffixes=('_calc', '_api'))
     except KeyError as e:
-        print(f"Cross-validation merge failed: {e}")
-        print(f"Available merge keys: {merge_keys}")
+        logger.error(f"Cross-validation merge failed: {e}")
+        logger.debug(f"Available merge keys: {merge_keys}")
         return pd.DataFrame(), {}
     
     if merged.empty:
@@ -735,61 +670,61 @@ def check_completeness(df_list):
 # Main function (updated for extended)
 def run_validation(stocks: str, start_date: str = '20240101', end_date: str = '20250918', period: str = 'annual'):
     """Run full extended validation"""
-    print(f"Starting Tushare cross-validation for {stocks} ({start_date} to {end_date})")
+    logger.info(f"Starting Tushare cross-validation for {stocks} ({start_date} to {end_date})")
 
     # Fetch
-    print("1. Fetching data...")
+    logger.info("1. Fetching data...")
     periods = generate_periods(start_date, end_date, period)
     income_df, balance_df, cashflow_df, fina_df = fetch_tushare_data(stocks, periods)
 
     # Deduplicate dataframes to ensure data quality
-    print("1. Deduplicating data...")
+    logger.info("1. Deduplicating data...")
     logger.info(f"income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
     income_df, balance_df, cashflow_df, fina_df = deduplicate_dataframes(income_df, balance_df, cashflow_df, fina_df)
     logger.info(f"after deduplicate, income_df: {len(income_df)}, balance_df: {len(balance_df)}, cashflow_df: {len(cashflow_df)}, fina_df: {len(fina_df)}")
 
     # Compute (extended)
-    print("2. Computing extended indicators...")
+    logger.info("2. Computing extended indicators...")
     computed_df = compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks)
-    
+
     # Validate (extended)
-    print("3. Cross-validating consistency...")
+    logger.info("3. Cross-validating consistency...")
     validation_df, consistency_summary = cross_validate_indicators(computed_df, fina_df)
-    
+
     # Completeness
-    print("4. Checking completeness...")
+    logger.info("4. Checking completeness...")
     completeness = check_completeness([income_df, balance_df, cashflow_df, fina_df])
     
     # Report
-    print("\n=== Extended Consistency Summary (%% Consistent) ===")
+    logger.info("=== Extended Consistency Summary (% Consistent) ===")
     for k, v in consistency_summary.items():
         status = "PASS" if v >= 95 else "WARN"
-        print(f"{k}: {v:.2f}% ({status})")
-    
-    print("\n=== Completeness Report ===")
+        logger.info(f"{k}: {v:.2f}% ({status})")
+
+    logger.info("=== Completeness Report ===")
     for k, v in completeness.items():
         if isinstance(v, dict):
-            print(f"{k}: rows={v['rows']}, null_pct={v['null_pct']}%, coverage={v['coverage']}%")
+            logger.info(f"{k}: rows={v['rows']}, null_pct={v['null_pct']}%, coverage={v['coverage']}%")
         else:
-            print(f"{k}: {v}")
-    
-    print("\n=== Detailed Validation (Sample) ===")
+            logger.info(f"{k}: {v}")
+
+    logger.info("=== Detailed Validation (Sample) ===")
     if not validation_df.empty:
         sample_cols = ['ts_code', 'report_period', 'grossprofit_margin_abs_diff', 'netprofit_margin_abs_diff',
                       'bvps_abs_diff', 'ocfps_abs_diff', 'currentasset_turn_abs_diff', 'fix_assets_turn_abs_diff',
                       'nca_to_assets_abs_diff', 'op_to_tp_abs_diff', 'eqt_to_liab_abs_diff']  # Extended sample
         available_cols = [col for col in sample_cols if col in validation_df.columns]
         if available_cols:
-            print(validation_df[available_cols].head().to_string(index=False))
+            logger.debug(validation_df[available_cols].head().to_string(index=False))
     else:
-        print("No overlapping periods for validation")
-    
+        logger.warning("No overlapping periods for validation")
+
     # Save CSVs
     if not validation_df.empty:
         stock_name = stocks.replace(',', '_') if stocks else 'sample'
         validation_df.to_csv(f'{stock_name}_extended_validation.csv', index=False)
         computed_df.to_csv(f'{stock_name}_extended_computed.csv', index=False)
-        print(f"\nSaved: {stock_name}_extended_validation.csv & {stock_name}_extended_computed.csv")
+        logger.info(f"Saved: {stock_name}_extended_validation.csv & {stock_name}_extended_computed.csv")
 
 # Example run and test
 if __name__ == "__main__":
@@ -808,6 +743,6 @@ if __name__ == "__main__":
         total_stocks = len(result)
         successful_stocks = sum(1 for r in result.values() if 'error' not in r)
         success_rate = successful_stocks / total_stocks * 100 if total_stocks > 0 else 0
-        print(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({success_rate:.1f}% success rate)")
+        logger.info(f"Validation completed: {successful_stocks}/{total_stocks} stocks processed successfully ({success_rate:.1f}% success rate)")
     else:
-        print("Validation completed: No results to display")
+        logger.info("Validation completed: No results to display")

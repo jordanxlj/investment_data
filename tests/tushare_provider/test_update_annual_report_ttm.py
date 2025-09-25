@@ -16,7 +16,7 @@ import os
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tushare_provider.update_annual_report_ttm import TTMCalculator
+from src.tushare_provider.update_annual_report_ttm import TTMCalculator
 
 
 class TestTTMCalculator:
