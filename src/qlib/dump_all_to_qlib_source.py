@@ -4,7 +4,11 @@ import pandas as pd
 import fire
 import os
 
-def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', skip_exists=True):
+def dump_all_to_sqlib_source(
+        mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', 
+        output_dir='temp_dir/qlib_source',
+        skip_exists=True
+    ):
   sqlEngine = create_engine(mysql_url, pool_recycle=3600)
   dbConnection = sqlEngine.raw_connection()
   stock_df = pd.read_sql(
@@ -29,8 +33,6 @@ def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investme
   dbConnection.close()
   sqlEngine.dispose()
 
-  script_path = os.path.dirname(os.path.realpath(__file__))
-  output_dir = f"{script_path}/qlib_source"
   if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 

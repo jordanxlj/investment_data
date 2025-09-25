@@ -25,8 +25,6 @@ tushare_pro = init_tushare()
 
 
 TABLE_NAME = "ts_a_stock_financial_profile"
-
-
 CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code                   VARCHAR(16)  NOT NULL,
