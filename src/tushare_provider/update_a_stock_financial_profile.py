@@ -352,10 +352,10 @@ def calculate_ttm_indicators(df):
         merged.loc[missing_mask, 'missing_type'] = 'data_missing'
 
         # 进一步分类缺失类型
-        existing_periods = set(group['report_period'].dropna())
-        if existing_periods:
-            min_existing_period = min(existing_periods)
-            max_existing_period = max(existing_periods)
+        existing_dates = group['report_date'].dropna()
+        if not existing_dates.empty:
+            min_existing_period = existing_dates.min()
+            max_existing_period = existing_dates.max()
 
             # 两头缺失：数据范围外的缺失
             outside_range = (merged['report_date'] < min_existing_period) | (merged['report_date'] > max_existing_period)
