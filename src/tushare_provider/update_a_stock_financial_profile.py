@@ -337,7 +337,7 @@ def calculate_ttm_indicators(df):
         # 生成从最早数据到最晚数据的完整季度末序列
         full_dates = pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
         full_df = pd.DataFrame({'report_date': full_dates})
-        full_df['report_period'] = full_df['report_date']
+        full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
         full_df['ts_code'] = ts_code  # 添加ts_code
 
         # 左合并原数据，缺失处NA
@@ -358,11 +358,11 @@ def calculate_ttm_indicators(df):
             max_existing_period = max(existing_periods)
 
             # 两头缺失：数据范围外的缺失
-            outside_range = (merged['report_period'] < min_existing_period) | (merged['report_period'] > max_existing_period)
+            outside_range = (merged['report_date'] < min_existing_period) | (merged['report_date'] > max_existing_period)
             merged.loc[missing_mask & outside_range, 'missing_type'] = 'edge_missing'
 
             # 中间缺失：数据范围内的缺失
-            inside_range = (merged['report_period'] >= min_existing_period) & (merged['report_period'] <= max_existing_period)
+            inside_range = (merged['report_date'] >= min_existing_period) & (merged['report_date'] <= max_existing_period)
             merged.loc[missing_mask & inside_range, 'missing_type'] = 'intermediate_missing'
 
             # 记录不同类型的缺失
