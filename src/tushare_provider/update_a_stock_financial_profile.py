@@ -402,12 +402,6 @@ def calculate_ttm_indicators(df):
 
     for col in flow_cols:
         if col in df.columns:
-            # 对于中间缺失，使用线性插值
-            intermediate_mask = df['missing_type'] == 'intermediate_missing'
-            if intermediate_mask.any():
-                # 对每个股票分别进行插值
-                df[col] = df.groupby('ts_code')[col].transform(lambda x: x.interpolate(method='linear', limit_direction='both'))
-
             # 对于两头缺失和数据缺失，填充为0（表示该时期没有发生）
             edge_data_mask = (df['missing_type'] == 'edge_missing') | (df['missing_type'] == 'data_missing')
             df.loc[edge_data_mask, col] = df.loc[edge_data_mask, col].fillna(0)
