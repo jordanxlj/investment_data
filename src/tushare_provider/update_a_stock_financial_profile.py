@@ -1220,6 +1220,9 @@ def update_a_stock_financial_profile(
         combined_df = calculate_ttm_indicators(combined_df)
         logger.info(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
 
+        # Clean up temporary columns before database insertion
+        combined_df = _coerce_schema(combined_df)
+
         # Upsert to database in batches
         total_written = _upsert_batch(engine, combined_df, chunksize=chunksize)
 
