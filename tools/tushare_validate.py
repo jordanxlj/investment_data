@@ -43,7 +43,7 @@ BALANCE_COLUMNS = [
     'total_cur_liab', 'defer_inc_non_cur_liab', 'total_ncl', 'total_liab',
     'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int',
     'total_liab_hldr_eqy', 'oth_pay_total', 'accounts_receiv_bill',
-    'accounts_pay', 'oth_rcv_total', 'fix_assets_total'
+    'accounts_pay', 'oth_rcv_total', 'fix_assets_total', 'r_and_d'
 ]
 
 # Cash flow statement fields (core primitives)
