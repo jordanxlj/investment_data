@@ -259,7 +259,7 @@ def coerce_dates(df: pd.DataFrame, fields: List[str]) -> pd.DataFrame:
             df[field] = pd.to_datetime(df[field], format='%Y%m%d', errors='coerce')
     return df
 
-def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
+def data_preprocess(df: pd.DataFrame) -> pd.DataFrame:
     """Coerce DataFrame schema to match database types"""
     if df.empty:
         return df
@@ -277,7 +277,7 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
     df = coerce_to_decimal(df, decimal_fields)
 
     # Handle dates
-    date_fields = ['report_period', 'ann_date', 'end_date']
+    date_fields = ['ann_date', 'end_date']
     df = coerce_dates(df, date_fields)
 
     # Fill missing values
@@ -364,11 +364,11 @@ def get_existing_dates(group: pd.DataFrame) -> pd.Series:
     """Extract and sort existing report dates."""
     return group['report_date'].dropna().sort_values().unique()
 
-def generate_full_quarters(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+def generate_full_quarters(min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DatetimeIndex:
     """Generate complete quarter-end date sequence within range."""
     return pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
 
-def create_full_df(dates: pd.DatetimeIndex) -> pd.DataFrame:
+def create_full_df(dates: pd.DatetimeIndex, ts_code: str) -> pd.DataFrame:
     """Create DataFrame with full quarter dates and ts_code."""
     full_df = pd.DataFrame({'report_date': dates})
     full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
@@ -391,23 +391,23 @@ def complete_quarters(origin: pd.DataFrame) -> pd.DataFrame:
     df = origin.sort_values(['ts_code', 'report_date'])
     completed_groups = []
 
-    for ts_code, group in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
-        existing_dates = group['report_date'].dropna().sort_values().unique()
+    for ts_code, group_iter in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
+        group_df = pd.DataFrame([row[1] for row in group_iter])
+        existing_dates = group_df['report_date'].dropna().sort_values().unique()
         if len(existing_dates) < 2:
-            group_copy = group.copy()
-            group_copy['missing'] = 0
-            completed_groups.append(group_copy)
+            group_df['missing'] = 0
+            completed_groups.append(group_df)
             continue
-        
+
         min_date = existing_dates.min()
         max_date = existing_dates.max()
-        
+
         full_dates = generate_full_quarters(min_date, max_date)
         if len(full_dates) == 0:
             completed_groups.append(pd.DataFrame())
             continue
-        full_df = create_full_df(full_dates)
-        merged = merge_with_original(full_df, group)
+        full_df = create_full_df(full_dates, ts_code)
+        merged = merge_with_original(full_df, group_df)
         completed_groups.append(merged.sort_values('report_date').reset_index(drop=True))
 
     return pd.concat(completed_groups, ignore_index=True)
@@ -437,12 +437,13 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     df = df.sort_values(['ts_code', 'report_period'])
+
     # Complete missingquarters
     df = complete_quarters(df)
 
     # Calculate TTM sums
     sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'operate_profit', 'total_cogs']  # Add relevant sum columns
-    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, quarterly_columns)).reset_index(drop=True)
+    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
     df = calculate_ttm_sums(df, sum_cols)
 
     # Calculate per-share TTM
@@ -658,7 +659,7 @@ def fetch_and_normalize_period_data(periods: List[str]) -> List[pd.DataFrame]:
         df = _fetch_single_period_data(report_period)
         logger.info(f"fetch report_period: {report_period}, {len(df)} records.")
         if not df.empty:
-            df = _coerce_schema(df)
+            df = data_preprocess(df)
             all_data_frames.append(df)
         time.sleep(0.5)
     return all_data_frames
@@ -722,6 +723,7 @@ def update_a_stock_financial_profile(
         total_raw_records = sum(len(df) for df in all_data_frames)
 
         combined_df = combine_data_frames(all_data_frames)
+        combined_df.to_csv("original_new.csv", index=False)
         logger.info(f"Combined {len(all_data_frames)} periods into {len(combined_df)} total records")
 
         logger.info("Calculating TTM (Trailing Twelve Months) indicators...")
