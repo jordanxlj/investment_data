@@ -51,7 +51,7 @@ class TestTTMCalculation:
             expected_ttm_cols = [
                 'eps_ttm', 'revenue_ps_ttm', 'ocfps_ttm', 'cfps_ttm',
                 'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
-                'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+                'fcf_ttm', 'fcf_margin_ttm', 'debt_to_ebitda'
             ]
 
             existing_cols = [col for col in expected_ttm_cols if col in result.columns]
@@ -89,7 +89,7 @@ class TestTTMCalculation:
             'eps_ttm', 'revenue_ps_ttm', 'cfps_ttm',
             'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
             'revenue_cagr_3y', 'netincome_cagr_3y',
-            'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+            'fcf_margin_ttm', 'debt_to_ebitda'
         ]
 
         assert len(TTM_COLUMNS) == len(expected_cols)
@@ -288,15 +288,15 @@ class TestTTMCalculation:
 
         result = calculate_ttm_indicators(test_data_debt.copy())
 
-        # Should have debt_to_ebitda_ttm column
-        assert 'debt_to_ebitda_ttm' in result.columns
+        # Should have debt_to_ebitda column
+        assert 'debt_to_ebitda' in result.columns
 
         # Check net debt calculation: total_liab - money_cap
         last_row = result.iloc[-1]
         net_debt = 2200 - 600  # 1600
         expected_ratio = net_debt / 340  # ~4.71
 
-        assert abs(last_row['debt_to_ebitda_ttm'] - expected_ratio) < 0.01, f"Debt/EBITDA should be ~{expected_ratio}, got {last_row['debt_to_ebitda_ttm']}"
+        assert abs(last_row['debt_to_ebitda'] - expected_ratio) < 0.01, f"Debt/EBITDA should be ~{expected_ratio}, got {last_row['debt_to_ebitda']}"
 
     def test_debt_to_ebitda_fallback_to_total_liab(self):
         """Test Debt to EBITDA fallback when cash data is missing"""
@@ -316,12 +316,12 @@ class TestTTMCalculation:
         result = calculate_ttm_indicators(test_data_debt_fallback.copy())
 
         # Should still calculate using total liabilities as fallback
-        assert 'debt_to_ebitda_ttm' in result.columns
+        assert 'debt_to_ebitda' in result.columns
 
         last_row = result.iloc[-1]
         expected_ratio_fallback = 2200 / 340  # ~6.47 (higher than net debt ratio)
 
-        assert abs(last_row['debt_to_ebitda_ttm'] - expected_ratio_fallback) < 0.01, f"Debt/EBITDA fallback should be ~{expected_ratio_fallback}, got {last_row['debt_to_ebitda_ttm']}"
+        assert abs(last_row['debt_to_ebitda'] - expected_ratio_fallback) < 0.01, f"Debt/EBITDA fallback should be ~{expected_ratio_fallback}, got {last_row['debt_to_ebitda']}"
 
     def test_yuan_to_wan_fields_cleanup(self):
         """Test that YUAN_TO_WAN_FIELDS only contains fields defined in DDL"""
