@@ -7,15 +7,14 @@ import argparse
 import time
 import logging
 
-from util import (
-    setup_logging, CacheManager, init_tushare, retry_api_call
+from src.util import (
+    setup_logging, CacheManager, init_tushare, call_tushare_api_with_retry
 )
 
-setup_logging(log_file='tushare_validate.log')
+setup_logging(level=logging.DEBUG, log_file='tushare_validate.log')
 logger = logging.getLogger(__name__)
 
 cache_manager = CacheManager()
-
 tushare_pro = init_tushare()
 
 # API field name list (all three major financial statements contain these base fields)
@@ -30,8 +29,8 @@ INCOME_COLUMNS = [
     'basic_eps', 'diluted_eps', 'total_revenue', 'revenue',
     'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp',
     'assets_impair_loss', 'operate_profit', 'non_oper_income', 'non_oper_exp',
-    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'ebit',
-    'ebitda', 'invest_income'
+    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p',
+    'invest_income'
 ]
 
 # Balance sheet fields (core primitives)
@@ -64,7 +63,7 @@ INDICATOR_COLUMNS = [
     'cash_ratio', 'inv_turn', 'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn',
     'debt_to_assets', 'debt_to_eqt', 'roe', 'roa', 'roic', 'netprofit_yoy',
     'or_yoy', 'basic_eps_yoy', 'assets_yoy', 'eqt_yoy', 'ocf_yoy', 'roe_yoy',
-    'equity_yoy', 'rd_exp', 'fcff_ps'
+    'equity_yoy', 'rd_exp', 'fcff_ps', 'ebit', 'ebitda'
 ]
 
 def generate_periods(start_date: str, end_date: str, period: str = "annual") -> List[str]:
@@ -424,6 +423,10 @@ def compute_basic_indicators(income_df, balance_df, cashflow_df, fina_df, stocks
         logger.debug(f"Available columns in fina_df: {list(fina_df.columns)}")
         return pd.DataFrame()
     df = df.copy()
+
+    for field in df.columns:
+        field_null_count = df[field].isna().sum()
+        logger.debug(f"{field}_null_pct: {field_null_count / len(df) * 100.0}")
 
     # Calculate TTM indicators vectorized
     logger.info("Calculating TTM (Trailing Twelve Months) indicators...")

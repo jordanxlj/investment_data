@@ -7,6 +7,8 @@ from functools import wraps
 import time
 import logging
 
+logger = logging.getLogger(__name__)
+
 def setup_logging(level=logging.INFO, format_str='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s', log_file=None):
     """Setup logging configuration"""
     handlers = [logging.StreamHandler()]

@@ -154,7 +154,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   -- TTM (Trailing Twelve Months) indicators - our key additions
   eps_ttm                   FLOAT NULL COMMENT 'TTM每股收益(元)',
   revenue_ps_ttm            FLOAT NULL COMMENT 'TTM每股营收(元)',
-  cfps_ttm                  FLOAT NULL COMMENT 'TTM每股现金流(元)',
   roe_ttm                   FLOAT NULL COMMENT 'TTM净资产收益率(%)',
   roa_ttm                   FLOAT NULL COMMENT 'TTM总资产报酬率(%)',
   netprofit_margin_ttm      FLOAT NULL COMMENT 'TTM净利率(%)',
@@ -162,7 +161,6 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   revenue_cagr_3y           FLOAT NULL COMMENT '营收三年复合增长率(%)',
   netincome_cagr_3y         FLOAT NULL COMMENT '净利润三年复合增长率(%)',
   fcf_margin_ttm            FLOAT NULL COMMENT 'TTM自由现金流率(%)',
-  debt_to_ebitda_ttm        FLOAT NULL COMMENT 'TTM债务/EBITDA比率',
 
   PRIMARY KEY (ts_code, report_period),
   INDEX idx_ann_date (ann_date),
@@ -183,8 +181,8 @@ INCOME_COLUMNS = [
     'basic_eps', 'diluted_eps', 'total_revenue', 'revenue',
     'total_cogs', 'oper_cost', 'sell_exp', 'admin_exp', 'fin_exp',
     'assets_impair_loss', 'operate_profit', 'non_oper_income', 'non_oper_exp',
-    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'ebit',
-    'ebitda', 'invest_income', 'interest_exp', 'oper_exp', 'comshare_payable_dvd'
+    'total_profit', 'income_tax', 'n_income', 'n_income_attr_p', 'invest_income', 
+    'interest_exp', 'oper_exp', 'comshare_payable_dvd'
 ]
 
 # Balance sheet fields (synchronized with tushare_validate.py)
@@ -220,13 +218,11 @@ INDICATOR_COLUMNS = [
     'cash_ratio', 'inv_turn', 'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn',
     'debt_to_assets', 'debt_to_eqt', 'roe', 'roa', 'roic', 'netprofit_yoy',
     'or_yoy', 'basic_eps_yoy', 'assets_yoy', 'eqt_yoy', 'ocf_yoy', 'roe_yoy',
-    'equity_yoy', 'rd_exp',
+    'equity_yoy', 'rd_exp', 'ebit', 'ebitda', 
 
     # TTM (Trailing Twelve Months) indicators - our key additions
-    'eps_ttm', 'revenue_ps_ttm', 'cfps_ttm',
-    'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
-    'revenue_cagr_3y', 'netincome_cagr_3y',
-    'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+    'eps_ttm', 'revenue_ps_ttm', 'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 
+    'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y', 'fcf_margin_ttm'
 ]
 
 # === Data source field configuration ===
@@ -285,14 +281,14 @@ PER_SHARE_FIELDS = [
 # TTM indicator fields to add to database schema
 TTM_COLUMNS = [
     # TTM basic financial indicators
-    'eps_ttm', 'revenue_ps_ttm', 'cfps_ttm',
-    'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 'grossprofit_margin_ttm',
+    'eps_ttm', 'revenue_ps_ttm', 'roe_ttm', 'roa_ttm', 
+    'netprofit_margin_ttm', 'grossprofit_margin_ttm',
 
     # TTM growth indicators
     'revenue_cagr_3y', 'netincome_cagr_3y',
 
     # TTM efficiency and quality indicators
-    'fcf_margin_ttm', 'debt_to_ebitda_ttm'
+    'fcf_margin_ttm'
 ]
 
 
@@ -424,22 +420,8 @@ def calculate_ttm_indicators(df):
     else:
         logger.info("数据填充完成，无剩余缺失值")
 
-    quarterly_columns = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act']
-    # Add optional quarterly columns that might not exist in all datasets
-    optional_quarterly_cols = ['total_cogs', 'oper_cost']
-    for col in optional_quarterly_cols:
-        if col in df.columns:
-            quarterly_columns.append(col)
-
-    # 使用itertools.groupby来避免pandas groupby的FutureWarning
-    df = df.sort_values(['ts_code', 'report_period'])
-    groups = []
-    for ts_code, group in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
-        group_df = pd.DataFrame([row[1] for row in group])
-        groups.append((ts_code, group_df))
-
-    processed_groups = [calculate_quarterly_values(group, quarterly_columns) for ts_code, group in groups]
-    df = pd.concat(processed_groups, ignore_index=True)
+    quarterly_columns = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act', 'total_cogs', 'oper_cost']
+    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, quarterly_columns)).reset_index(drop=True)
 
     # Sort by ts_code and report_period
     df = df.sort_values(['ts_code', 'report_period'])
@@ -451,11 +433,11 @@ def calculate_ttm_indicators(df):
     # For TTM calculation, we need to use the original quarterly values, not the differences
     # TTM should be sum of last 4 quarters of actual reported values
     ttm_columns = {col: 'ttm_' + col for col in quarterly_columns}
-    for orig_col, ttm_col in ttm_columns.items():
+    for col, ttm_col in ttm_columns.items():
         # Use rolling sum on the original quarterly values with min_periods=3
         df[ttm_col] = (
-            df.groupby('ts_code')[orig_col]  # Use original column, not q_ column
-            .rolling(window=4, min_periods=3)  # Allow TTM with at least 3 quarters
+            df.groupby('ts_code')['q_' + col]
+            .rolling(window=4, min_periods=4)
             .sum()
             .reset_index(level=0, drop=True)
         )
@@ -472,7 +454,6 @@ def calculate_ttm_indicators(df):
     # Per-share calculations (vectorized)
     df['eps_ttm'] = np.where(df['total_share'] > 0, df['ttm_n_income_attr_p'] / df['total_share'], 0)
     df['revenue_ps_ttm'] = np.where(df['total_share'] > 0, df['ttm_total_revenue'] / df['total_share'], 0)
-    df['cfps_ttm'] = np.where(df['total_share'] > 0, df['ttm_im_net_cashflow_oper_act'] / df['total_share'], 0)
 
     # ROE and ROA (using period-end values)
     df['roe_ttm'] = np.where(df['total_hldr_eqy_exc_min_int'] > 0,
@@ -533,20 +514,10 @@ def calculate_ttm_indicators(df):
     df['fcf_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0,
                                     (df['fcf_ttm'] / df['ttm_total_revenue']) * 100, np.nan)
 
-    # Debt to EBITDA TTM ratio - using net debt (total_liab - money_cap) for more accurate leverage measure
-    if 'total_liab' in df.columns and 'money_cap' in df.columns and 'ebitda' in df.columns:
-        net_debt = df['total_liab'] - df['money_cap']
-        df['debt_to_ebitda_ttm'] = np.where(df['ebitda'] > 0, net_debt / df['ebitda'], np.nan)
-    elif 'total_liab' in df.columns and 'ebitda' in df.columns:
-        # Fallback to total liabilities if cash data not available
-        df['debt_to_ebitda_ttm'] = np.where(df['ebitda'] > 0, df['total_liab'] / df['ebitda'], np.nan)
-    else:
-        df['debt_to_ebitda_ttm'] = np.nan
-
     # Round results
-    round_cols = ['eps_ttm', 'revenue_ps_ttm', 'cfps_ttm', 'roe_ttm', 'roa_ttm',
+    round_cols = ['eps_ttm', 'revenue_ps_ttm', 'roe_ttm', 'roa_ttm',
                   'netprofit_margin_ttm', 'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y',
-                  'fcf_margin_ttm', 'debt_to_ebitda_ttm']
+                  'fcf_margin_ttm']
     df[round_cols] = df[round_cols].round(4)
 
     # Remove filled rows (missing=1) after calculations are complete
@@ -758,13 +729,6 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
     """
     Fetch financial data for a single period
 
-    ✨ Optimization features:
-    - Retry mechanism: Each API call retries up to 3 times with exponential backoff
-    - Smart merging: Merge all data sources at once, supports partial data
-    - Error recovery: Failure of one data source doesn't affect others
-    - Detailed logging: Complete data fetching and merging process records
-    - Simplified configuration: Field names identical to API, no mapping table needed
-
     Data merging strategy:
     1. Three major financial statements (Income + Balance + Cash Flow) use common keys for merging
     2. Financial indicator data uses simplified keys for merging (no report_type field)
@@ -940,7 +904,7 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
 
             # Convert report_period to DATE object directly from end_date
             # This creates a proper DATE object for the reporting period end date
-            merged_df['report_period'] = pd.to_datetime(merged_df['end_date'], format='%Y%m%d').dt.date
+            merged_df['report_period'] = merged_df['end_date']
             merged_df['period'] = 'annual' if report_period.endswith('1231') else 'quarter'
             merged_df['currency'] = 'CNY'  # A-share default currency is CNY
 
@@ -1092,65 +1056,13 @@ def update_a_stock_financial_profile(
 ) -> None:
     """
     Incrementally fetch Tushare financial profile data and write to MySQL ts_a_stock_financial_profile table
-
-    ✨ Optimization features:
-    - Period-by-period processing: Avoid memory overflow from loading too much data at once
-    - Real-time writing: Write to database immediately after processing each period
-    - Memory-friendly: Release memory immediately after processing each period's data
-    - 🔄 Retry mechanism: Automatically retry API calls up to 3 times with exponential backoff
-    - 🛡️ Global error handling: Catch database and API exceptions with graceful degradation
-
-    Contains complete financial data, grouped by relevance:
-    1. Three major financial statements: Income statement, Balance sheet, Cash flow statement
-    2. Basic financial indicators: Gross margin, net margin and other basic indicators
-    3. Solvency indicators: Current ratio, quick ratio, debt-to-assets ratio, etc.
-    4. Operating efficiency indicators: Turnover ratios, operating efficiency, etc.
-    5. Profitability indicators: ROE, ROA, net margin, etc.
-    6. DuPont analysis indicators: Equity multiplier, ROE decomposition, etc.
-    7. Per share indicators: Earnings per share, book value per share, etc.
-    8. Cash flow indicators: Cash flow ratios, cash flow efficiency, etc.
-    9. Growth indicators: Various business growth rates
-    10. Quarterly financial indicators: Quarterly data and ratios
-    11. Cost and expense structure analysis: Expense ratio analysis
-    12. Asset structure analysis: Asset allocation and capital structure
-    13. Valuation indicators: Market value, intrinsic value, etc.
+    Contains complete financial data, grouped by relevance
 
     Data sources:
     - pro.income_vip() - Income statement
     - pro.balancesheet_vip() - Balance sheet
     - pro.cashflow_vip() - Cash flow statement
     - pro.fina_indicator_vip() - Financial indicators
-
-    Data type optimization:
-    - Ratios and per-share earnings: FLOAT type (precise to 6 decimal places)
-    - Absolute amounts: DECIMAL(16,4) type (precise to cent)
-    - Date fields: DATE type (report_period, ann_date) for efficient date operations and storage
-
-    Field configuration optimization:
-    - Field names identical to Tushare API, no mapping table needed
-    - Use COMMON_FIELDS and INDICATOR_BASE_FIELDS for simplified configuration
-    - Four major data source groups: Income statement, Balance sheet, Cash flow, Financial indicators
-
-    Processing workflow:
-    1. Generate list of periods that need processing
-    2. Process each period individually:
-       - Fetch four major data sources (three major statements + financial indicators)
-       - Smart merging: Merge all available data at once
-       - Error recovery: Partial data failure doesn't affect the whole process
-       - Write to database immediately to free up memory
-    3. Statistical processing results
-
-    Data merging optimization:
-    - One-time merging strategy: Three major statements → Financial indicators
-    - Smart key matching: Select appropriate join keys based on data source characteristics
-    - Partial data support: Continue even if some data sources fail
-    - Detailed status monitoring: Real-time display of data fetching and merging status
-
-    Retry mechanism details:
-    - Each API call failure automatically retries, up to 3 times
-    - Retry intervals: 1s → 2s → 4s (exponential backoff)
-    - Detailed recording of error information for each retry
-    - Failure of one API doesn't affect other API calls
 
     Args:
         mysql_url: MySQL connection URL
@@ -1167,13 +1079,14 @@ def update_a_stock_financial_profile(
 
         logger.info(f"Starting to update financial profile data, end date: {end_date}, period type: {period}, limit: {limit}")
 
+        '''
         # Create database engine
         engine = create_engine(mysql_url, pool_recycle=3600)
 
         # Create table structure
         with engine.begin() as conn:
             conn.execute(text(CREATE_TABLE_DDL))
-
+        '''
         # Fetch and process financial profile data period by period
         logger.info("Fetching and processing financial profile data period by period...")
 
