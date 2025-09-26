@@ -162,6 +162,10 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   netincome_cagr_3y         FLOAT NULL COMMENT '净利润三年复合增长率(%)',
   fcf_margin_ttm            FLOAT NULL COMMENT 'TTM自由现金流率(%)',
 
+  -- Ratio indicators of quality and r&d investment
+  debt_to_ebitda            FLOAT NULL COMMENT '债务/EBITDA比率',
+  rd_exp_to_capex           FLOAT NULL COMMENT '研发支出/资本支出比率',
+
   PRIMARY KEY (ts_code, report_period),
   INDEX idx_ann_date (ann_date),
   INDEX idx_report_period (report_period),
@@ -222,7 +226,8 @@ INDICATOR_COLUMNS = [
 
     # TTM (Trailing Twelve Months) indicators - our key additions
     'eps_ttm', 'revenue_ps_ttm', 'roe_ttm', 'roa_ttm', 'netprofit_margin_ttm', 
-    'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y', 'fcf_margin_ttm'
+    'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y', 
+    'fcf_margin_ttm', 'debt_to_ebitda', 'rd_exp_to_capex'
 ]
 
 # === Data source field configuration ===
@@ -287,8 +292,8 @@ TTM_COLUMNS = [
     # TTM growth indicators
     'revenue_cagr_3y', 'netincome_cagr_3y',
 
-    # TTM efficiency and quality indicators
-    'fcf_margin_ttm'
+    # Efficiency and quality indicators
+    'fcf_margin_ttm', 'debt_to_ebitda', 'rd_exp_to_capex'
 ]
 
 
@@ -365,7 +370,7 @@ def calculate_ttm_indicators(df):
             intermediate_missing = merged[(merged['missing_type'] == 'intermediate_missing')]
             if not intermediate_missing.empty:
                 missing_periods = intermediate_missing['report_period'].tolist()
-                logger.warning(f"{ts_code}: 中间数据缺失 {len(missing_periods)} 个季度: {missing_periods}")
+                logger.info(f"{ts_code}: 中间数据缺失 {len(missing_periods)} 个季度: {missing_periods}")
 
         # 统计缺失情况
         missing_stats = merged['missing_type'].value_counts()
@@ -422,9 +427,6 @@ def calculate_ttm_indicators(df):
 
     quarterly_columns = ['n_income_attr_p', 'total_revenue', 'im_net_cashflow_oper_act', 'total_cogs', 'oper_cost']
     df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, quarterly_columns)).reset_index(drop=True)
-
-    # Sort by ts_code and report_period
-    df = df.sort_values(['ts_code', 'report_period'])
 
     # Calculate rolling TTM sums for quarterly values using vectorized operations
     # First sort by ts_code and report_date to ensure proper rolling window
@@ -495,6 +497,7 @@ def calculate_ttm_indicators(df):
 
     # FCF TTM (Free Cash Flow) - improved calculation using historical CapEx average
     # FCF = Operating Cash Flow - CapEx (Capital Expenditures)
+    df['fcf_ttm'] = np.nan
     if 'n_cashflow_act' in df.columns and 'c_pay_acq_const_fiolta' in df.columns:
         df['fcf_ttm'] = df['n_cashflow_act'] - df['c_pay_acq_const_fiolta'].fillna(0)
     elif 'n_cashflow_act' in df.columns:
@@ -507,17 +510,51 @@ def calculate_ttm_indicators(df):
             )
         else:
             df['fcf_ttm'] = df['n_cashflow_act'] * 0.7  # Pure fallback if column missing
-    else:
-        df['fcf_ttm'] = np.nan
 
     # FCF Margin TTM
     df['fcf_margin_ttm'] = np.where(df['ttm_total_revenue'] > 0,
                                     (df['fcf_ttm'] / df['ttm_total_revenue']) * 100, np.nan)
 
+    # Debt to EBITDA TTM ratio - using net debt (total_liab - money_cap) for more accurate leverage measure
+    if 'total_liab' in df.columns and 'money_cap' in df.columns and 'ebitda' in df.columns:
+        net_debt = df['total_liab'] - df['money_cap']
+        df['debt_to_ebitda'] = np.where(df['ebitda'] > 0, net_debt / df['ebitda'] * 100.0, np.nan)
+    elif 'total_liab' in df.columns and 'ebitda' in df.columns:
+        # Fallback to total liabilities if cash data not available
+        df['debt_to_ebitda'] = np.where(df['ebitda'] > 0, df['total_liab'] / df['ebitda'] * 100.0, np.nan)
+    else:
+        df['debt_to_ebitda'] = np.nan
+
+    if 'rd_exp' in df.columns and 'c_pay_acq_const_fiolta' in df.columns:
+        df['rd_exp_to_capex'] = np.where(df['c_pay_acq_const_fiolta'] > 0, df['rd_exp'] / (df['c_pay_acq_const_fiolta'] + df['rd_exp']) * 100.0, np.nan)
+    else:
+        df['rd_exp_to_capex'] = np.nan
+
+    # Fill NaN values in quality/r&d indicators with the most recent valid value within the past year (4 quarters)
+    df = df.sort_values(['ts_code', 'report_date'])
+
+    def fill_with_recent_valid(series):
+        """Fill NaN values with the most recent valid value within past 4 quarters"""
+        result = series.copy()
+        for i in range(len(series)):
+            if pd.isna(result.iloc[i]):
+                # Look back up to 4 periods for valid values
+                for j in range(1, 5):  # Check previous 1-4 periods
+                    if i - j >= 0 and not pd.isna(series.iloc[i - j]):
+                        result.iloc[i] = series.iloc[i - j]
+                        break
+        return result
+
+    # Apply filling logic to quality indicators
+    quality_indicators = ['debt_to_ebitda', 'rd_exp_to_capex']
+    for col in quality_indicators:
+        if col in df.columns:
+            df[col] = df.groupby('ts_code')[col].transform(fill_with_recent_valid)
+
     # Round results
     round_cols = ['eps_ttm', 'revenue_ps_ttm', 'roe_ttm', 'roa_ttm',
                   'netprofit_margin_ttm', 'grossprofit_margin_ttm', 'revenue_cagr_3y', 'netincome_cagr_3y',
-                  'fcf_margin_ttm']
+                  'fcf_margin_ttm', 'debt_to_ebitda', 'rd_exp_to_capex']
     df[round_cols] = df[round_cols].round(4)
 
     # Remove filled rows (missing=1) after calculations are complete
@@ -553,8 +590,8 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
         # Convert date columns from string to DATE objects for efficient storage and queries
         # This avoids SQL-level date conversion and improves insertion performance
         # Convert report_period from '2024-03-31' format to DATE object
-        if 'report_period' in out.columns:
-            out['report_period'] = pd.to_datetime(out['report_period'], format='%Y-%m-%d', errors='coerce').dt.date
+        #if 'report_period' in out.columns:
+        #    out['report_period'] = pd.to_datetime(out['report_period'], format='%Y-%m-%d', errors='coerce').dt.date
 
         # Convert ann_date from '20240331' format to DATE object
         if 'ann_date' in out.columns:
@@ -1126,6 +1163,7 @@ def update_a_stock_financial_profile(
 
         # Combine all data for TTM calculations
         combined_df = pd.concat(all_data_frames, ignore_index=True)
+
         logger.info(f"Combined {len(all_data_frames)} periods into {len(combined_df)} total records")
 
         # Calculate TTM indicators
@@ -1134,10 +1172,11 @@ def update_a_stock_financial_profile(
         logger.info(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
 
         # Clean up temporary columns before database insertion
-        combined_df = _coerce_schema(combined_df)
+        #combined_df = _coerce_schema(combined_df)
+        combined_df.to_csv('update_financial_profile.csv')
 
         # Upsert to database in batches
-        total_written = _upsert_batch(engine, combined_df, chunksize=chunksize)
+        #total_written = _upsert_batch(engine, combined_df, chunksize=chunksize)
 
         logger.info(f"Update completed:")
         logger.info(f"- Processed {len(periods)} periods")
