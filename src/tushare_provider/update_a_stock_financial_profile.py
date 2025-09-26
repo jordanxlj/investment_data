@@ -3,7 +3,7 @@ import time
 import datetime
 import logging
 from typing import Optional, List, Dict, Any, Union
-
+import itertools
 import fire
 import pandas as pd
 import numpy as np
@@ -294,7 +294,7 @@ def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
 def calculate_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
     """Calculate rolling TTM sums for specified columns"""
     for col in sum_cols:
-        df[f'ttm_{col}'] = df.groupby('ts_code')[col].rolling(4, min_periods=3).sum().reset_index(0, drop=True)
+        df[f'ttm_{col}'] = df.groupby('ts_code')['q_' + col].rolling(4, min_periods=4).sum().reset_index(0, drop=True)
     return df
 
 def calculate_cagr(df: pd.DataFrame, col: str, output_prefix: str = None, years: int = 3) -> pd.DataFrame:
@@ -360,15 +360,89 @@ def calculate_rd_exp_to_capex(df: pd.DataFrame) -> pd.DataFrame:
         )
     return df
 
+def get_existing_dates(group: pd.DataFrame) -> pd.Series:
+    """Extract and sort existing report dates."""
+    return group['report_date'].dropna().sort_values().unique()
+
+def generate_full_quarters(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    """Generate complete quarter-end date sequence within range."""
+    return pd.date_range(start=min_date, end=max_date, freq='QE-SEP')
+
+def create_full_df(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    """Create DataFrame with full quarter dates and ts_code."""
+    full_df = pd.DataFrame({'report_date': dates})
+    full_df['report_period'] = full_df['report_date'].dt.strftime('%Y%m%d')
+    full_df['ts_code'] = ts_code
+    return full_df
+
+def merge_with_original(full: pd.DataFrame, original: pd.DataFrame) -> pd.DataFrame:
+    """Merge full date frame with original data."""
+    original = original.drop_duplicates(subset=['ts_code', 'report_period', 'report_date'], keep='last')
+    merged = pd.merge(full, original, on=['ts_code', 'report_period', 'report_date'], how='left')
+
+    # set missing
+    missing_mask = merged['ann_date'].isna()
+    merged['missing'] = missing_mask.astype(int)
+    return merged
+    
+# 为每个ts_code补全中间缺失的季度序列
+def complete_quarters(origin: pd.DataFrame) -> pd.DataFrame:
+    origin['report_date'] = pd.to_datetime(origin['report_period'], format='%Y%m%d')
+    df = origin.sort_values(['ts_code', 'report_date'])
+    completed_groups = []
+
+    for ts_code, group in itertools.groupby(df.iterrows(), key=lambda x: x[1]['ts_code']):
+        existing_dates = group['report_date'].dropna().sort_values().unique()
+        if len(existing_dates) < 2:
+            group_copy = group.copy()
+            group_copy['missing'] = 0
+            completed_groups.append(group_copy)
+            continue
+        
+        min_date = existing_dates.min()
+        max_date = existing_dates.max()
+        
+        full_dates = generate_full_quarters(min_date, max_date)
+        if len(full_dates) == 0:
+            completed_groups.append(pd.DataFrame())
+            continue
+        full_df = create_full_df(full_dates)
+        merged = merge_with_original(full_df, group)
+        completed_groups.append(merged.sort_values('report_date').reset_index(drop=True))
+
+    return pd.concat(completed_groups, ignore_index=True)
+
+def calculate_quarterly_values(group: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Calculate quarterly values using vectorized operations within each year"""
+    group = group.sort_values('report_period')
+    group['year'] = group['report_period'].astype(str).str[:4]
+    for col in columns:
+        group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
+    return group.drop(columns=['year'])
+
+def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
+    # Remove filled rows (missing=1) after calculations are complete
+    if 'missing' in df.columns:
+        original_count = len(df)
+        df = df[df['missing'] != 1].copy()
+        removed_count = original_count - len(df)
+        if removed_count > 0:
+            logger.info(f"Removed {removed_count} filled rows after TTM/CAGR calculations")
+        df = df.drop(columns=['missing'])
+    return df
+
 def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate all TTM indicators"""
     if df.empty:
         return df
 
     df = df.sort_values(['ts_code', 'report_period'])
+    # Complete missingquarters
+    df = complete_quarters(df)
 
     # Calculate TTM sums
     sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'operate_profit', 'total_cogs']  # Add relevant sum columns
+    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, quarterly_columns)).reset_index(drop=True)
     df = calculate_ttm_sums(df, sum_cols)
 
     # Calculate per-share TTM
@@ -399,6 +473,7 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = calculate_debt_to_ebitda_ttm(df)
     df = calculate_rd_exp_to_capex(df)
 
+    df = clean_completed_rows(df)
     return df
 
 def fetch_api_data(api_func, fields: str, period: str) -> pd.DataFrame:
