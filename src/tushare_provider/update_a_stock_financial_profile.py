@@ -297,12 +297,15 @@ def calculate_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
         df[f'ttm_{col}'] = df.groupby('ts_code')[col].rolling(4, min_periods=3).sum().reset_index(0, drop=True)
     return df
 
-def calculate_cagr(df: pd.DataFrame, col: str, years: int = 3) -> pd.DataFrame:
+def calculate_cagr(df: pd.DataFrame, col: str, output_prefix: str = None, years: int = 3) -> pd.DataFrame:
     """Calculate CAGR for specified column"""
+    if output_prefix is None:
+        output_prefix = col
+
     lag_col = f'{col}_{years}y_ago'
     if lag_col in df.columns:
         mask_positive = (df[lag_col] > 0) & (df[col] > 0)
-        df[f'{col}_cagr_{years}y'] = np.where(
+        df[f'{output_prefix}_cagr_{years}y'] = np.where(
             mask_positive,
             ((df[col] / df[lag_col]) ** (1/years) - 1) * 100,
             np.nan
@@ -340,7 +343,7 @@ def calculate_fcf_margin_ttm(df: pd.DataFrame) -> pd.DataFrame:
 def calculate_debt_to_ebitda_ttm(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate Debt to EBITDA TTM"""
     if 'total_liab' in df.columns and 'ttm_ebitda' in df.columns:
-        df['debt_to_ebitda_ttm'] = np.where(
+        df['debt_to_ebitda'] = np.where(
             df['ttm_ebitda'] > 0,
             df['total_liab'] / df['ttm_ebitda'],
             np.nan
@@ -352,7 +355,7 @@ def calculate_rd_exp_to_capex(df: pd.DataFrame) -> pd.DataFrame:
     if 'rd_exp' in df.columns and 'c_pay_acq_const_fiolta' in df.columns:
         df['rd_exp_to_capex'] = np.where(
             df['c_pay_acq_const_fiolta'] > 0,
-            (df['rd_exp'] / df['c_pay_acq_const_fiolta']) * 100,
+            df['rd_exp'] / (df['c_pay_acq_const_fiolta'] + df['rd_exp']) * 100,
             np.nan
         )
     return df
@@ -385,8 +388,8 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['grossprofit_margin_ttm'] = ((df['ttm_total_revenue'] - df['ttm_total_cogs']) / df['ttm_total_revenue']) * 100
 
     # Calculate CAGRs
-    df = calculate_cagr(df, 'total_revenue')
-    df = calculate_cagr(df, 'n_income_attr_p', col='netincome')
+    df = calculate_cagr(df, 'total_revenue', output_prefix='revenue')
+    df = calculate_cagr(df, 'n_income_attr_p', output_prefix='netincome')
 
     # Calculate FCF and related
     df = calculate_fcf_ttm(df)
