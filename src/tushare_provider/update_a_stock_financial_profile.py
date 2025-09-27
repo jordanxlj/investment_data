@@ -17,7 +17,7 @@ from ..util import (
     setup_logging, init_tushare, call_tushare_api_with_retry
 )
 
-setup_logging(log_file='update_a_stock_financial_profile.log')
+setup_logging(level=logging.DEBUG, log_file='update_a_stock_financial_profile.log')
 logger = logging.getLogger(__name__)
 
 tushare_pro = init_tushare()
@@ -227,7 +227,7 @@ TTM_COLUMNS = [
 ALL_COLUMNS = COMMON_FIELDS + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
 
 # Fields to convert from Yuan to Wan
-YUAN_TO_WAN_FIELDS = INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + ['rd_exp', 'fcf_ttm']
+YUAN_TO_WAN_FIELDS = INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + ['gross_margin', 'rd_exp', 'ebit', 'ebitda','fcf_ttm']
 
 def convert_yuan_to_wan(df: pd.DataFrame, fields: List[str]) -> pd.DataFrame:
     """Convert specified fields from Yuan to Wan (divide by 10,000)"""
@@ -375,12 +375,15 @@ def create_full_df(dates: pd.DatetimeIndex, ts_code: str) -> pd.DataFrame:
     full_df['ts_code'] = ts_code
     return full_df
 
-def merge_with_original(full: pd.DataFrame, original: pd.DataFrame) -> pd.DataFrame:
+def merge_with_original(ts_code: str, full: pd.DataFrame, original: pd.DataFrame) -> pd.DataFrame:
     """Merge full date frame with original data."""
     original = original.drop_duplicates(subset=['ts_code', 'report_period', 'report_date'], keep='last')
     merged = pd.merge(full, original, on=['ts_code', 'report_period', 'report_date'], how='left')
 
     # set missing
+    missing_count = merged['ann_date'].isna().sum()
+    if missing_count > 0:
+        logger.info(f"complete data len: {ts_code}, {missing_count}")
     missing_mask = merged['ann_date'].isna()
     merged['missing'] = missing_mask.astype(int)
     return merged
@@ -407,7 +410,7 @@ def complete_quarters(origin: pd.DataFrame) -> pd.DataFrame:
             completed_groups.append(pd.DataFrame())
             continue
         full_df = create_full_df(full_dates, ts_code)
-        merged = merge_with_original(full_df, group_df)
+        merged = merge_with_original(ts_code, full_df, group_df)
         completed_groups.append(merged.sort_values('report_date').reset_index(drop=True))
 
     return pd.concat(completed_groups, ignore_index=True)
@@ -440,11 +443,13 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # Complete missingquarters
     df = complete_quarters(df)
-
+    logger.debug(f"in calculate_ttm_indicators, after complete_quarters, df len: {len(df)}")
     # Calculate TTM sums
     sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'operate_profit', 'total_cogs']  # Add relevant sum columns
     df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
+    logger.debug(f"in calculate_ttm_indicators, after calculate_quarterly_values, df len: {len(df)}")
     df = calculate_ttm_sums(df, sum_cols)
+    logger.debug(f"after calculate_ttm_sums, df len: {len(df)}")
 
     # Calculate per-share TTM
     if 'ttm_n_income_attr_p' in df.columns and 'total_share' in df.columns:
@@ -474,7 +479,9 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = calculate_debt_to_ebitda_ttm(df)
     df = calculate_rd_exp_to_capex(df)
 
+    logger.debug(f"before clean_completed_rows, df len: {len(df)}")
     df = clean_completed_rows(df)
+    logger.debug(f"after clean_completed_rows, df len: {len(df)}")
     return df
 
 def fetch_api_data(api_func, fields: str, period: str) -> pd.DataFrame:
@@ -485,18 +492,24 @@ def fetch_api_data(api_func, fields: str, period: str) -> pd.DataFrame:
         logger.error(f"Error fetching data from {api_func.__name__}: {e}")
         return pd.DataFrame()
 
-def rename_end_date_to_report_period(df: pd.DataFrame) -> pd.DataFrame:
-    """Rename 'end_date' to 'report_period' if exists"""
+def single_period_data_preprocess(df: pd.DataFrame, common_fields: List[str]=None) -> pd.DataFrame:
+    """single period data preprocess"""
     if 'end_date' in df.columns:
         df = df.rename(columns={'end_date': 'report_period'})
+
+    # Deduplicate
+    df = deduplicate_dataframe(df, ['ts_code', 'report_period'])
+
+    if common_fields:
+        df = df.drop(columns=[col for col in common_fields if col in df.columns], errors='ignore')
     return df
 
-def merge_dataframes(dfs: List[pd.DataFrame], on: List[str]) -> pd.DataFrame:
+def merge_dataframes(main: pd.DataFrame, dfs: List[pd.DataFrame], on: List[str]) -> pd.DataFrame:
     """Merge multiple DataFrames on specified keys"""
-    merged = None
+    merged = main.copy()
     for df in dfs:
         if not df.empty:
-            merged = df if merged is None else merged.merge(df, on=on, how='outer')
+            merged = merged.merge(df, on=on, how='left')
     return merged if merged is not None else pd.DataFrame()
 
 def deduplicate_dataframe(df: pd.DataFrame, subset: List[str]) -> pd.DataFrame:
@@ -517,18 +530,14 @@ def _fetch_single_period_data(report_period: str) -> pd.DataFrame:
         cashflow_df = fetch_api_data(tushare_pro.cashflow_vip, ','.join(COMMON_FIELDS + CASHFLOW_FIELDS), report_period)
         indicator_df = fetch_api_data(tushare_pro.fina_indicator_vip, ','.join(COMMON_FIELDS + INDICATOR_FIELDS), report_period)
 
-        # Rename columns for consistency
-        income_df = rename_end_date_to_report_period(income_df)
-        balance_df = rename_end_date_to_report_period(balance_df)
-        cashflow_df = rename_end_date_to_report_period(cashflow_df)
-        indicator_df = rename_end_date_to_report_period(indicator_df)
+        common_non_keys = ['ann_date', 'end_date', 'report_type']
+        income_df = single_period_data_preprocess(income_df, common_non_keys)
+        balance_df = single_period_data_preprocess(balance_df, common_non_keys)
+        cashflow_df = single_period_data_preprocess(cashflow_df, common_non_keys)
+        indicator_df = single_period_data_preprocess(indicator_df)
 
         # Merge all dataframes
-        merged_df = merge_dataframes([income_df, balance_df, cashflow_df, indicator_df], on=['ts_code', 'ann_date', 'report_period'])
-
-        # Deduplicate
-        merged_df = deduplicate_dataframe(merged_df, ['ts_code', 'report_period'])
-
+        merged_df = merge_dataframes(indicator_df, [income_df, balance_df, cashflow_df], on=['ts_code', 'report_period'])
         return merged_df
 
     except Exception as e:
