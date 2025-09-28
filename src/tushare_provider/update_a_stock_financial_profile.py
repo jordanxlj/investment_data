@@ -291,10 +291,16 @@ def data_preprocess(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def calculate_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
+def calculate_quarterly_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
     """Calculate rolling TTM sums for specified columns"""
     for col in sum_cols:
         df[f'ttm_{col}'] = df.groupby('ts_code')['q_' + col].rolling(4, min_periods=4).sum().reset_index(0, drop=True)
+    return df
+
+def calculate_semi_annual_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
+    """Calculate rolling TTM sums for specified columns"""
+    for col in sum_cols:
+        df[f'ttm_{col}'] = df.groupby('ts_code')['hy_' + col].rolling(4, min_periods=2).sum().reset_index(0, drop=True)
     return df
 
 def calculate_cagr(df: pd.DataFrame, col: str, output_prefix: str = None, years: int = 3) -> pd.DataFrame:
@@ -424,6 +430,78 @@ def calculate_quarterly_values(group: pd.DataFrame, columns: List[str]) -> pd.Da
         group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
     return group.drop(columns=['year'])
 
+def calculate_semi_annual_values(group: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Calculate lower half-year diffs for semi-annual reports, with validation."""
+    if group.empty:
+        return group
+    
+    group = group.sort_values('report_period').copy()  # Safe copy
+    group['year'] = group['report_period'].str[:4].astype(int)  # Ensure int for safety
+    if group['ts_code'].iloc[0] == '000003.SZ':
+        import pdb; pdb.set_trace()
+    
+    def process_year(ygroup: pd.DataFrame) -> pd.DataFrame:
+        periods = ygroup['report_period'].str[4:].unique()
+        valid_num = len(ygroup[ygroup['missing'] != 1])
+        if len(ygroup) < 1 or valid_num > 2:
+            return ygroup
+        
+        logger.warning(f"Semi-annual process year {ygroup['ts_code'].iloc[0]}-{ygroup['year'].iloc[0]}: invalid row count {len(ygroup)}")
+        has_h1 = '0630' in periods
+        has_fy = '1231' in periods
+        
+        if not has_h1 and not has_fy:
+            return ygroup  # Nothing to process
+        
+        adjusted_rows = []
+        
+        # Add original rows first
+        adjusted_rows.extend(ygroup.to_dict('records'))
+        
+        if has_h1 and has_fy:
+            h1 = ygroup[ygroup['report_period'].str.endswith('0630')].iloc[0].copy()
+            fy = ygroup[ygroup['report_period'].str.endswith('1231')].iloc[0].copy()
+            
+            h2 = fy.copy()
+            h2['report_period'] = h2['year'].astype(str) + '1231_H2'
+            h2['report_date'] = pd.to_datetime(str(h2['year']) + '-12-31')
+            
+            for col in columns:
+                if col in ygroup.columns:
+                    # H1: keep original
+                    h1['hy_' + col] = h1[col]
+                    # H2: diff
+                    diff = fy[col] - h1[col]
+                    if pd.isna(diff):
+                        logger.warning(f"Invalid diff for {col} in year {h2['year']}: {diff}")
+                        continue
+                    h2['hy_' + col] = diff
+            adjusted_rows.append(h1.to_dict())
+            adjusted_rows.append(h2.to_dict())
+        
+        elif has_h1:
+            h1 = ygroup.iloc[0].copy()
+            for col in columns:
+                h1['hy_' + col] = h1.get(col, np.nan)  # Keep H1 if no FY
+            # No H2 without FY
+            adjusted_rows.append(h1.to_dict())
+        elif has_fy:
+            fy = ygroup.iloc[0].copy()
+            for col in columns:
+                fy['hy_' + col] = fy.get(col, np.nan)  # Treat FY as full if no H1
+            adjusted_rows.append(fy.to_dict())
+        
+        return pd.DataFrame(adjusted_rows)
+    
+    # Collect all processed years
+    processed_dfs = []
+    for _, ygroup in group.groupby('year'):
+        processed_dfs.append(process_year(ygroup))
+    
+    adjusted = pd.concat(processed_dfs, ignore_index=True) if processed_dfs else pd.DataFrame()
+    adjusted.drop('year', axis=1, inplace=True, errors='ignore')
+    return adjusted.sort_values('report_period').reset_index(drop=True)
+
 def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
     # Remove filled rows (missing=1) after calculations are complete
     if 'missing' in df.columns:
@@ -433,6 +511,35 @@ def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
         if removed_count > 0:
             logger.info(f"Removed {removed_count} filled rows after TTM/CAGR calculations")
         df = df.drop(columns=['missing'])
+    return df
+
+def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
+    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']  # Add relevant sum columns
+
+    # Calculate quarterly TTM diffs
+    df_quarter = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
+    # Calculate quarterly TTM sums
+    df_quarter = calculate_quarterly_ttm_sums(df_quarter, sum_cols)
+    # Identify rows where any ttm_ col is NaN (potential for semi fallback)
+    ttm_cols = [f'ttm_{col}' for col in sum_cols]
+    na_mask = df_quarter[ttm_cols].isna().any(axis=1)
+    
+    if not na_mask.any():
+        return df_quarter  # All good, no need for fallback
+    
+    # Calculate semi-annual diffs
+    df_semi = df_quarter.groupby('ts_code').apply(lambda g: calculate_semi_annual_values(g, sum_cols)).reset_index(drop=True)
+    import pdb; pdb.set_trace()
+    # For groups with NaNs, apply semi-annual as fallback
+    def fallback_semi(g: pd.DataFrame, na_m: pd.Series) -> pd.DataFrame:
+        g_semi = calculate_semi_annual_ttm_sums(g.copy(), sum_cols)
+        # Fill only NaN rows from quarterly with semi values
+        for col in sum_cols:
+            g['ttm_' + col] = np.where(na_m, g_semi['ttm_' + col], g['ttm_' + col])
+        return g
+    
+    # Apply fallback per group
+    df = df_semi.groupby('ts_code').apply(lambda g: fallback_semi(g, na_mask[g.index])).reset_index(drop=True)
     return df
 
 def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -445,12 +552,9 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # Complete missingquarters
     df = complete_quarters(df)
     logger.debug(f"in calculate_ttm_indicators, after complete_quarters, df len: {len(df)}")
-    # Calculate TTM sums
-    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']  # Add relevant sum columns
-    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
-    logger.debug(f"in calculate_ttm_indicators, after calculate_quarterly_values, df len: {len(df)}")
-    df = calculate_ttm_sums(df, sum_cols)
-    logger.debug(f"after calculate_ttm_sums, df len: {len(df)}")
+
+    # Calculate TTM sum values
+    df = calculate_ttm_values(df)
 
     # Calculate per-share TTM
     if 'ttm_n_income_attr_p' in df.columns and 'total_share' in df.columns:
