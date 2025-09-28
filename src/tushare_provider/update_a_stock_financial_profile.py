@@ -301,8 +301,9 @@ def calculate_cagr(df: pd.DataFrame, col: str, output_prefix: str = None, years:
     """Calculate CAGR for specified column"""
     if output_prefix is None:
         output_prefix = col
-
     lag_col = f'{col}_{years}y_ago'
+    df[lag_col] = df.groupby('ts_code')[col].shift(12)
+
     if lag_col in df.columns:
         mask_positive = (df[lag_col] > 0) & (df[col] > 0)
         df[f'{output_prefix}_cagr_{years}y'] = np.where(
@@ -445,7 +446,7 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = complete_quarters(df)
     logger.debug(f"in calculate_ttm_indicators, after complete_quarters, df len: {len(df)}")
     # Calculate TTM sums
-    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'operate_profit', 'total_cogs']  # Add relevant sum columns
+    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']  # Add relevant sum columns
     df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
     logger.debug(f"in calculate_ttm_indicators, after calculate_quarterly_values, df len: {len(df)}")
     df = calculate_ttm_sums(df, sum_cols)
@@ -464,8 +465,8 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['roa_ttm'] = (df['ttm_n_income_attr_p'] / df['total_assets']) * 100
     if 'ttm_n_income_attr_p' in df.columns and 'ttm_total_revenue' in df.columns:
         df['netprofit_margin_ttm'] = (df['ttm_n_income_attr_p'] / df['ttm_total_revenue']) * 100
-    if 'ttm_operate_profit' in df.columns and 'ttm_total_cogs' in df.columns and 'ttm_total_revenue' in df.columns:
-        df['grossprofit_margin_ttm'] = ((df['ttm_total_revenue'] - df['ttm_total_cogs']) / df['ttm_total_revenue']) * 100
+    if 'ttm_oper_cost' in df.columns and 'ttm_total_revenue' in df.columns:
+        df['grossprofit_margin_ttm'] = ((df['ttm_total_revenue'] - df['ttm_oper_cost']) / df['ttm_total_revenue']) * 100
 
     # Calculate CAGRs
     df = calculate_cagr(df, 'total_revenue', output_prefix='revenue')
