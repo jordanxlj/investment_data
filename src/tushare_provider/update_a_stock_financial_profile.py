@@ -438,49 +438,62 @@ def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.Dat
     """
     if df.empty:
         return df
-    
+   
     df = df.sort_values(['ts_code', 'report_period']).copy()
     df['year'] = df['report_period'].str[:4]
     df['month_day'] = df['report_period'].str[4:]
-    
+   
     group_key = ['ts_code', 'year']
-    
-    # Vectorized compute per group info
-    group_info = df.groupby(group_key).agg(
-        count=('report_period', 'size'),
+   
+    # Filter only semi-annual data first
+    df_semi = df[df['month_day'].isin(['0630', '1231'])].copy()
+   
+    if df_semi.empty:
+        return df  # No semi data, return original
+   
+    # Compute per group info on filtered df
+    group_info = df_semi.groupby(group_key).agg(
         has_h1=('month_day', lambda x: '0630' in x.values),
         has_fy=('month_day', lambda x: '1231' in x.values)
     ).reset_index()
-    
-    # Merge back
-    df = df.merge(group_info, on=group_key, how='left')
-    df['has_h1'] = df['has_h1'].fillna(False)
-    df['has_fy'] = df['has_fy'].fillna(False)
-    
-    # Case 1: both H1 and FY
-    mask_both = (df['has_h1'] & df['has_fy'])
-    mask_h1 = df['has_h1'] & ~df['has_fy']
-    mask_fy = ~df['has_h1'] & df['has_fy']
-
+   
+    # Merge info back to df_semi
+    df_semi = df_semi.merge(group_info, on=group_key, how='left')
+    df_semi.fillna({'has_h1': False, 'has_fy': False}, inplace=True)
+   
+    # Masks for semi years on df_semi
+    mask_both = df_semi['has_h1'] & df_semi['has_fy']
+    mask_h1 = df_semi['has_h1'] & ~df_semi['has_fy']
+    mask_fy = ~df_semi['has_h1'] & df_semi['has_fy']
+   
     for col in columns:
-        df['hy_' + col] = np.nan
-
-        # both: H1 = col
-        h1_both_mask = mask_both & (df['month_day'] == '0630')
-        df.loc[h1_both_mask, 'hy_' + col] = df.loc[h1_both_mask, col]
-
-        # both: H2 = FY - H1
-        fy_both_mask = mask_both & (df['month_day'] == '1231')
-        df['tmp_shift'] = df.groupby(group_key)[col].shift(2)
-        df.loc[fy_both_mask, 'hy_' + col] = df.loc[fy_both_mask, col] - df.loc[fy_both_mask, 'tmp_shift']
-        df.drop(columns=['tmp_shift'], inplace=True)
-
-        # only h1: H1 = col
-        df.loc[mask_h1, 'hy_' + col] = df.loc[mask_h1, col]
-
-    # Clean up extra columns
+        df_semi['hy_' + col] = np.nan
+       
+        # both: H1 hy_ = col (on 0630 row)
+        h1_both_mask = mask_both & (df_semi['month_day'] == '0630')
+        df_semi.loc[h1_both_mask, 'hy_' + col] = df_semi.loc[h1_both_mask, col]
+       
+        # both: FY hy_ = col - shift(1) (since sorted and filtered, shift(1) is 0630 for 1231 if present)
+        fy_both_mask = mask_both & (df_semi['month_day'] == '1231')
+        df_semi['tmp_shift'] = df_semi.groupby(group_key)[col].shift(1)
+        diff = df_semi.loc[fy_both_mask, col] - df_semi.loc[fy_both_mask, 'tmp_shift']
+        df_semi.loc[fy_both_mask, 'hy_' + col] = diff
+       
+        # only h1: hy_ = col (on 0630 row)
+        h1_only_mask = mask_h1 & (df_semi['month_day'] == '0630')
+        df_semi.loc[h1_only_mask, 'hy_' + col] = df_semi.loc[h1_only_mask, col]
+       
+        # only fy: log only
+        if mask_fy.any():
+            logger.info(f"Only FY data for some years, no hy_ set for {col}")
+   
+    # Clean up df_semi
     drop_cols = ['year', 'month_day', 'has_h1', 'has_fy', 'tmp_shift']
-    df.drop(columns=drop_cols, inplace=True, errors='ignore')
+    df_semi.drop(columns=drop_cols, inplace=True, errors='ignore')
+   
+    # Merge hy_ columns back to original df (left join to keep shape)
+    hy_cols = ['ts_code', 'report_period'] + ['hy_' + col for col in columns]
+    df = df.merge(df_semi[hy_cols], on=['ts_code', 'report_period'], how='left')
     return df
     
 def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
