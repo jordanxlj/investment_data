@@ -485,7 +485,12 @@ def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.Dat
        
         # only fy: log only
         if mask_fy.any():
-            logger.info(f"Only FY data for some years, no hy_ set for {col}")
+            fy_only_rows = df_semi[mask_fy]
+            logger.info(f"FY-only rows count: {len(fy_only_rows)}")
+            if not fy_only_rows.empty:
+                # Group by ts_code to show unique stocks with only FY data
+                fy_only_by_code = fy_only_rows.groupby(['ts_code', 'report_period']).size()
+                logger.info(f"Sample FY-only (ts_code, report_period) pairs: {fy_only_by_code.index.tolist()}")
    
     # Clean up df_semi
     drop_cols = ['year', 'month_day', 'has_h1', 'has_fy', 'tmp_shift']
