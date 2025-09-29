@@ -422,69 +422,86 @@ def complete_quarters(origin: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat(completed_groups, ignore_index=True)
 
-def calculate_quarterly_values(group: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+def calculate_quarterly_values(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
     """Calculate quarterly values using vectorized operations within each year"""
-    group = group.sort_values('report_period')
-    group['year'] = group['report_period'].astype(str).str[:4]
+    df = df.sort_values('report_period')
+    df['year'] = df['report_period'].astype(str).str[:4]
     for col in columns:
-        group['q_' + col] = group.groupby('year')[col].diff().fillna(group[col])
-    return group.drop(columns=['year'])
+        df['q_' + col] = df.groupby(['ts_code', 'year'])[col].diff().fillna(df[col])
+    return df.drop(columns=['year'])
 
-def calculate_semi_annual_values(group: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
-    """Add hy_ columns for semi-annual processing without creating new rows.
-
-    Logic:
-    - For 0630 (semi-annual): hy_col = original value (represents H1 period)
-    - For 1231 (annual): hy_col = annual_value - semi_value (represents H2 period)
-    - For quarterly data: hy_col = NaN (not used for semi-annual processing)
+def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """Vectorized semi-annual values calculation for entire df, as supplement for missing Q1/Q3.
+    - For H1 + FY: H1 hy_ = H1 (cumulative), H2 hy_ = FY - H1.
+    - For only H1: H1 hy_ = H1.
+    - For only FY: only log.
     """
-    if group.empty:
-        return group
-
-    group = group.copy()
-    group['year'] = group['report_period'].str[:4]
-
-    def process_year(ygroup: pd.DataFrame) -> pd.DataFrame:
-        # Initialize hy_ columns
+    if df.empty:
+        return df
+    
+    df = df.sort_values(['ts_code', 'report_period']).copy()
+    df['year'] = df['report_period'].str[:4]
+    df['month_day'] = df['report_period'].str[4:]
+    
+    group_key = ['ts_code', 'year']
+    
+    # Vectorized compute per group info
+    group_info = df.groupby(group_key).agg(
+        count=('report_period', 'size'),
+        has_h1=('month_day', lambda x: '0630' in x.values),
+        has_fy=('month_day', lambda x: '1231' in x.values)
+    ).reset_index()
+    
+    # Merge back
+    df = df.merge(group_info, on=group_key, how='inner')
+    
+    # Case 1: both H1 and FY
+    mask_both = (df['has_h1'] & df['has_fy'])
+    df_both = df[mask_both].copy()
+    
+    if not df_both.empty:
+        h1_mask = df_both['month_day'] == '0630'
+        fy_mask = df_both['month_day'] == '1231'
+        
+        h1_df = df_both[h1_mask].copy()
+        fy_df = df_both[fy_mask].copy()
+        
+        # hy for H1 = col (vectorized)
         for col in columns:
-            if col in ygroup.columns:
-                ygroup[f'hy_{col}'] = np.nan
+            h1_df['hy_' + col] = h1_df[col]
+        
+        # hy for H2 = fy - h1 (align by group)
+        for col in columns:
+            # Get h1 values aligned to fy index via merge or shift
+            h1_values = h1_df.set_index(group_key)[col]
+            fy_values = fy_df.set_index(group_key)[col]
+            diff = fy_values - h1_values
+            fy_df['hy_' + col] = diff.values  # Indices align since same groups
+        
+        df_both = pd.concat([h1_df, fy_df])
+    
+    # Case 2: only H1
+    mask_h1 = df['has_h1'] & ~df['has_fy']
+    df_h1 = df[mask_h1].copy()
+    if not df_h1.empty:
+        # hy for H1 = col (vectorized)
+        for col in columns:
+            df_h1['hy_' + col] = df_h1[col]
 
-        periods = ygroup['report_period'].str[4:].unique()
-        has_h1 = '0630' in periods
-        has_fy = '1231' in periods
+    # Case 3: only FY
+    mask_fy = ~df['has_h1'] & df['has_fy']
+    df_fy = df[mask_fy].copy()
+    if not df_fy.empty:
+        logger.info(f"Case 3: only FY, df_fy len: {len(df_fy)}")
 
-        if has_h1 and has_fy:
-            # We have both semi-annual and annual reports
-            h1_mask = ygroup['report_period'].str.endswith('0630')
-            fy_mask = ygroup['report_period'].str.endswith('1231')
-
-            for col in columns:
-                if col in ygroup.columns:
-                    # H1: use original value
-                    ygroup.loc[h1_mask, f'hy_{col}'] = ygroup.loc[h1_mask, col]
-                    # FY: calculate H2 as FY - H1
-                    h1_value = ygroup.loc[h1_mask, col].iloc[0] if h1_mask.any() else 0
-                    fy_value = ygroup.loc[fy_mask, col].iloc[0] if fy_mask.any() else 0
-                    h2_value = fy_value - h1_value
-                    ygroup.loc[fy_mask, f'hy_{col}'] = h2_value
-        else:
-            # Only one type of report, use original values
-            for col in columns:
-                if col in ygroup.columns:
-                    ygroup[f'hy_{col}'] = ygroup[col]
-
-        return ygroup
-
-    # Process each year
-    processed_groups = []
-    for _, ygroup in group.groupby('year'):
-        processed_groups.append(process_year(ygroup))
-
-    result = pd.concat(processed_groups, ignore_index=True) if processed_groups else group
-    result.drop('year', axis=1, inplace=True, errors='ignore')
-    return result
-
+    final_df = pd.concat([df_both, df_h1])
+    
+    # Clean up extra columns
+    drop_cols = ['year', 'month_day', 'has_h1', 'has_fy']
+    final_df.drop(columns=drop_cols, inplace=True, errors='ignore')
+    
+    return final_df.sort_values(['ts_code', 'report_period']).reset_index(drop=True)
+    
 def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
     # Remove filled rows (missing=1) after calculations are complete
     if 'missing' in df.columns:
@@ -501,8 +518,7 @@ def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
     sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']
 
     # Calculate quarterly values (diffs)
-    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
-
+    df = calculate_quarterly_values(df, sum_cols)
     # Try quarterly TTM sums first
     df_quarter = calculate_quarterly_ttm_sums(df.copy(), sum_cols)
 
@@ -517,8 +533,7 @@ def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
     logger.info(f"Found {na_mask.sum()} rows with insufficient quarterly data, trying semi-annual fallback")
 
     # Add semi-annual columns
-    df_semi = df_quarter.groupby('ts_code').apply(lambda g: calculate_semi_annual_values(g, sum_cols)).reset_index(drop=True)
-
+    df_semi = calculate_semi_annual_values(df_quarter, sum_cols)
     # Calculate semi-annual TTM sums
     df_semi_ttm = calculate_semi_annual_ttm_sums(df_semi.copy(), sum_cols)
 
