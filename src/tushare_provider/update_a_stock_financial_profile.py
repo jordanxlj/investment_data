@@ -453,54 +453,35 @@ def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.Dat
     ).reset_index()
     
     # Merge back
-    df = df.merge(group_info, on=group_key, how='inner')
+    df = df.merge(group_info, on=group_key, how='left')
+    df['has_h1'] = df['has_h1'].fillna(False)
+    df['has_fy'] = df['has_fy'].fillna(False)
     
     # Case 1: both H1 and FY
     mask_both = (df['has_h1'] & df['has_fy'])
-    df_both = df[mask_both].copy()
-    
-    if not df_both.empty:
-        h1_mask = df_both['month_day'] == '0630'
-        fy_mask = df_both['month_day'] == '1231'
-        
-        h1_df = df_both[h1_mask].copy()
-        fy_df = df_both[fy_mask].copy()
-        
-        # hy for H1 = col (vectorized)
-        for col in columns:
-            h1_df['hy_' + col] = h1_df[col]
-        
-        # hy for H2 = fy - h1 (align by group)
-        for col in columns:
-            # Get h1 values aligned to fy index via merge or shift
-            h1_values = h1_df.set_index(group_key)[col]
-            fy_values = fy_df.set_index(group_key)[col]
-            diff = fy_values - h1_values
-            fy_df['hy_' + col] = diff.values  # Indices align since same groups
-        
-        df_both = pd.concat([h1_df, fy_df])
-    
-    # Case 2: only H1
     mask_h1 = df['has_h1'] & ~df['has_fy']
-    df_h1 = df[mask_h1].copy()
-    if not df_h1.empty:
-        # hy for H1 = col (vectorized)
-        for col in columns:
-            df_h1['hy_' + col] = df_h1[col]
-
-    # Case 3: only FY
     mask_fy = ~df['has_h1'] & df['has_fy']
-    df_fy = df[mask_fy].copy()
-    if not df_fy.empty:
-        logger.info(f"Case 3: only FY, df_fy len: {len(df_fy)}")
 
-    final_df = pd.concat([df_both, df_h1])
-    
+    for col in columns:
+        df['hy_' + col] = np.nan
+
+        # both: H1 = col
+        h1_both_mask = mask_both & (df['month_day'] == '0630')
+        df.loc[h1_both_mask, 'hy_' + col] = df.loc[h1_both_mask, col]
+
+        # both: H2 = FY - H1
+        fy_both_mask = mask_both & (df['month_day'] == '1231')
+        df['tmp_shift'] = df.groupby(group_key)[col].shift(2)
+        df.loc[fy_both_mask, 'hy_' + col] = df.loc[fy_both_mask, col] - df.loc[fy_both_mask, 'tmp_shift']
+        df.drop(columns=['tmp_shift'], inplace=True)
+
+        # only h1: H1 = col
+        df.loc[mask_h1, 'hy_' + col] = df.loc[mask_h1, col]
+
     # Clean up extra columns
-    drop_cols = ['year', 'month_day', 'has_h1', 'has_fy']
-    final_df.drop(columns=drop_cols, inplace=True, errors='ignore')
-    
-    return final_df.sort_values(['ts_code', 'report_period']).reset_index(drop=True)
+    drop_cols = ['year', 'month_day', 'has_h1', 'has_fy', 'tmp_shift']
+    df.drop(columns=drop_cols, inplace=True, errors='ignore')
+    return df
     
 def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
     # Remove filled rows (missing=1) after calculations are complete
