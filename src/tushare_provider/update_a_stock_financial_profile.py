@@ -431,76 +431,59 @@ def calculate_quarterly_values(group: pd.DataFrame, columns: List[str]) -> pd.Da
     return group.drop(columns=['year'])
 
 def calculate_semi_annual_values(group: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
-    """Calculate lower half-year diffs for semi-annual reports, with validation."""
+    """Add hy_ columns for semi-annual processing without creating new rows.
+
+    Logic:
+    - For 0630 (semi-annual): hy_col = original value (represents H1 period)
+    - For 1231 (annual): hy_col = annual_value - semi_value (represents H2 period)
+    - For quarterly data: hy_col = NaN (not used for semi-annual processing)
+    """
     if group.empty:
         return group
-    
-    group = group.sort_values('report_period').copy()  # Safe copy
-    group['year'] = group['report_period'].str[:4].astype(int)  # Ensure int for safety
-    if group['ts_code'].iloc[0] == '000003.SZ':
-        import pdb; pdb.set_trace()
-    
+
+    group = group.copy()
+    group['year'] = group['report_period'].str[:4]
+
     def process_year(ygroup: pd.DataFrame) -> pd.DataFrame:
+        # Initialize hy_ columns
+        for col in columns:
+            if col in ygroup.columns:
+                ygroup[f'hy_{col}'] = np.nan
+
         periods = ygroup['report_period'].str[4:].unique()
-        valid_num = len(ygroup[ygroup['missing'] != 1])
-        if len(ygroup) < 1 or valid_num > 2:
-            return ygroup
-        
-        logger.warning(f"Semi-annual process year {ygroup['ts_code'].iloc[0]}-{ygroup['year'].iloc[0]}: invalid row count {len(ygroup)}")
         has_h1 = '0630' in periods
         has_fy = '1231' in periods
-        
-        if not has_h1 and not has_fy:
-            return ygroup  # Nothing to process
-        
-        adjusted_rows = []
-        
-        # Add original rows first
-        adjusted_rows.extend(ygroup.to_dict('records'))
-        
+
         if has_h1 and has_fy:
-            h1 = ygroup[ygroup['report_period'].str.endswith('0630')].iloc[0].copy()
-            fy = ygroup[ygroup['report_period'].str.endswith('1231')].iloc[0].copy()
-            
-            h2 = fy.copy()
-            h2['report_period'] = h2['year'].astype(str) + '1231_H2'
-            h2['report_date'] = pd.to_datetime(str(h2['year']) + '-12-31')
-            
+            # We have both semi-annual and annual reports
+            h1_mask = ygroup['report_period'].str.endswith('0630')
+            fy_mask = ygroup['report_period'].str.endswith('1231')
+
             for col in columns:
                 if col in ygroup.columns:
-                    # H1: keep original
-                    h1['hy_' + col] = h1[col]
-                    # H2: diff
-                    diff = fy[col] - h1[col]
-                    if pd.isna(diff):
-                        logger.warning(f"Invalid diff for {col} in year {h2['year']}: {diff}")
-                        continue
-                    h2['hy_' + col] = diff
-            adjusted_rows.append(h1.to_dict())
-            adjusted_rows.append(h2.to_dict())
-        
-        elif has_h1:
-            h1 = ygroup.iloc[0].copy()
+                    # H1: use original value
+                    ygroup.loc[h1_mask, f'hy_{col}'] = ygroup.loc[h1_mask, col]
+                    # FY: calculate H2 as FY - H1
+                    h1_value = ygroup.loc[h1_mask, col].iloc[0] if h1_mask.any() else 0
+                    fy_value = ygroup.loc[fy_mask, col].iloc[0] if fy_mask.any() else 0
+                    h2_value = fy_value - h1_value
+                    ygroup.loc[fy_mask, f'hy_{col}'] = h2_value
+        else:
+            # Only one type of report, use original values
             for col in columns:
-                h1['hy_' + col] = h1.get(col, np.nan)  # Keep H1 if no FY
-            # No H2 without FY
-            adjusted_rows.append(h1.to_dict())
-        elif has_fy:
-            fy = ygroup.iloc[0].copy()
-            for col in columns:
-                fy['hy_' + col] = fy.get(col, np.nan)  # Treat FY as full if no H1
-            adjusted_rows.append(fy.to_dict())
-        
-        return pd.DataFrame(adjusted_rows)
-    
-    # Collect all processed years
-    processed_dfs = []
+                if col in ygroup.columns:
+                    ygroup[f'hy_{col}'] = ygroup[col]
+
+        return ygroup
+
+    # Process each year
+    processed_groups = []
     for _, ygroup in group.groupby('year'):
-        processed_dfs.append(process_year(ygroup))
-    
-    adjusted = pd.concat(processed_dfs, ignore_index=True) if processed_dfs else pd.DataFrame()
-    adjusted.drop('year', axis=1, inplace=True, errors='ignore')
-    return adjusted.sort_values('report_period').reset_index(drop=True)
+        processed_groups.append(process_year(ygroup))
+
+    result = pd.concat(processed_groups, ignore_index=True) if processed_groups else group
+    result.drop('year', axis=1, inplace=True, errors='ignore')
+    return result
 
 def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
     # Remove filled rows (missing=1) after calculations are complete
@@ -514,33 +497,39 @@ def clean_completed_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
-    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']  # Add relevant sum columns
+    """Calculate TTM values using quarterly data, with semi-annual fallback when needed."""
+    sum_cols = ['n_income_attr_p', 'total_revenue', 'ebitda', 'oper_cost', 'total_cogs']
 
-    # Calculate quarterly TTM diffs
-    df_quarter = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
-    # Calculate quarterly TTM sums
-    df_quarter = calculate_quarterly_ttm_sums(df_quarter, sum_cols)
-    # Identify rows where any ttm_ col is NaN (potential for semi fallback)
+    # Calculate quarterly values (diffs)
+    df = df.groupby('ts_code').apply(lambda g: calculate_quarterly_values(g, sum_cols)).reset_index(drop=True)
+
+    # Try quarterly TTM sums first
+    df_quarter = calculate_quarterly_ttm_sums(df.copy(), sum_cols)
+
+    # Check which rows have NaN TTM values (insufficient quarterly data)
     ttm_cols = [f'ttm_{col}' for col in sum_cols]
     na_mask = df_quarter[ttm_cols].isna().any(axis=1)
-    
+
     if not na_mask.any():
-        return df_quarter  # All good, no need for fallback
-    
-    # Calculate semi-annual diffs
+        return df_quarter  # All quarterly TTM calculations succeeded
+
+    # For rows with NaN quarterly TTM, try semi-annual approach
+    logger.info(f"Found {na_mask.sum()} rows with insufficient quarterly data, trying semi-annual fallback")
+
+    # Add semi-annual columns
     df_semi = df_quarter.groupby('ts_code').apply(lambda g: calculate_semi_annual_values(g, sum_cols)).reset_index(drop=True)
-    import pdb; pdb.set_trace()
-    # For groups with NaNs, apply semi-annual as fallback
-    def fallback_semi(g: pd.DataFrame, na_m: pd.Series) -> pd.DataFrame:
-        g_semi = calculate_semi_annual_ttm_sums(g.copy(), sum_cols)
-        # Fill only NaN rows from quarterly with semi values
-        for col in sum_cols:
-            g['ttm_' + col] = np.where(na_m, g_semi['ttm_' + col], g['ttm_' + col])
-        return g
-    
-    # Apply fallback per group
-    df = df_semi.groupby('ts_code').apply(lambda g: fallback_semi(g, na_mask[g.index])).reset_index(drop=True)
-    return df
+
+    # Calculate semi-annual TTM sums
+    df_semi_ttm = calculate_semi_annual_ttm_sums(df_semi.copy(), sum_cols)
+
+    # Fill NaN quarterly TTM values with semi-annual TTM values
+    df_quarter.to_csv('df_quarter_before.csv', index=False)
+    for col in sum_cols:
+        ttm_col = f'ttm_{col}'
+        df_quarter[ttm_col] = np.where(na_mask, df_semi_ttm[ttm_col], df_quarter[ttm_col])
+    df_quarter.to_csv('df_quarter_after.csv', index=False)
+
+    return df_quarter
 
 def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate all TTM indicators"""
@@ -837,13 +826,13 @@ def update_a_stock_financial_profile(
         total_raw_records = sum(len(df) for df in all_data_frames)
 
         combined_df = combine_data_frames(all_data_frames)
-        combined_df.to_csv("original_new.csv", index=False)
+        #combined_df.to_csv("original_new.csv", index=False)
         logger.info(f"Combined {len(all_data_frames)} periods into {len(combined_df)} total records")
 
         logger.info("Calculating TTM (Trailing Twelve Months) indicators...")
         combined_df = calculate_ttm_indicators(combined_df)
         logger.info(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
-        combined_df.to_csv("combined_df.csv", index=False)
+        #combined_df.to_csv("combined_df.csv", index=False)
 
         # total_written = _upsert_batch(engine, combined_df, chunksize)
         total_written = len(combined_df)  # Placeholder
