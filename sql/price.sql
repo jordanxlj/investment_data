@@ -178,3 +178,19 @@ LEFT JOIN ts_link_table ON ts_raw_table.symbol = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info existing ON existing.symbol = ts_link_table.w_symbol
   AND existing.tradedate = ts_raw_table.tradedate
 WHERE existing.symbol IS NULL;  -- Double-check to prevent duplicates
+
+/* Calculate actual statistics for the price update */
+SET @price_updated_records = ROW_COUNT();
+SET @price_actual_start = (SELECT MIN(tradedate) FROM final_a_stock_comb_info WHERE tradedate >= @start_date);
+SET @price_actual_end = (SELECT MAX(tradedate) FROM final_a_stock_comb_info WHERE tradedate >= @start_date);
+
+INSERT INTO update_record_table (
+    update_type, record_count,
+    start_day, end_day, last_update_time
+) VALUES (
+    'eod_price',
+    @price_updated_records,
+    @price_actual_start,
+    @price_actual_end,
+    NOW()
+);
