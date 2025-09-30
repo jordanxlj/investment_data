@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 from src.tushare_provider.update_a_stock_financial_profile import (
     calculate_ttm_indicators,
     TTM_COLUMNS,
-    ALL_COLUMNS,
+    API_COLUMNS,
     _fetch_single_period_data,
     _generate_periods,
     update_a_stock_financial_profile,
@@ -453,19 +453,19 @@ class TestSchemaCoercion:
     #     assert not result.empty
     #     assert result['ts_code'].iloc[0] == '000001.SZ'
 
-    def test_all_columns_exist(self):
+    def test_api_columns_exist(self):
         """Test that ALL_COLUMNS includes all expected columns"""
-        assert isinstance(ALL_COLUMNS, list)
-        assert len(ALL_COLUMNS) > 50  # Should have many columns
+        assert isinstance(API_COLUMNS, list)
+        assert len(API_COLUMNS) > 50  # Should have many columns
 
         # Check that basic columns are present
         basic_cols = ['ts_code', 'report_period', 'ann_date']
         for col in basic_cols:
-            assert col in ALL_COLUMNS
+            assert col in API_COLUMNS
 
         # Check that TTM columns are included
         for col in TTM_COLUMNS:
-            assert col in ALL_COLUMNS
+            assert col in API_COLUMNS
 
 
 class TestPeriodGeneration:

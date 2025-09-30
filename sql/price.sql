@@ -40,24 +40,47 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   f_dv_ratio FLOAT,
   f_roe FLOAT,
   fcff_ps FLOAT,
+
+  /* Liquidity */
   current_ratio FLOAT,
   quick_ratio FLOAT,
   cash_ratio FLOAT,
-  ca_turn FLOAT
+  /* Efficiency & Turnover */
+  ca_turn FLOAT,
+  inv_turn FLOAT,
+  ar_turn FLOAT,
+  fa_turn FLOAT,
+  assets_turn FLOAT,
+  /* Profitability */
   roic FLOAT,
-  or_yoy FLOAT,
-  equity_yoy FLOAT,
-  eps_ttm FLOAT,
-  revenue_ps_ttm FLOAT,
   roe_ttm FLOAT,
   roa_ttm FLOAT,
   grossprofit_margin_ttm FLOAT,
   netprofit_margin_ttm FLOAT,
+  fcf_margin_ttm FLOAT,
+  /* Growth */
+  or_yoy FLOAT,
+  netprofit_yoy FLOAT,
+  basic_eps_yoy FLOAT,
+  equity_yoy FLOAT,
+  assets_yoy FLOAT,
+  ocf_yoy FLOAT,
+  roe_yoy FLOAT,
   revenue_cagr_3y FLOAT,
   netincome_cagr_3y FLOAT,
-  rd_exp_to_capex FLOAT,
-  fcf_margin_ttm FLOAT,
+  /* Leverage & Risk*/
+  debt_to_assets FLOAT,
+  debt_to_eqt FLOAT,
   debt_to_ebitda FLOAT,
+  /* Valuation & Cash Flow */
+  bps FLOAT,
+  eps_ttm FLOAT,
+  revenue_ps_ttm FLOAT,
+  cfps FLOAT,
+  fcff_ps FLOAT,
+  /* Other */
+  rd_exp_to_capex FLOAT,
+  goodwill FLOAT,
   PRIMARY KEY (tradedate, symbol),
   INDEX idx_tradedate_desc (tradedate DESC),
   INDEX idx_comb_symbol_tradedate (symbol, tradedate)

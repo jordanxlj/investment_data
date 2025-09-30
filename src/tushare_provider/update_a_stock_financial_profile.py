@@ -555,19 +555,43 @@ def calculate_ttm_indicators(df: pd.DataFrame, cagr_years: int = 3) -> pd.DataFr
 
     # Calculate per-share TTM
     if 'ttm_n_income_attr_p' in df.columns and 'total_share' in df.columns:
-        df['eps_ttm'] = df['ttm_n_income_attr_p'] / df['total_share']
+        df['eps_ttm'] = np.where(
+            df['total_share'] > 0,
+            df['ttm_n_income_attr_p'] / df['total_share'],
+            np.nan
+        )
     if 'ttm_total_revenue' in df.columns and 'total_share' in df.columns:
-        df['revenue_ps_ttm'] = df['ttm_total_revenue'] / df['total_share']
+        df['revenue_ps_ttm'] = np.where(
+            df['total_share'] > 0,
+            df['ttm_total_revenue'] / df['total_share'],
+            np.nan
+        )
 
     # Calculate profitability TTM
     if 'ttm_n_income_attr_p' in df.columns and 'total_hldr_eqy_exc_min_int' in df.columns:
-        df['roe_ttm'] = (df['ttm_n_income_attr_p'] / df['total_hldr_eqy_exc_min_int']) * 100
+        df['roe_ttm'] = np.where(
+            df['total_hldr_eqy_exc_min_int'] > 0,
+            (df['ttm_n_income_attr_p'] / df['total_hldr_eqy_exc_min_int']) * 100,
+            np.nan
+        )
     if 'ttm_n_income_attr_p' in df.columns and 'total_assets' in df.columns:
-        df['roa_ttm'] = (df['ttm_n_income_attr_p'] / df['total_assets']) * 100
+        df['roa_ttm'] = np.where(
+            df['total_assets'] > 0,
+            (df['ttm_n_income_attr_p'] / df['total_assets']) * 100,
+            np.nan
+        )
     if 'ttm_n_income_attr_p' in df.columns and 'ttm_total_revenue' in df.columns:
-        df['netprofit_margin_ttm'] = (df['ttm_n_income_attr_p'] / df['ttm_total_revenue']) * 100
+        df['netprofit_margin_ttm'] = np.where(
+            df['ttm_total_revenue'] > 0,
+            (df['ttm_n_income_attr_p'] / df['ttm_total_revenue']) * 100,
+            np.nan
+        )
     if 'ttm_oper_cost' in df.columns and 'ttm_total_revenue' in df.columns:
-        df['grossprofit_margin_ttm'] = ((df['ttm_total_revenue'] - df['ttm_oper_cost']) / df['ttm_total_revenue']) * 100
+        df['grossprofit_margin_ttm'] = np.where(
+            df['ttm_total_revenue'] > 0,
+            ((df['ttm_total_revenue'] - df['ttm_oper_cost']) / df['ttm_total_revenue']) * 100,
+            np.nan
+        )
 
     # Calculate CAGRs
     df = calculate_cagr(df, 'total_revenue', output_prefix='revenue', years=cagr_years)
