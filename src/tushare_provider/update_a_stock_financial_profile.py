@@ -535,12 +535,20 @@ def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
     df_semi = calculate_semi_annual_values(df_quarter, sum_cols)
     # Calculate semi-annual TTM sums
     df_semi_ttm = calculate_semi_annual_ttm_sums(df_semi.copy(), sum_cols)
-
+    df_semi_ttm.to_csv('df_semi_ttm.csv', index=False)
     # Fill NaN quarterly TTM values with semi-annual TTM values
     df_quarter.to_csv('df_quarter_before.csv', index=False)
+
+    # Ensure both DataFrames are sorted consistently before filling
+    sort_keys = ['ts_code', 'report_period']
+    df_quarter = df_quarter.sort_values(sort_keys).reset_index(drop=True)
+    df_semi_ttm = df_semi_ttm.sort_values(sort_keys).reset_index(drop=True)
+
+    # Fill NaN values column by column to preserve existing valid values
     for col in sum_cols:
         ttm_col = f'ttm_{col}'
-        df_quarter[ttm_col] = np.where(na_mask, df_semi_ttm[ttm_col], df_quarter[ttm_col])
+        col_na_mask = df_quarter[ttm_col].isna()
+        df_quarter[ttm_col] = np.where(col_na_mask, df_semi_ttm[ttm_col], df_quarter[ttm_col])
     df_quarter.to_csv('df_quarter_after.csv', index=False)
 
     return df_quarter
