@@ -27,8 +27,6 @@ CREATE_TABLE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ts_code                   VARCHAR(16)  NOT NULL,
   report_period             DATE         NOT NULL,
-  period                    VARCHAR(8)   NOT NULL,
-  currency                  VARCHAR(3)   NOT NULL,
   ann_date                  DATE         NULL,
 
   -- Income statement fields (万元存储 - converted from 元)
@@ -224,7 +222,7 @@ TTM_COLUMNS = [
 ]
 
 # All columns for schema coercion (includes core fields added during processing)
-ALL_COLUMNS = ['ts_code', 'report_period', 'ann_date', 'end_date', 'period', 'currency'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
+ALL_COLUMNS = ['ts_code', 'report_period', 'ann_date', 'end_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
 
 # Fields to convert from Yuan to Wan
 YUAN_TO_WAN_FIELDS = INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + ['gross_margin', 'rd_exp', 'ebit', 'ebitda','fcf_ttm']
@@ -282,13 +280,6 @@ def data_preprocess(df: pd.DataFrame) -> pd.DataFrame:
 
     # Fill missing values
     df = df.fillna(pd.NA)
-
-    # Add currency and period if missing
-    if 'currency' not in df.columns:
-        df['currency'] = 'CNY'
-    if 'period' not in df.columns:
-        df['period'] = 'quarter'  # Default, adjust as needed
-
     return df
 
 def calculate_quarterly_ttm_sums(df: pd.DataFrame, sum_cols: List[str]) -> pd.DataFrame:
@@ -484,7 +475,7 @@ def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.Dat
         df_semi.loc[h1_only_mask, 'hy_' + col] = df_semi.loc[h1_only_mask, col]
        
         # only fy: log only
-        if mask_fy.any():
+        if mask_fy.any() and col == columns[0]:
             fy_only_rows = df_semi[mask_fy]
             logger.info(f"FY-only rows count: {len(fy_only_rows)}")
             if not fy_only_rows.empty:
@@ -535,7 +526,7 @@ def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
     df_semi = calculate_semi_annual_values(df_quarter, sum_cols)
     # Calculate semi-annual TTM sums
     df_semi_ttm = calculate_semi_annual_ttm_sums(df_semi.copy(), sum_cols)
-    df_semi_ttm.to_csv('df_semi_ttm.csv', index=False)
+
     # Fill NaN quarterly TTM values with semi-annual TTM values
     df_quarter.to_csv('df_quarter_before.csv', index=False)
 
@@ -553,7 +544,7 @@ def calculate_ttm_values(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_quarter
 
-def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_ttm_indicators(df: pd.DataFrame, cagr_years: int = 3) -> pd.DataFrame:
     """Calculate all TTM indicators"""
     if df.empty:
         return df
@@ -584,8 +575,8 @@ def calculate_ttm_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['grossprofit_margin_ttm'] = ((df['ttm_total_revenue'] - df['ttm_oper_cost']) / df['ttm_total_revenue']) * 100
 
     # Calculate CAGRs
-    df = calculate_cagr(df, 'total_revenue', output_prefix='revenue')
-    df = calculate_cagr(df, 'n_income_attr_p', output_prefix='netincome')
+    df = calculate_cagr(df, 'total_revenue', output_prefix='revenue', years=cagr_years)
+    df = calculate_cagr(df, 'n_income_attr_p', output_prefix='netincome', years=cagr_years)
 
     # Calculate FCF and related
     df = calculate_fcf_ttm(df)
@@ -808,6 +799,7 @@ def update_a_stock_financial_profile(
     end_date: Optional[str] = None,
     period: str = "quarter",
     limit: int = 10,
+    window_size: int = 3,
     chunksize: int = 1000,
 ) -> None:
     """
@@ -824,12 +816,13 @@ def update_a_stock_financial_profile(
         mysql_url: MySQL connection URL
         end_date: End date in YYYYMMDD format, defaults to yesterday
         period: Report period type, 'annual' or 'quarter'
-        limit: Limit on number of report periods to fetch
+        limit: Limit on number of report periods to fetch (quarters if period='quarter', years if period='annual')
+        window_size: Window size in years for CAGR calculations (converted to periods internally), defaults to 3
         chunksize: Batch processing size
     """
     try:
         end_date = set_default_end_date(end_date)
-        logger.info(f"Starting to update financial profile data, end date: {end_date}, period type: {period}, limit: {limit}")
+        logger.info(f"Starting to update financial profile data, end date: {end_date}, period type: {period}, limit: {limit}, window_size: {window_size}y")
 
         # engine = create_database_engine(mysql_url)
         # create_table_structure(engine)
@@ -840,7 +833,15 @@ def update_a_stock_financial_profile(
             logger.warning("No valid periods found")
             return
 
-        all_data_frames = fetch_and_normalize_period_data(periods)
+        # For CAGR calculation, we need additional historical data
+        # Convert window_size from years to periods based on period type
+        window_periods = window_size * 4 if period == "quarter" else window_size
+        historical_limit = limit + window_periods
+        logger.info(f"Window size: {window_size} years = {window_periods} {period} periods")
+        historical_periods = _generate_periods(end_date, period, historical_limit)
+        logger.info(f"Generated {len(historical_periods)} historical periods for CAGR calculation")
+
+        all_data_frames = fetch_and_normalize_period_data(historical_periods)
         if not all_data_frames:
             logger.warning("No data retrieved for any period")
             return
@@ -852,14 +853,21 @@ def update_a_stock_financial_profile(
         logger.info(f"Combined {len(all_data_frames)} periods into {len(combined_df)} total records")
 
         logger.info("Calculating TTM (Trailing Twelve Months) indicators...")
-        combined_df = calculate_ttm_indicators(combined_df)
+        combined_df = calculate_ttm_indicators(combined_df, window_size)
         logger.info(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
+
+        # Filter to only update the most recent 'limit' periods as specified
+        # The historical data was only used for CAGR calculation
+        combined_df['report_period_str'] = combined_df['report_period'].astype(str)
+        update_df = combined_df[combined_df['report_period_str'].isin(periods)].copy()
+        update_df.drop(columns=['report_period_str'], inplace=True)
+        logger.info(f"Filtered to {len(update_df)} records for database update (recent {limit} periods only)")
         #combined_df.to_csv("combined_df.csv", index=False)
 
-        # total_written = _upsert_batch(engine, combined_df, chunksize)
-        total_written = len(combined_df)  # Placeholder
+        # total_written = _upsert_batch(engine, update_df, chunksize)
+        total_written = len(update_df)  # Placeholder
 
-        log_update_completion(periods, total_raw_records, combined_df, total_written)
+        log_update_completion(periods, total_raw_records, update_df, total_written)
 
     except Exception as e:
         logger.error(f"Fatal error in update_a_stock_financial_profile: {e}")

@@ -459,7 +459,7 @@ class TestSchemaCoercion:
         assert len(ALL_COLUMNS) > 50  # Should have many columns
 
         # Check that basic columns are present
-        basic_cols = ['ts_code', 'report_period', 'ann_date', 'period', 'currency']
+        basic_cols = ['ts_code', 'report_period', 'ann_date']
         for col in basic_cols:
             assert col in ALL_COLUMNS
 
