@@ -780,7 +780,6 @@ def prepare_upsert_batch(rows: List[Dict[str, Any]], table: Table, chunksize: in
         update_map = {
             c: getattr(stmt.inserted, c)
             for c in DB_COLUMNS
-            if c not in ("ts_code", "report_period", "ann_date")
         }
         ondup = stmt.on_duplicate_key_update(**update_map)
         # Assume conn.execute(ondup) here, but in context
