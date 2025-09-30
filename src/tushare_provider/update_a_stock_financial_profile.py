@@ -927,8 +927,8 @@ def update_a_stock_financial_profile(
         start_period, end_period = set_default_period_range(start_period, end_period, period, window_size)
         logger.info(f"Starting to update financial profile data, period range: {start_period} to {end_period}, period type: {period}, window_size: {window_size}y")
 
-        # engine = create_database_engine(mysql_url)
-        # create_table_structure(engine)
+        engine = create_database_engine(mysql_url)
+        create_table_structure(engine)
 
         periods = _generate_periods(start_period, end_period, period)
         logger.info(f"Generated {len(periods)} periods: {periods}")
@@ -974,7 +974,7 @@ def update_a_stock_financial_profile(
         logger.info(f"Filtered to {len(update_df)} records for database update (periods in range {start_period} to {end_period})")
         #combined_df.to_csv("combined_df.csv", index=False)
 
-        # total_written = _upsert_batch(engine, update_df, chunksize)
+        total_written = _upsert_batch(engine, update_df, chunksize)
         total_written = len(update_df)  # Placeholder
 
         log_update_completion(periods, total_raw_records, update_df, total_written)
