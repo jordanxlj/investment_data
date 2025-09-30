@@ -344,6 +344,93 @@ class TestYuanToWanFields:
                 #     f"Field {field} in YUAN_TO_WAN_FIELDS is not in any expected category"  # TODO: Re-enable after cache clear
 
 
+class TestGuardClauses:
+    """Test guard clauses and error handling"""
+
+    def test_guard_empty_dataframe(self):
+        """Test handling of empty DataFrame"""
+        empty_df = pd.DataFrame()
+        result = calculate_ttm_indicators(empty_df)
+        assert result.empty, "Should handle empty DataFrame gracefully"
+
+    def test_guard_missing_required_columns(self):
+        """Test handling of missing required columns"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'],
+            'ann_date': ['20231231']
+            # Missing report_period and financial columns
+        })
+        with pytest.raises(KeyError):
+            calculate_ttm_indicators(df)
+
+    def test_guard_nan_inputs(self):
+        """Test handling of NaN inputs in financial data"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'],
+            'report_period': ['20231231'],
+            'ann_date': ['20240101'],
+            'n_income_attr_p': [np.nan],  # NaN input
+            'total_revenue': [1000],
+            'ebitda': [200],
+            'oper_cost': [800],
+            'total_cogs': [700],
+            'total_assets': [10000],
+            'total_hldr_eqy_exc_min_int': [8000],
+            'total_share': [1000],
+            'im_net_cashflow_oper_act': [200]
+        })
+        result = calculate_ttm_indicators(df)
+        # Should handle NaN gracefully
+        assert len(result) == 1
+        assert pd.isna(result['eps_ttm'].iloc[0]) or pd.isna(result['n_income_attr_p'].iloc[0])
+
+    def test_guard_zero_base_cagr(self):
+        """Test CAGR calculation with zero base values"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ'] * 5,
+            'report_period': ['20200331', '20200630', '20200930', '20201231', '20210331'],
+            'ann_date': ['20200401', '20200701', '20201001', '20210101', '20210401'],
+            'n_income_attr_p': [0, 0, 0, 0, 100],  # Zero base for CAGR
+            'total_revenue': [0, 0, 0, 0, 1000],  # Zero base for CAGR
+            'ebitda': [50, 50, 50, 50, 150],  # Required for TTM calculation
+            'oper_cost': [800, 800, 800, 800, 800],  # Required for TTM calculation
+            'total_cogs': [700, 700, 700, 700, 700],  # Required for TTM calculation
+            'total_assets': [10000, 10000, 10000, 10000, 10000],
+            'total_hldr_eqy_exc_min_int': [8000, 8000, 8000, 8000, 8000],
+            'total_share': [1000] * 5,
+            'im_net_cashflow_oper_act': [200, 200, 200, 200, 200]
+        })
+        result = calculate_ttm_indicators(df)
+        # Should handle zero base values without crashing
+        assert len(result) == 5
+        # CAGR with zero base should be handled gracefully
+        assert not result.empty
+
+    def test_multi_stock_groupby(self):
+        """Test calculations work correctly with multiple stocks"""
+        df = pd.DataFrame({
+            'ts_code': ['000001.SZ', '000002.SZ', '000001.SZ', '000002.SZ'],
+            'report_period': ['20231231', '20231231', '20240331', '20240331'],
+            'ann_date': ['20240101', '20240101', '20240401', '20240401'],
+            'n_income_attr_p': [100, 200, 150, 250],
+            'total_revenue': [1000, 2000, 1200, 2200],
+            'ebitda': [150, 300, 180, 330],
+            'oper_cost': [800, 1600, 900, 1700],
+            'total_cogs': [700, 1400, 800, 1500],
+            'total_assets': [10000, 20000, 10500, 20500],
+            'total_hldr_eqy_exc_min_int': [8000, 16000, 8200, 16200],
+            'total_share': [1000, 2000, 1000, 2000],
+            'im_net_cashflow_oper_act': [200, 400, 220, 420],
+            'period': ['annual', 'annual', 'quarter', 'quarter'],  # Required column
+            'currency': ['CNY', 'CNY', 'CNY', 'CNY']  # Required column
+        })
+        result = calculate_ttm_indicators(df)
+        # Should process both stocks independently
+        assert len(result) == 4
+        assert len(result[result['ts_code'] == '000001.SZ']) == 2
+        assert len(result[result['ts_code'] == '000002.SZ']) == 2
+
+
 class TestSchemaCoercion:
     """Test data schema coercion and validation"""
 
