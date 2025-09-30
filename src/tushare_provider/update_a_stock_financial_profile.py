@@ -2,7 +2,7 @@ import os
 import time
 import datetime
 import logging
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Tuple
 import itertools
 import fire
 import pandas as pd
@@ -683,13 +683,70 @@ def generate_quarterly_periods(end_dt: datetime.datetime, limit: int) -> List[st
                 current_quarter = datetime.datetime(current_quarter.year, 9, 30)
     return periods
 
-def _generate_periods(end_date: str, period: str = "annual", limit: int = 1) -> List[str]:
-    """Generate list of periods that need to be processed"""
-    end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
-    if period == "annual":
-        return generate_annual_periods(end_dt, limit)
+
+def generate_annual_periods_in_range(start_dt: datetime.datetime, end_dt: datetime.datetime) -> List[str]:
+    """Generate annual periods within the date range"""
+    periods = []
+    current_year = start_dt.year
+
+    # Find the first valid annual period >= start_dt
+    while datetime.datetime(current_year, 12, 31) < start_dt:
+        current_year += 1
+
+    # Generate all annual periods up to end_dt
+    while datetime.datetime(current_year, 12, 31) <= end_dt:
+        periods.append(f"{current_year}1231")
+        current_year += 1
+
+    return periods
+
+
+def generate_quarterly_periods_in_range(start_dt: datetime.datetime, end_dt: datetime.datetime) -> List[str]:
+    """Generate quarterly periods within the date range"""
+    periods = []
+    quarters = [(3, 31), (6, 30), (9, 30), (12, 31)]
+
+    # Find the first valid quarter >= start_dt
+    current_year = start_dt.year
+    current_quarter_idx = 0
+
+    # Find the first quarter that is >= start_dt
+    for i, (month, day) in enumerate(quarters):
+        q_date = datetime.datetime(current_year, month, day)
+        if q_date >= start_dt:
+            current_quarter_idx = i
+            break
     else:
-        return generate_quarterly_periods(end_dt, limit)
+        # If no quarter in current year >= start_dt, move to next year
+        current_year += 1
+        current_quarter_idx = 0
+
+    # Generate all quarterly periods up to end_dt
+    while True:
+        if current_quarter_idx >= len(quarters):
+            current_quarter_idx = 0
+            current_year += 1
+
+        month, day = quarters[current_quarter_idx]
+        q_date = datetime.datetime(current_year, month, day)
+
+        if q_date > end_dt:
+            break
+
+        periods.append(q_date.strftime("%Y%m%d"))
+        current_quarter_idx += 1
+
+    return periods
+
+def _generate_periods(start_period: str, end_period: str, period: str = "quarter") -> List[str]:
+    """Generate list of periods that need to be processed within the date range"""
+    start_dt = datetime.datetime.strptime(start_period, "%Y%m%d")
+    end_dt = datetime.datetime.strptime(end_period, "%Y%m%d")
+
+    if period == "annual":
+        return generate_annual_periods_in_range(start_dt, end_dt)
+    else:
+        return generate_quarterly_periods_in_range(start_dt, end_dt)
 
 def fetch_period_data(periods: List[str]) -> List[pd.DataFrame]:
     """Fetch data for multiple periods"""
@@ -759,6 +816,40 @@ def set_default_end_date(end_date: Optional[str]) -> str:
         end_date = yesterday.strftime("%Y%m%d")
     return end_date
 
+
+def calculate_historical_start_period(start_period: str, period: str, window_periods: int) -> str:
+    """Calculate historical start period by going back window_periods from start_period"""
+    start_dt = datetime.datetime.strptime(start_period, "%Y%m%d")
+
+    if period == "annual":
+        historical_start_year = start_dt.year - window_periods
+        return f"{historical_start_year}1231"
+    else:  # quarter
+        # Go back window_periods quarters from start_period
+        historical_start_dt = start_dt
+        for _ in range(window_periods):
+            if historical_start_dt.month == 3:
+                historical_start_dt = datetime.datetime(historical_start_dt.year - 1, 12, 31)
+            elif historical_start_dt.month == 6:
+                historical_start_dt = datetime.datetime(historical_start_dt.year, 3, 31)
+            elif historical_start_dt.month == 9:
+                historical_start_dt = datetime.datetime(historical_start_dt.year, 6, 30)
+            else:  # 12
+                historical_start_dt = datetime.datetime(historical_start_dt.year, 9, 30)
+        return historical_start_dt.strftime("%Y%m%d")
+
+
+def set_default_period_range(start_period: str, end_period: Optional[str], period: str, window_size: int) -> Tuple[str, str]:
+    """Set default end period if none provided"""
+    if not start_period:
+        raise ValueError("start_period is required and cannot be empty")
+
+    if end_period is None:
+        yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
+        end_period = yesterday.strftime("%Y%m%d")
+
+    return start_period, end_period
+
 def create_database_engine(mysql_url: str) -> Any:
     """Create SQLAlchemy engine"""
     return create_engine(mysql_url, pool_recycle=3600)
@@ -795,10 +886,10 @@ def log_update_completion(periods: List[str], total_raw_records: int, combined_d
     logger.info(f"- Total records written to database: {total_written}")
 
 def update_a_stock_financial_profile(
+    start_period: str,
     mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
-    end_date: Optional[str] = None,
+    end_period: Optional[str] = None,
     period: str = "quarter",
-    limit: int = 10,
     window_size: int = 3,
     chunksize: int = 1000,
 ) -> None:
@@ -813,32 +904,32 @@ def update_a_stock_financial_profile(
     - pro.fina_indicator_vip() - Financial indicators
 
     Args:
+        start_period: Start period in YYYYMMDD format (required)
         mysql_url: MySQL connection URL
-        end_date: End date in YYYYMMDD format, defaults to yesterday
+        end_period: End period in YYYYMMDD format, defaults to yesterday
         period: Report period type, 'annual' or 'quarter'
-        limit: Limit on number of report periods to fetch (quarters if period='quarter', years if period='annual')
         window_size: Window size in years for CAGR calculations (converted to periods internally), defaults to 3
         chunksize: Batch processing size
     """
     try:
-        end_date = set_default_end_date(end_date)
-        logger.info(f"Starting to update financial profile data, end date: {end_date}, period type: {period}, limit: {limit}, window_size: {window_size}y")
+        start_period, end_period = set_default_period_range(start_period, end_period, period, window_size)
+        logger.info(f"Starting to update financial profile data, period range: {start_period} to {end_period}, period type: {period}, window_size: {window_size}y")
 
         # engine = create_database_engine(mysql_url)
         # create_table_structure(engine)
 
-        periods = _generate_periods(end_date, period, limit)
+        periods = _generate_periods(start_period, end_period, period)
         logger.info(f"Generated {len(periods)} periods: {periods}")
         if not periods:
             logger.warning("No valid periods found")
             return
 
         # For CAGR calculation, we need additional historical data
-        # Convert window_size from years to periods based on period type
+        # Generate additional historical periods going backward from start_period
         window_periods = window_size * 4 if period == "quarter" else window_size
-        historical_limit = limit + window_periods
+        historical_start_period = calculate_historical_start_period(start_period, period, window_periods)
+        historical_periods = _generate_periods(historical_start_period, end_period, period)
         logger.info(f"Window size: {window_size} years = {window_periods} {period} periods")
-        historical_periods = _generate_periods(end_date, period, historical_limit)
         logger.info(f"Generated {len(historical_periods)} historical periods for CAGR calculation")
 
         all_data_frames = fetch_and_normalize_period_data(historical_periods)
@@ -856,12 +947,12 @@ def update_a_stock_financial_profile(
         combined_df = calculate_ttm_indicators(combined_df, window_size)
         logger.info(f"TTM calculation completed, {len(combined_df)} records after TTM processing")
 
-        # Filter to only update the most recent 'limit' periods as specified
+        # Filter to only update the periods in the specified range
         # The historical data was only used for CAGR calculation
         combined_df['report_period_str'] = combined_df['report_period'].astype(str)
         update_df = combined_df[combined_df['report_period_str'].isin(periods)].copy()
         update_df.drop(columns=['report_period_str'], inplace=True)
-        logger.info(f"Filtered to {len(update_df)} records for database update (recent {limit} periods only)")
+        logger.info(f"Filtered to {len(update_df)} records for database update (periods in range {start_period} to {end_period})")
         #combined_df.to_csv("combined_df.csv", index=False)
 
         # total_written = _upsert_batch(engine, update_df, chunksize)

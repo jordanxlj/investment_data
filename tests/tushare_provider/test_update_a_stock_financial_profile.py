@@ -473,27 +473,33 @@ class TestPeriodGeneration:
 
     def test_generate_periods_annual(self):
         """Test annual period generation"""
-        periods = _generate_periods('20231231', 'annual', 3)
+        periods = _generate_periods('20211231', '20231231', 'annual')
         assert isinstance(periods, list)
-        assert len(periods) <= 3
+        assert len(periods) == 3
 
         # Should be in YYYYMMDD format
         for period in periods:
             assert len(period) == 8
             assert period.endswith('1231')  # Annual periods end with Dec 31
 
+        # Should include the expected periods
+        expected = ['20211231', '20221231', '20231231']
+        assert periods == expected
+
     def test_generate_periods_quarterly(self):
         """Test quarterly period generation"""
-        periods = _generate_periods('20231231', 'quarter', 4)
+        periods = _generate_periods('20230331', '20231231', 'quarter')
         assert isinstance(periods, list)
-        assert len(periods) <= 4
+        assert len(periods) == 4
 
         # Should be in YYYYMMDD format
         for period in periods:
             assert len(period) == 8
             # Should end with quarter end dates
-            day = period[-2:]
-            assert day in ['31', '30']
+
+        # Should include the expected periods
+        expected = ['20230331', '20230630', '20230930', '20231231']
+        assert periods == expected
 
 
 @pytest.mark.integration
@@ -527,10 +533,10 @@ class TestIntegration:
         # Should raise the exception (not swallow it)
         with pytest.raises(Exception, match="Database connection failed"):
             update_a_stock_financial_profile(
+                start_period="20231231",
                 mysql_url="mysql+pymysql://invalid:invalid@invalid:3306/invalid",
-                end_date="20231231",
-                period="quarter",
-                limit=1
+                end_period="20231231",
+                period="quarter"
             )
     '''
     @patch('src.tushare_provider.update_a_stock_financial_profile._fetch_single_period_data')
@@ -547,10 +553,10 @@ class TestIntegration:
         # Should raise the exception (not swallow it)
         with pytest.raises(Exception, match="API call failed"):
             update_a_stock_financial_profile(
+                start_period="20231231",
                 mysql_url="mysql+pymysql://test:test@localhost:3306/test",
-                end_date="20231231",
-                period="quarter",
-                limit=1
+                end_period="20231231",
+                period="quarter"
             )
 
 
