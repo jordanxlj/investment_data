@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
   ebit                      DECIMAL(16,4) NULL COMMENT '息税前利润(万元)',
   ebitda                    DECIMAL(16,4) NULL COMMENT 'EBITDA(万元)',
   invest_income             DECIMAL(16,4) NULL COMMENT '投资收益(万元)',
-  interest_exp              DECIMAL(16,4) NULL COMMENT '利息支出(万元)',
+  int_exp                   DECIMAL(16,4) NULL COMMENT '利息支出(万元)',
   oper_exp                  DECIMAL(16,4) NULL COMMENT '营业支出(万元)',
   comshare_payable_dvd      DECIMAL(16,4) NULL COMMENT '应付股利(万元)',
  
@@ -180,7 +180,7 @@ INCOME_FIELDS = [
     'basic_eps', 'diluted_eps', 'total_revenue', 'revenue', 'total_cogs', 'oper_cost', 
     'sell_exp', 'admin_exp', 'fin_exp', 'assets_impair_loss', 'operate_profit', 
     'non_oper_income', 'non_oper_exp', 'total_profit', 'income_tax', 'n_income', 
-    'n_income_attr_p', 'invest_income', 'interest_exp', 'oper_exp', 
+    'n_income_attr_p', 'invest_income', 'int_exp', 'oper_exp', 
     'comshare_payable_dvd'
 ]
 
@@ -221,9 +221,9 @@ TTM_COLUMNS = [
     'debt_to_ebitda', 'rd_exp_to_capex'
 ]
 
-# All columns for schema coercion (includes core fields added during processing)
-ALL_COLUMNS = ['ts_code', 'report_period', 'ann_date', 'end_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
-
+# columns for schema coercion (includes core fields added during processing)
+API_COLUMNS = ['ts_code', 'report_period', 'ann_date', 'end_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
+DB_COLUMNS = ['ts_code', 'report_period', 'ann_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
 # Fields to convert from Yuan to Wan
 YUAN_TO_WAN_FIELDS = INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + ['gross_margin', 'rd_exp', 'ebit', 'ebitda','fcf_ttm']
 
@@ -267,11 +267,11 @@ def data_preprocess(df: pd.DataFrame) -> pd.DataFrame:
     df = convert_yuan_to_wan(df, YUAN_TO_WAN_FIELDS)
 
     # Coerce to float for ratios and per-share
-    float_fields = [f for f in ALL_COLUMNS if f.endswith('_eps') or f.endswith('_ps') or f.endswith('_ratio') or f.endswith('_margin') or f.endswith('_turn') or f.endswith('_yoy') or f.endswith('_cagr_3y')]
+    float_fields = [f for f in API_COLUMNS if f.endswith('_eps') or f.endswith('_ps') or f.endswith('_ratio') or f.endswith('_margin') or f.endswith('_turn') or f.endswith('_yoy') or f.endswith('_cagr_3y')]
     df = coerce_to_float(df, float_fields)
 
     # Coerce to decimal for large amounts
-    decimal_fields = [f for f in ALL_COLUMNS if f in YUAN_TO_WAN_FIELDS]
+    decimal_fields = [f for f in API_COLUMNS if f in YUAN_TO_WAN_FIELDS]
     df = coerce_to_decimal(df, decimal_fields)
 
     # Handle dates
@@ -779,7 +779,7 @@ def prepare_upsert_batch(rows: List[Dict[str, Any]], table: Table, chunksize: in
         stmt = mysql_insert(table).values(batch)
         update_map = {
             c: getattr(stmt.inserted, c)
-            for c in ALL_COLUMNS
+            for c in DB_COLUMNS
             if c not in ("ts_code", "report_period", "ann_date")
         }
         ondup = stmt.on_duplicate_key_update(**update_map)
@@ -792,8 +792,7 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     if df.empty:
         return 0
 
-    DB_COLUMNS = ['ts_code', 'report_period', 'ann_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
-    # Only keep columns that are in ALL_COLUMNS
+    # Only keep columns that are in DB_COLUMNS
     columns_to_keep = [col for col in df.columns if col in DB_COLUMNS]
     df = df[columns_to_keep]
 
@@ -966,7 +965,7 @@ def update_a_stock_financial_profile(
         # The historical data was only used for CAGR calculation
         combined_df['report_period_str'] = combined_df['report_period'].astype(str)
         update_df = combined_df[combined_df['report_period_str'].isin(periods)].copy()
-        update_df.drop(columns=['report_period_str', 'end_date'], inplace=True)
+        update_df.drop(columns=['report_period_str'], inplace=True)
         logger.info(f"Filtered to {len(update_df)} records for database update (periods in range {start_period} to {end_period})")
         #combined_df.to_csv("combined_df.csv", index=False)
 
