@@ -966,7 +966,7 @@ def update_a_stock_financial_profile(
         # The historical data was only used for CAGR calculation
         combined_df['report_period_str'] = combined_df['report_period'].astype(str)
         update_df = combined_df[combined_df['report_period_str'].isin(periods)].copy()
-        update_df.drop(columns=['report_period_str'], inplace=True)
+        update_df.drop(columns=['report_period_str', 'end_date'], inplace=True)
         logger.info(f"Filtered to {len(update_df)} records for database update (periods in range {start_period} to {end_period})")
         #combined_df.to_csv("combined_df.csv", index=False)
 
