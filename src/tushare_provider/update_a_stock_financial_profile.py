@@ -800,6 +800,9 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     if 'report_period' in df.columns:
         df['report_period'] = pd.to_datetime(df['report_period'], format='%Y%m%d').dt.date
 
+    # Replace NaN values with None for MySQL compatibility
+    df = df.replace({np.nan: None, pd.NA: None})
+
     total_processed = len(df)
     meta = MetaData()
     table = Table(TABLE_NAME, meta, autoload_with=engine)
