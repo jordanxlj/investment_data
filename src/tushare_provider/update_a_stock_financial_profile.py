@@ -771,7 +771,7 @@ def _fetch_financial_data(end_date: str, period: str = "annual", limit: int = 1)
     else:
         return pd.DataFrame()
 
-def prepare_upsert_batch(rows: List[Dict[str, Any]], table: Table, chunksize: int) -> int:
+def prepare_upsert_batch(rows: List[Dict[str, Any]], table: Table, conn, chunksize: int) -> int:
     """Prepare and execute upsert in batches"""
     total_affected = 0
     for i in range(0, len(rows), chunksize):
@@ -780,10 +780,11 @@ def prepare_upsert_batch(rows: List[Dict[str, Any]], table: Table, chunksize: in
         update_map = {
             c: getattr(stmt.inserted, c)
             for c in DB_COLUMNS
+            if c not in ("ts_code", "report_period", "ann_date")
         }
         ondup = stmt.on_duplicate_key_update(**update_map)
-        # Assume conn.execute(ondup) here, but in context
-        total_affected += len(batch)  # Simplified for example
+        result = conn.execute(ondup)
+        total_affected += result.rowcount
     return total_affected
 
 def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
@@ -805,8 +806,7 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     rows = df.to_dict(orient="records")
 
     with engine.begin() as conn:
-        total_affected = prepare_upsert_batch(rows, table, chunksize)
-        # Actual execution would be here
+        total_affected = prepare_upsert_batch(rows, table, conn, chunksize)
 
     logger.info(f"Processed {total_processed} records, database reported {total_affected} affected rows")
     return total_processed
@@ -969,7 +969,6 @@ def update_a_stock_financial_profile(
         #combined_df.to_csv("combined_df.csv", index=False)
 
         total_written = _upsert_batch(engine, update_df, chunksize)
-        total_written = len(update_df)  # Placeholder
 
         log_update_completion(periods, total_raw_records, update_df, total_written)
 
