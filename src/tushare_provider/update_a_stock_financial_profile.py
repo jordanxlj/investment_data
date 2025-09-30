@@ -17,7 +17,7 @@ from ..util import (
     setup_logging, init_tushare, call_tushare_api_with_retry
 )
 
-setup_logging(level=logging.DEBUG, log_file='update_a_stock_financial_profile.log')
+setup_logging(level=logging.INFO, log_file='update_a_stock_financial_profile.log')
 logger = logging.getLogger(__name__)
 
 tushare_pro = init_tushare()
@@ -473,15 +473,10 @@ def calculate_semi_annual_values(df: pd.DataFrame, columns: List[str]) -> pd.Dat
         # only h1: hy_ = col (on 0630 row)
         h1_only_mask = mask_h1 & (df_semi['month_day'] == '0630')
         df_semi.loc[h1_only_mask, 'hy_' + col] = df_semi.loc[h1_only_mask, col]
-       
-        # only fy: log only
-        if mask_fy.any() and col == columns[0]:
-            fy_only_rows = df_semi[mask_fy]
-            logger.info(f"FY-only rows count: {len(fy_only_rows)}")
-            if not fy_only_rows.empty:
-                # Group by ts_code to show unique stocks with only FY data
-                fy_only_by_code = fy_only_rows.groupby(['ts_code', 'report_period']).size()
-                logger.info(f"Sample FY-only (ts_code, report_period) pairs: {fy_only_by_code.index.tolist()}")
+
+        # only fy: hy_ = col
+        fy_only_mask = mask_fy & (df_semi['month_day'] == '1231')
+        df_semi.loc[fy_only_mask, 'hy_' + col] = df_semi.loc[fy_only_mask, col]
    
     # Clean up df_semi
     drop_cols = ['year', 'month_day', 'has_h1', 'has_fy', 'tmp_shift']
