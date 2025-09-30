@@ -792,8 +792,9 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     if df.empty:
         return 0
 
+    DB_COLUMNS = ['ts_code', 'report_period', 'ann_date'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
     # Only keep columns that are in ALL_COLUMNS
-    columns_to_keep = [col for col in df.columns if col in ALL_COLUMNS]
+    columns_to_keep = [col for col in df.columns if col in DB_COLUMNS]
     df = df[columns_to_keep]
 
     # Convert report_period from YYYYMMDD string format to DATE format
