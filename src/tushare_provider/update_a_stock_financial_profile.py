@@ -797,6 +797,14 @@ def _upsert_batch(engine, df: pd.DataFrame, chunksize: int = 1000) -> int:
     if df.empty:
         return 0
 
+    # Only keep columns that are in ALL_COLUMNS
+    columns_to_keep = [col for col in df.columns if col in ALL_COLUMNS]
+    df = df[columns_to_keep]
+
+    # Convert report_period from YYYYMMDD string format to DATE format
+    if 'report_period' in df.columns:
+        df['report_period'] = pd.to_datetime(df['report_period'], format='%Y%m%d').dt.date
+
     total_processed = len(df)
     meta = MetaData()
     table = Table(TABLE_NAME, meta, autoload_with=engine)
@@ -886,7 +894,7 @@ def log_update_completion(periods: List[str], total_raw_records: int, combined_d
     logger.info(f"- Total records written to database: {total_written}")
 
 def update_a_stock_financial_profile(
-    start_period: str,
+    start_period,
     mysql_url: str = "mysql+pymysql://root:@127.0.0.1:3306/investment_data",
     end_period: Optional[str] = None,
     period: str = "quarter",
@@ -912,6 +920,10 @@ def update_a_stock_financial_profile(
         chunksize: Batch processing size
     """
     try:
+        # Convert parameters to string in case they're passed as int from command line
+        start_period = str(start_period)
+        if end_period is not None:
+            end_period = str(end_period)
         start_period, end_period = set_default_period_range(start_period, end_period, period, window_size)
         logger.info(f"Starting to update financial profile data, period range: {start_period} to {end_period}, period type: {period}, window_size: {window_size}y")
 
@@ -924,8 +936,15 @@ def update_a_stock_financial_profile(
             logger.warning("No valid periods found")
             return
 
-        # For CAGR calculation, we need additional historical data
-        # Generate additional historical periods going backward from start_period
+        # Check if requested periods have any data before fetching historical data
+        logger.info("Checking if requested periods have data...")
+        test_data_frames = fetch_and_normalize_period_data(periods[:1])  # Test with just the first period
+        if not test_data_frames or all(len(df) == 0 for df in test_data_frames):
+            logger.warning("No data found for requested periods, skipping historical data fetch")
+            return
+
+        # Data exists for requested periods, now fetch full historical data for CAGR calculation
+        logger.info("Fetching historical data for CAGR calculation...")
         window_periods = window_size * 4 if period == "quarter" else window_size
         historical_start_period = calculate_historical_start_period(start_period, period, window_periods)
         historical_periods = _generate_periods(historical_start_period, end_period, period)
