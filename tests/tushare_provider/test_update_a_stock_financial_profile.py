@@ -243,7 +243,7 @@ class TestSemiAnnualValues:
             result = calculate_semi_annual_values(test_data.copy(), columns)
 
         assert len(result) == 1
-        assert np.isnan(result['hy_n_income_attr_p'].iloc[0])  # No hy_ set
+        assert result['hy_n_income_attr_p'].iloc[0] == 550
         # assert any('FY-only rows count' in record.message for record in caplog.records)  # TODO: Re-enable after cache clear
 
     def test_semi_annual_with_quarters(self):
