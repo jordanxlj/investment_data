@@ -223,8 +223,8 @@ TTM_COLUMNS = [
     'debt_to_ebitda', 'rd_exp_to_capex'
 ]
 
-# All columns for schema coercion
-ALL_COLUMNS = COMMON_FIELDS + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
+# All columns for schema coercion (includes core fields added during processing)
+ALL_COLUMNS = ['ts_code', 'report_period', 'ann_date', 'end_date', 'period', 'currency'] + INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + INDICATOR_FIELDS + TTM_COLUMNS
 
 # Fields to convert from Yuan to Wan
 YUAN_TO_WAN_FIELDS = INCOME_FIELDS + BALANCE_FIELDS + CASHFLOW_FIELDS + ['gross_margin', 'rd_exp', 'ebit', 'ebitda','fcf_ttm']
