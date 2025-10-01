@@ -8,6 +8,7 @@
 CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   tradedate DATE NOT NULL,
   symbol VARCHAR(16) NOT NULL,
+  industry INT,
   high FLOAT,
   low FLOAT,
   open FLOAT,
@@ -84,7 +85,7 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   PRIMARY KEY (tradedate, symbol),
   INDEX idx_tradedate_desc (tradedate DESC),
   INDEX idx_comb_symbol_tradedate (symbol, tradedate)
-) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 
 
 /* Set shared variables to avoid repeated subqueries */
