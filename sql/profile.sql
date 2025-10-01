@@ -70,9 +70,11 @@ CREATE TEMPORARY TABLE temp_batch_dates (
     batch_end DATE
 );
 
-/* Process each batch */
+/* Create stored procedure for batch processing */
 DELIMITER //
-batch_processing: BEGIN
+DROP PROCEDURE IF EXISTS process_financial_profile_batches //
+CREATE PROCEDURE process_financial_profile_batches()
+BEGIN
     DECLARE done INT DEFAULT FALSE;
     DECLARE batch_start_date DATE;
     DECLARE batch_end_date DATE;
@@ -212,6 +214,9 @@ batch_processing: BEGIN
     CLOSE cur;
 END //
 DELIMITER ;
+
+/* Execute the batch processing procedure */
+CALL process_financial_profile_batches();
 
 
 /* Show overall update summary */
