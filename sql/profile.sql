@@ -43,27 +43,6 @@ SET @disable_keys = 0;  /* Set to 1 to disable/enable keys during update (test c
 
 SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug = ', @debug, ', batch_size_years = ', @batch_size_years) AS update_info;
 
-/* Create optimized indexes for performance */
-SELECT "Creating performance indexes..." AS index_creation;
-SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_ts_code_ann_date_report ON ts_a_stock_financial_profile (ts_code, ann_date, report_period)';
-PREPARE stmt FROM @index_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_w_symbol_link ON ts_link_table (w_symbol, link_symbol)';
-PREPARE stmt FROM @index_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_ann_date_ts_code ON ts_a_stock_financial_profile (ann_date, ts_code)';
-PREPARE stmt FROM @index_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SELECT "Index creation completed." AS index_status;
-
-/* No initialization needed - records will be created during updates */
-
 /* Update financial metrics from ts_a_stock_financial_profile based on announcement dates */
 SELECT "Update financial metrics from ts_a_stock_financial_profile based on announcement dates (batch processing by tradedate)" as info;
 
