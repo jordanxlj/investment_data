@@ -36,8 +36,8 @@
    ============================================================================ */
 
 /* Set shared variables */
-SET @start_date = '2010-01-01';  /* Start date for data processing */
-SET @debug = 0;  /* Set to 1 to enable debug output */
+SET @start_date = '2017-07-01';  /* Start date for data processing */
+SET @debug = 1;  /* Set to 1 to enable debug output */
 SET @batch_size_years = 1;  /* Process one year at a time */
 
 SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug = ', @debug, ', batch_size_years = ', @batch_size_years) AS update_info;
