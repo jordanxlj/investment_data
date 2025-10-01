@@ -30,7 +30,7 @@ CREATE TABLE  IF NOT EXISTS {TABLE_NAME}  (
    sell_elg_amount  FLOAT NULL,
    net_mf_amount  FLOAT NULL,
   PRIMARY KEY ( ts_code , trade_date ),
-  INDEX idx_ts_code_trade_date (ts_code, trade_date),
+  INDEX idx_ts_code_trade_date (ts_code, trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8;
 """
 
@@ -137,7 +137,7 @@ def update_astock_moneyflow_to_latest(
         latest_df = pandas.read_sql(latest_sql, db_conn)
         val = latest_df["trade_date"][0]
         if pandas.notna(val):
-            latest_trade_date = str(val)
+            latest_trade_date = str(val).replace('-', '')
     except Exception as e:
         print("Failed to read latest trade_date:", e)
 
