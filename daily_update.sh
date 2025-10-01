@@ -65,7 +65,7 @@ echo "Updating A-share basic info"
 python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_basic.py" --mysql_url="${MYSQL_URL}" 
 
 echo "Updating A-share financial profile"
-python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_financial_profile.py" --mysql_url="${MYSQL_URL}" --start_period 20250930
+python3 -m src.tushare_provider.update_a_stock_financial_profile --mysql_url="${MYSQL_URL}" --start_period 20250930
 
 echo "Updating A-share suspend info"
 python3 "${SCRIPT_DIR}/tushare_provider/update_a_stock_suspend_info.py" --mysql_url="${MYSQL_URL}"
