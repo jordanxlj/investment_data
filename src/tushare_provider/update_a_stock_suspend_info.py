@@ -129,12 +129,12 @@ def update_astock_suspend_to_latest(
     try:
         with sql_engine.begin() as econn:
             latest_df = pandas.read_sql_query(
-                "SELECT DATE_FORMAT(MAX(trade_date), '%Y%m%d') AS trade_date FROM ts_a_stock_suspend_info",
+                "SELECT MAX(trade_date) AS trade_date FROM ts_a_stock_suspend_info",
                 econn,
             )
             val = latest_df["trade_date"].iloc[0] if not latest_df.empty else None
             if pandas.notna(val):
-                latest_trade_date = str(val)
+                latest_trade_date = str(val).replace('-', '')
     except Exception as e:
         print("Failed to read latest trade_date:", e)
 
