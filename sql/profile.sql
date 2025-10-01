@@ -24,7 +24,7 @@
    ============================================================================ */
 
 /* Set shared variables */
-SET @start_date = '2018-01-01';  /* Start date for data processing */
+SET @start_date = '2010-01-01';  /* Start date for data processing */
 SET @debug = 0;  /* Set to 1 to enable debug output */
 
 SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug = ', @debug) AS update_info;
@@ -57,7 +57,7 @@ INNER JOIN ts_a_stock_financial_profile financial ON (
         SELECT MAX(f2.report_period)
         FROM ts_a_stock_financial_profile f2
         WHERE f2.ts_code = financial.ts_code
-          AND f2.ann_date <= target.tradedate
+          AND f2.ann_date < target.tradedate
     )
 )
 SET
