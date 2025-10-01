@@ -47,13 +47,14 @@ SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug 
 SELECT "Update financial metrics from ts_a_stock_financial_profile based on announcement dates (batch processing by tradedate)" as info;
 
 /* Get the last financial update time from the tracking table */
+SET @last_completed_end_day = (SELECT MAX(end_day) FROM update_record_table
+                               WHERE update_type = 'financial_profile');
 SET @financial_update_start = COALESCE(
-    (SELECT MAX(end_day) FROM update_record_table
-     WHERE update_type = 'financial_profile'),
+    (SELECT DATE_ADD(@last_completed_end_day, INTERVAL 1 DAY)),
     @start_date
 );
 
-SELECT CONCAT('Last financial update was on: ', @financial_update_start) AS last_update_info;
+SELECT CONCAT('Starting financial update from: ', @financial_update_start, ' (day after last successful update)') AS last_update_info;
 
 /* Get the date range that needs updating */
 SET @max_tradedate = (SELECT MAX(tradedate) FROM final_a_stock_comb_info);
@@ -89,10 +90,22 @@ BEGIN
     /* Generate batch date ranges (quarterly batches) */
     SET @current_date = @financial_update_start;
     batch_date_loop: LOOP
-        SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
+        /* Calculate batch end date more precisely for quarterly batches */
+        IF @batch_size_years = 0.25 THEN
+            /* For quarterly: add 3 months and subtract 1 day */
+            SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL 3 MONTH), INTERVAL 1 DAY);
+        ELSE
+            /* For other batch sizes: use year calculation */
+            SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
+        END IF;
 
         IF @batch_end > @max_tradedate THEN
             SET @batch_end = @max_tradedate;
+        END IF;
+
+        /* Debug: show what we're inserting */
+        IF @debug = 1 THEN
+            SELECT CONCAT('Inserting batch: ', @current_date, ' to ', @batch_end) AS batch_insert_debug;
         END IF;
 
         INSERT INTO temp_batch_dates VALUES (@current_date, @batch_end);
@@ -101,7 +114,12 @@ BEGIN
             LEAVE batch_date_loop;
         END IF;
 
-        SET @current_date = DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR);
+        /* Advance to next batch start */
+        IF @batch_size_years = 0.25 THEN
+            SET @current_date = DATE_ADD(@current_date, INTERVAL 3 MONTH);
+        ELSE
+            SET @current_date = DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR);
+        END IF;
     END LOOP;
 
     SELECT CONCAT('Generated ', (SELECT COUNT(*) FROM temp_batch_dates), ' batches for processing') AS batch_info;
@@ -123,7 +141,7 @@ BEGIN
         revenue_cagr_3y, netincome_cagr_3y,
         rd_exp_to_capex, goodwill
     FROM ts_a_stock_financial_profile
-    WHERE ann_date > @financial_update_start AND ann_date >= @start_date;
+    WHERE ann_date >= @financial_update_start AND ann_date >= @start_date;
 
     /* Fill NULL next_ann_date with far future date to avoid range issues */
     UPDATE temp_report_ranges SET next_ann_date = '2100-01-01' WHERE next_ann_date IS NULL;
