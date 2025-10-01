@@ -5,7 +5,7 @@
    to final_a_stock_comb_info based on announcement dates.
 
    FEATURES:
-   - Batch processing by tradedate (configurable batch size, default 1 year)
+   - Batch processing by tradedate (configurable batch size, default 0.25 for quarterly)
    - Incremental updates based on last update time from update_record_table
    - Transactional batch processing with rollback on errors
    - Detailed progress tracking with individual batch records
@@ -25,8 +25,9 @@
    - Other (rd_exp_to_capex, goodwill)
 
    CONFIGURATION:
-   - @batch_size_years: Number of years to process in each batch (default: 1)
+   - @batch_size_years: Number of years to process in each batch (default: 0.25 for quarterly)
    - @debug: Enable debug output (0=off, 1=on)
+   - @disable_keys: Disable/enable table keys during update (0=off, 1=on, test carefully)
 
    ⚠️  IMPORTANT: TTM and CAGR values are approximations using latest available data.
    For accurate financial analysis, consider using the Python TTM calculation scripts.
@@ -47,14 +48,13 @@ SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug 
 SELECT "Update financial metrics from ts_a_stock_financial_profile based on announcement dates (batch processing by tradedate)" as info;
 
 /* Get the last financial update time from the tracking table */
-SET @last_completed_end_day = (SELECT MAX(end_day) FROM update_record_table
-                               WHERE update_type = 'financial_profile');
 SET @financial_update_start = COALESCE(
-    (SELECT DATE_ADD(@last_completed_end_day, INTERVAL 1 DAY)),
+    (SELECT MAX(end_day) FROM update_record_table
+     WHERE update_type = 'financial_profile'),
     @start_date
 );
 
-SELECT CONCAT('Starting financial update from: ', @financial_update_start, ' (day after last successful update)') AS last_update_info;
+SELECT CONCAT('Last financial update was on: ', @financial_update_start) AS last_update_info;
 
 /* Get the date range that needs updating */
 SET @max_tradedate = (SELECT MAX(tradedate) FROM final_a_stock_comb_info);
@@ -90,41 +90,20 @@ BEGIN
     /* Generate batch date ranges (quarterly batches) */
     SET @current_date = @financial_update_start;
     batch_date_loop: LOOP
-        /* Calculate batch end date more precisely for quarterly batches */
-        IF @batch_size_years = 0.25 THEN
-            /* For quarterly: add 3 months and subtract 1 day */
-            SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL 3 MONTH), INTERVAL 1 DAY);
-        ELSE
-            /* For other batch sizes: use year calculation */
-            SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
-        END IF;
-
+        SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL 3 MONTH), INTERVAL 1 DAY);
         IF @batch_end > @max_tradedate THEN
             SET @batch_end = @max_tradedate;
         END IF;
-
-        /* Debug: show what we're inserting */
-        IF @debug = 1 THEN
-            SELECT CONCAT('Inserting batch: ', @current_date, ' to ', @batch_end) AS batch_insert_debug;
-        END IF;
-
         INSERT INTO temp_batch_dates VALUES (@current_date, @batch_end);
-
         IF @batch_end >= @max_tradedate THEN
             LEAVE batch_date_loop;
         END IF;
-
-        /* Advance to next batch start */
-        IF @batch_size_years = 0.25 THEN
-            SET @current_date = DATE_ADD(@current_date, INTERVAL 3 MONTH);
-        ELSE
-            SET @current_date = DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR);
-        END IF;
+        SET @current_date = DATE_ADD(@current_date, INTERVAL 3 MONTH);
     END LOOP;
 
     SELECT CONCAT('Generated ', (SELECT COUNT(*) FROM temp_batch_dates), ' batches for processing') AS batch_info;
 
-    /* Pre-compute report ranges for new announcements using window functions */
+    /* Pre-compute report ranges including all relevant reports to handle gaps */
     CREATE TEMPORARY TABLE temp_report_ranges AS
     SELECT
         ts_code,
@@ -141,28 +120,20 @@ BEGIN
         revenue_cagr_3y, netincome_cagr_3y,
         rd_exp_to_capex, goodwill
     FROM ts_a_stock_financial_profile
-    WHERE ann_date >= @financial_update_start AND ann_date >= @start_date;
+    WHERE ann_date <= @max_tradedate AND ann_date >= @start_date;  /* Include all from start to max for continuity */
 
-    /* Fill NULL next_ann_date with far future date to avoid range issues */
+    /* Handle the last range per ts_code */
     UPDATE temp_report_ranges SET next_ann_date = '2100-01-01' WHERE next_ann_date IS NULL;
 
-    /* Add index on temp table for faster JOINs */
+    /* Add index for faster JOINs */
     ALTER TABLE temp_report_ranges ADD INDEX idx_ts_code_ann_date (ts_code, ann_date);
 
-    /* Determine minimum affected tradedate (new reports start) */
-    SET @min_affected_tradedate = (SELECT MIN(ann_date) FROM temp_report_ranges);
-    IF @min_affected_tradedate IS NULL THEN
-        SET @min_affected_tradedate = @financial_update_start;  /* No new reports, fallback */
-    END IF;
-
     IF @debug = 1 THEN
-        SELECT CONCAT('Precomputed report ranges for ', (SELECT COUNT(*) FROM temp_report_ranges), ' new announcements') AS precompute_info;
-        SELECT 'Sample of precomputed ranges:' AS sample_info;
-        SELECT ts_code, ann_date, next_ann_date, report_period, current_ratio
-        FROM temp_report_ranges ORDER BY ts_code, ann_date LIMIT 5;
+        SELECT 'Precomputed report ranges:' AS status;
+        SELECT * FROM temp_report_ranges LIMIT 10;
     END IF;
 
-    /* Optionally disable keys for faster bulk updates */
+    /* Optionally disable keys for faster bulk updates (InnoDB limited effect) */
     IF @disable_keys = 1 THEN
         ALTER TABLE final_a_stock_comb_info DISABLE KEYS;
         SELECT "Disabled keys on final_a_stock_comb_info for faster updates" AS key_management;
@@ -176,22 +147,13 @@ BEGIN
             LEAVE batch_loop;
         END IF;
 
-        /* Skip batches that don't overlap with affected tradedates (incremental optimization) */
-        IF batch_end_date < @min_affected_tradedate THEN
-            IF @debug = 1 THEN
-                SELECT CONCAT('Skipping batch: ', batch_start_date, ' to ', batch_end_date, ' (before affected range)') AS skip_info;
-            END IF;
-            ITERATE batch_loop;  /* Skip to next batch */
-        END IF;
-
-        /* Start transaction for this batch */
         START TRANSACTION;
 
         IF @debug = 1 THEN
             SELECT CONCAT('Processing batch: ', batch_start_date, ' to ', batch_end_date) AS batch_status;
         END IF;
 
-        /* Bulk update financial metrics for this batch using precomputed ranges */
+        /* Bulk update using precomputed ranges (nearest prior report) */
         UPDATE final_a_stock_comb_info target
         INNER JOIN ts_link_table link ON target.symbol = link.w_symbol
         INNER JOIN temp_report_ranges r ON r.ts_code = link.link_symbol
@@ -243,8 +205,8 @@ BEGIN
             target.rd_exp_to_capex = r.rd_exp_to_capex,
             target.goodwill = r.goodwill
         WHERE target.tradedate BETWEEN batch_start_date AND batch_end_date
-          AND target.tradedate > r.ann_date  /* Apply from day after announcement */
-          AND target.tradedate <= r.next_ann_date;  /* Until next announcement (inclusive) */
+          AND target.tradedate > r.ann_date  /* Strict prior announcement */
+          AND (target.tradedate <= r.next_ann_date OR r.next_ann_date = '2100-01-01');  /* Until next or indefinite */
 
         SET @batch_updated = ROW_COUNT();
         SET @total_updated_records = @total_updated_records + @batch_updated;
@@ -253,7 +215,7 @@ BEGIN
             SELECT CONCAT('Batch ', batch_start_date, '-', batch_end_date, ': Updated ', @batch_updated, ' records') AS batch_result;
         END IF;
 
-        /* Record individual batch update in tracking table */
+        /* Record batch in tracking table */
         IF @batch_updated > 0 THEN
             INSERT INTO update_record_table (
                 update_type, end_day, start_day, record_count, last_update_time
@@ -266,14 +228,12 @@ BEGIN
             );
         END IF;
 
-        /* Commit the batch transaction */
         COMMIT;
-
     END LOOP;
 
     CLOSE cur;
 
-    /* Re-enable keys if they were disabled */
+    /* Re-enable keys if disabled */
     IF @disable_keys = 1 THEN
         ALTER TABLE final_a_stock_comb_info ENABLE KEYS;
         SELECT "Re-enabled keys on final_a_stock_comb_info" AS key_management;
@@ -286,7 +246,6 @@ DELIMITER ;
 
 /* Execute the batch processing procedure */
 CALL process_financial_profile_batches();
-
 
 /* Show overall update summary */
 SELECT
@@ -304,7 +263,6 @@ SELECT
     last_update_time
 FROM update_record_table
 WHERE update_type = 'financial_profile'
-  AND last_update_time >= (SELECT MIN(last_update_time) FROM update_record_table WHERE update_type = 'financial_profile')
 ORDER BY last_update_time DESC;
 
 /* Clean up temporary table */
