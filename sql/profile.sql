@@ -38,9 +38,29 @@
 /* Set shared variables */
 SET @start_date = '2017-07-01';  /* Start date for data processing */
 SET @debug = 1;  /* Set to 1 to enable debug output */
-SET @batch_size_years = 1;  /* Process one year at a time */
+SET @batch_size_years = 0.25;  /* Process quarterly batches for better performance */
+SET @disable_keys = 0;  /* Set to 1 to disable/enable keys during update (test carefully!) */
 
 SELECT CONCAT('Financial Update: Processing data from: ', @start_date, ', debug = ', @debug, ', batch_size_years = ', @batch_size_years) AS update_info;
+
+/* Create optimized indexes for performance */
+SELECT "Creating performance indexes..." AS index_creation;
+SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_ts_code_ann_date_report ON ts_a_stock_financial_profile (ts_code, ann_date, report_period)';
+PREPARE stmt FROM @index_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_w_symbol_link ON ts_link_table (w_symbol, link_symbol)';
+PREPARE stmt FROM @index_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @index_sql = 'CREATE INDEX IF NOT EXISTS idx_ann_date_ts_code ON ts_a_stock_financial_profile (ann_date, ts_code)';
+PREPARE stmt FROM @index_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT "Index creation completed." AS index_status;
 
 /* No initialization needed - records will be created during updates */
 
@@ -87,7 +107,7 @@ BEGIN
         RESIGNAL;
     END;
 
-    /* Generate batch date ranges (one batch per year) */
+    /* Generate batch date ranges (quarterly batches) */
     SET @current_date = @financial_update_start;
     batch_date_loop: LOOP
         SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
@@ -107,12 +127,64 @@ BEGIN
 
     SELECT CONCAT('Generated ', (SELECT COUNT(*) FROM temp_batch_dates), ' batches for processing') AS batch_info;
 
+    /* Pre-compute report ranges for new announcements using window functions */
+    CREATE TEMPORARY TABLE temp_report_ranges AS
+    SELECT
+        ts_code,
+        ann_date,
+        LEAD(ann_date) OVER (PARTITION BY ts_code ORDER BY ann_date) AS next_ann_date,
+        report_period,
+        /* All financial metrics to be updated */
+        current_ratio, quick_ratio, cash_ratio,
+        ca_turn, inv_turn, ar_turn, fa_turn, assets_turn,
+        roic, roe_ttm, roa_ttm, grossprofit_margin_ttm, netprofit_margin_ttm, fcf_margin_ttm,
+        debt_to_assets, debt_to_eqt, debt_to_ebitda,
+        bps, eps_ttm, revenue_ps_ttm, cfps, fcff_ps,
+        or_yoy, netprofit_yoy, basic_eps_yoy, equity_yoy, assets_yoy, ocf_yoy, roe_yoy,
+        revenue_cagr_3y, netincome_cagr_3y,
+        rd_exp_to_capex, goodwill
+    FROM ts_a_stock_financial_profile
+    WHERE ann_date > @financial_update_start AND ann_date >= @start_date;
+
+    /* Fill NULL next_ann_date with far future date to avoid range issues */
+    UPDATE temp_report_ranges SET next_ann_date = '2100-01-01' WHERE next_ann_date IS NULL;
+
+    /* Add index on temp table for faster JOINs */
+    ALTER TABLE temp_report_ranges ADD INDEX idx_ts_code_ann_date (ts_code, ann_date);
+
+    /* Determine minimum affected tradedate (new reports start) */
+    SET @min_affected_tradedate = (SELECT MIN(ann_date) FROM temp_report_ranges);
+    IF @min_affected_tradedate IS NULL THEN
+        SET @min_affected_tradedate = @financial_update_start;  /* No new reports, fallback */
+    END IF;
+
+    IF @debug = 1 THEN
+        SELECT CONCAT('Precomputed report ranges for ', (SELECT COUNT(*) FROM temp_report_ranges), ' new announcements') AS precompute_info;
+        SELECT 'Sample of precomputed ranges:' AS sample_info;
+        SELECT ts_code, ann_date, next_ann_date, report_period, current_ratio
+        FROM temp_report_ranges ORDER BY ts_code, ann_date LIMIT 5;
+    END IF;
+
+    /* Optionally disable keys for faster bulk updates */
+    IF @disable_keys = 1 THEN
+        ALTER TABLE final_a_stock_comb_info DISABLE KEYS;
+        SELECT "Disabled keys on final_a_stock_comb_info for faster updates" AS key_management;
+    END IF;
+
     OPEN cur;
 
     batch_loop: LOOP
         FETCH cur INTO batch_start_date, batch_end_date;
         IF done THEN
             LEAVE batch_loop;
+        END IF;
+
+        /* Skip batches that don't overlap with affected tradedates (incremental optimization) */
+        IF batch_end_date < @min_affected_tradedate THEN
+            IF @debug = 1 THEN
+                SELECT CONCAT('Skipping batch: ', batch_start_date, ' to ', batch_end_date, ' (before affected range)') AS skip_info;
+            END IF;
+            ITERATE batch_loop;  /* Skip to next batch */
         END IF;
 
         /* Start transaction for this batch */
@@ -122,69 +194,60 @@ BEGIN
             SELECT CONCAT('Processing batch: ', batch_start_date, ' to ', batch_end_date) AS batch_status;
         END IF;
 
-        /* Update financial metrics for this batch */
+        /* Bulk update financial metrics for this batch using precomputed ranges */
         UPDATE final_a_stock_comb_info target
         INNER JOIN ts_link_table link ON target.symbol = link.w_symbol
-        INNER JOIN ts_a_stock_financial_profile financial ON (
-            financial.ts_code = link.link_symbol
-            AND target.tradedate BETWEEN batch_start_date AND batch_end_date
-            AND target.tradedate > financial.ann_date
-            AND financial.ann_date > @financial_update_start
-            AND financial.ann_date >= @start_date
-            AND financial.report_period = (
-                SELECT MAX(f2.report_period)
-                FROM ts_a_stock_financial_profile f2
-                WHERE f2.ts_code = financial.ts_code
-                  AND f2.ann_date < target.tradedate
-            )
-        )
+        INNER JOIN temp_report_ranges r ON r.ts_code = link.link_symbol
         SET
             /* Liquidity ratios */
-            target.current_ratio = financial.current_ratio,
-            target.quick_ratio = financial.quick_ratio,
-            target.cash_ratio = financial.cash_ratio,
+            target.current_ratio = r.current_ratio,
+            target.quick_ratio = r.quick_ratio,
+            target.cash_ratio = r.cash_ratio,
 
             /* Turnover ratios */
-            target.ca_turn = financial.ca_turn,
-            target.inv_turn = financial.inv_turn,
-            target.ar_turn = financial.ar_turn,
-            target.fa_turn = financial.fa_turn,
-            target.assets_turn = financial.assets_turn,
+            target.ca_turn = r.ca_turn,
+            target.inv_turn = r.inv_turn,
+            target.ar_turn = r.ar_turn,
+            target.fa_turn = r.fa_turn,
+            target.assets_turn = r.assets_turn,
 
             /* Profitability - Basic ratios that don't need TTM calculation */
-            target.roic = financial.roic,
-            target.roe_ttm = financial.roe_ttm,
-            target.roa_ttm = financial.roa_ttm,
-            target.grossprofit_margin_ttm = financial.grossprofit_margin_ttm,
-            target.netprofit_margin_ttm = financial.netprofit_margin_ttm,
-            target.fcf_margin_ttm = financial.fcf_margin_ttm,
+            target.roic = r.roic,
+            target.roe_ttm = r.roe_ttm,
+            target.roa_ttm = r.roa_ttm,
+            target.grossprofit_margin_ttm = r.grossprofit_margin_ttm,
+            target.netprofit_margin_ttm = r.netprofit_margin_ttm,
+            target.fcf_margin_ttm = r.fcf_margin_ttm,
 
             /* Leverage */
-            target.debt_to_assets = financial.debt_to_assets,
-            target.debt_to_eqt = financial.debt_to_eqt,
-            target.debt_to_ebitda = financial.debt_to_ebitda,
+            target.debt_to_assets = r.debt_to_assets,
+            target.debt_to_eqt = r.debt_to_eqt,
+            target.debt_to_ebitda = r.debt_to_ebitda,
 
             /* Valuation */
-            target.bps = financial.bps,
-            target.eps_ttm = financial.eps_ttm,
-            target.revenue_ps_ttm = financial.revenue_ps_ttm,
-            target.cfps = financial.cfps,
-            target.fcff_ps = financial.fcff_ps,
+            target.bps = r.bps,
+            target.eps_ttm = r.eps_ttm,
+            target.revenue_ps_ttm = r.revenue_ps_ttm,
+            target.cfps = r.cfps,
+            target.fcff_ps = r.fcff_ps,
 
             /* Growth */
-            target.or_yoy = financial.or_yoy,
-            target.netprofit_yoy = financial.netprofit_yoy,
-            target.basic_eps_yoy = financial.basic_eps_yoy,
-            target.equity_yoy = financial.equity_yoy,
-            target.assets_yoy = financial.assets_yoy,
-            target.ocf_yoy = financial.ocf_yoy,
-            target.roe_yoy = financial.roe_yoy,
-            target.revenue_cagr_3y = financial.revenue_cagr_3y,
-            target.netincome_cagr_3y = financial.netincome_cagr_3y,
+            target.or_yoy = r.or_yoy,
+            target.netprofit_yoy = r.netprofit_yoy,
+            target.basic_eps_yoy = r.basic_eps_yoy,
+            target.equity_yoy = r.equity_yoy,
+            target.assets_yoy = r.assets_yoy,
+            target.ocf_yoy = r.ocf_yoy,
+            target.roe_yoy = r.roe_yoy,
+            target.revenue_cagr_3y = r.revenue_cagr_3y,
+            target.netincome_cagr_3y = r.netincome_cagr_3y,
 
             /* Other */
-            target.rd_exp_to_capex = financial.rd_exp_to_capex,
-            target.goodwill = financial.goodwill;
+            target.rd_exp_to_capex = r.rd_exp_to_capex,
+            target.goodwill = r.goodwill
+        WHERE target.tradedate BETWEEN batch_start_date AND batch_end_date
+          AND target.tradedate > r.ann_date  /* Apply from day after announcement */
+          AND target.tradedate <= r.next_ann_date;  /* Until next announcement (inclusive) */
 
         SET @batch_updated = ROW_COUNT();
         SET @total_updated_records = @total_updated_records + @batch_updated;
@@ -212,6 +275,15 @@ BEGIN
     END LOOP;
 
     CLOSE cur;
+
+    /* Re-enable keys if they were disabled */
+    IF @disable_keys = 1 THEN
+        ALTER TABLE final_a_stock_comb_info ENABLE KEYS;
+        SELECT "Re-enabled keys on final_a_stock_comb_info" AS key_management;
+    END IF;
+
+    /* Clean up temporary table */
+    DROP TEMPORARY TABLE IF EXISTS temp_report_ranges;
 END //
 DELIMITER ;
 
