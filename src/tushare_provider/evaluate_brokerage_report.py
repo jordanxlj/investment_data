@@ -334,7 +334,7 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 
         # Convert eval_date from string to DATE object for efficient storage and queries
         # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
-        eval_date_obj = pd.to_datetime(eval_date, format='%Y-%m-%d').date()
+        eval_date_obj = pd.to_datetime(eval_date, format='%Y%m%d').date()
 
         result = {
             'ts_code': ts_code,
