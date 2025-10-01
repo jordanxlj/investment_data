@@ -132,6 +132,7 @@ def update_astock_fundamental_to_latest(
     if not latest_trade_date:
         latest_trade_date = "20080101"
 
+    latest_trade_date = latest_trade_date.replace("-", "")
     end_date = datetime.datetime.now().strftime("%Y%m%d")
 
     trade_date_df = get_trade_cal(latest_trade_date, end_date)
