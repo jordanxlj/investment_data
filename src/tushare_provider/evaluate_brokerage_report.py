@@ -415,7 +415,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
                 # Get all reports available up to current_date
-                current_date_dt = pd.to_datetime(current_date, format='%Y-%m-%d')
+                current_date_dt = pd.to_datetime(current_date, format='%Y%m%d')
                 date_df = bulk_df[bulk_df['report_date_dt'] < current_date_dt].copy()
 
                 if date_df.empty:
