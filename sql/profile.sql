@@ -70,26 +70,6 @@ CREATE TEMPORARY TABLE temp_batch_dates (
     batch_end DATE
 );
 
-/* Generate batch date ranges (one batch per year) */
-SET @current_date = @financial_update_start;
-batch_date_loop: LOOP
-    SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
-
-    IF @batch_end > @max_tradedate THEN
-        SET @batch_end = @max_tradedate;
-    END IF;
-
-    INSERT INTO temp_batch_dates VALUES (@current_date, @batch_end);
-
-    IF @batch_end >= @max_tradedate THEN
-        LEAVE batch_date_loop;
-    END IF;
-
-    SET @current_date = DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR);
-END LOOP;
-
-SELECT CONCAT('Generated ', (SELECT COUNT(*) FROM temp_batch_dates), ' batches for processing') AS batch_info;
-
 /* Process each batch */
 DELIMITER //
 batch_processing: BEGIN
@@ -104,6 +84,26 @@ batch_processing: BEGIN
         SELECT 'Error occurred during batch processing. Transaction rolled back.' AS error_message;
         RESIGNAL;
     END;
+
+    /* Generate batch date ranges (one batch per year) */
+    SET @current_date = @financial_update_start;
+    batch_date_loop: LOOP
+        SET @batch_end = DATE_SUB(DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR), INTERVAL 1 DAY);
+
+        IF @batch_end > @max_tradedate THEN
+            SET @batch_end = @max_tradedate;
+        END IF;
+
+        INSERT INTO temp_batch_dates VALUES (@current_date, @batch_end);
+
+        IF @batch_end >= @max_tradedate THEN
+            LEAVE batch_date_loop;
+        END IF;
+
+        SET @current_date = DATE_ADD(@current_date, INTERVAL @batch_size_years YEAR);
+    END LOOP;
+
+    SELECT CONCAT('Generated ', (SELECT COUNT(*) FROM temp_batch_dates), ' batches for processing') AS batch_info;
 
     OPEN cur;
 
