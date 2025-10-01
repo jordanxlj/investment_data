@@ -102,7 +102,7 @@ SET
     target.ocf_yoy = financial.ocf_yoy,
     target.roe_yoy = financial.roe_yoy,
     target.revenue_cagr_3y = financial.revenue_cagr_3y,
-    target.netincome_cagr_3y = financial.netprofit_cagr_3y,
+    target.netincome_cagr_3y = financial.netincome_cagr_3y,
 
     /* Other */
     target.rd_exp_to_capex = financial.rd_exp_to_capex,
