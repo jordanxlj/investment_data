@@ -1,5 +1,4 @@
 /* Module 12: Update Consensus Report Data (Day by Day) */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-10';  /* Default start date */
 SET @debug = 0;
 
@@ -17,7 +16,7 @@ SELECT "Update final_a_stock_comb_info with consensus report data - use min_pric
 /* Debug: Check source data availability */
 SELECT MAX(eval_date) AS max_source_date, COUNT(*) AS source_rows
 FROM ts_a_stock_consensus_report
-WHERE eval_date > @max_tradedate
+WHERE eval_date >= @last_brokerage_update
   AND total_reports > 0;
 
 /* Create a temporary table to store dates to process */
@@ -26,7 +25,6 @@ CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT eval_date AS trade_date
 FROM ts_a_stock_consensus_report
 WHERE eval_date >= @last_brokerage_update
-  AND eval_date > @max_tradedate
   AND total_reports > 0
 ORDER BY eval_date;
 
@@ -77,7 +75,6 @@ BEGIN
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
   WHERE consensus.eval_date >= @last_brokerage_update
-    AND consensus.eval_date > @max_tradedate
     AND consensus.total_reports > 0;
 
   -- Create index on the temporary table for better performance
