@@ -83,11 +83,12 @@ echo "evaluate A-share brokerage report"
 python3 "${SCRIPT_DIR}/tushare_provider/evaluate_brokerage_report.py" --mysql_url="${MYSQL_URL}"
 
 echo "Merging to final tables"
-mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/price.sql" 
-mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/fundamental.sql" &
-mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/moneyflow.sql" &
-mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/cost.sql" &
-mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "${SCRIPT_DIR}/sql/brokerage.sql" &
+#mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/price.sql" 
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/fundamental.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/moneyflow.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/cost.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/brokerage.sql" &
+mysql -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" -u"${MYSQL_USER}" --protocol=tcp ${PASS_OPT} "${MYSQL_DB}" < "sql/profile.sql" &
 
 #wait for all finished
 wait
