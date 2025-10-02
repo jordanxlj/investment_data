@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS final_a_stock_comb_info (
   f_pe FLOAT,
   f_dv_ratio FLOAT,
   f_roe FLOAT,
-  fcff_ps FLOAT,
 
   /* Liquidity */
   current_ratio FLOAT,
