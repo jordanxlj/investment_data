@@ -1,7 +1,16 @@
 /* Module 12: Update Consensus Report Data (Day by Day) */
 SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
-SET @start_date = '2025-09-01';
+SET @start_date = '2025-09-10';  /* Default start date */
 SET @debug = 0;
+
+/* Get the last brokerage report update time from the tracking table */
+SET @last_brokerage_update = COALESCE(
+    (SELECT MAX(end_day) FROM update_record_table
+     WHERE update_type = 'brokerage_report'),
+    @start_date
+);
+
+SELECT CONCAT('Last brokerage report update was on: ', @last_brokerage_update) AS last_update_info;
 
 SELECT "Update final_a_stock_comb_info with consensus report data - use min_price as target_price (day by day)" as info;
 
@@ -16,7 +25,7 @@ DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT eval_date AS trade_date
 FROM ts_a_stock_consensus_report
-WHERE eval_date >= @start_date
+WHERE eval_date >= @last_brokerage_update
   AND eval_date > @max_tradedate
   AND total_reports > 0
 ORDER BY eval_date;
@@ -34,6 +43,7 @@ CREATE PROCEDURE process_consensus_batch()
 BEGIN
   DECLARE v_current_date DATE;
   DECLARE processed_count INT DEFAULT 0;
+  DECLARE total_updated INT DEFAULT 0;
   DECLARE done INT DEFAULT FALSE;
   DECLARE date_cursor CURSOR FOR
     SELECT trade_date
@@ -66,7 +76,7 @@ BEGIN
     END AS f_neg_ratio
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
-  WHERE consensus.eval_date >= @start_date
+  WHERE consensus.eval_date >= @last_brokerage_update
     AND consensus.eval_date > @max_tradedate
     AND consensus.total_reports > 0;
 
@@ -101,8 +111,12 @@ BEGIN
       final.f_target_price = updates.f_target_price
     WHERE updates.tradedate = v_current_date;
 
+    /* Get rows updated for this date and accumulate */
+    SET @updated_for_date = ROW_COUNT();
+    SET total_updated = total_updated + @updated_for_date;
+
     /* Debug: Rows updated for this date */
-    SELECT ROW_COUNT() AS updated_for_date;
+    SELECT @updated_for_date AS updated_for_date;
 
     /* Remove processed date from temp table */
     DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
@@ -118,6 +132,19 @@ BEGIN
   END LOOP read_loop;
 
   CLOSE date_cursor;
+
+  -- Record the update in tracking table
+  IF total_updated > 0 THEN
+    INSERT INTO update_record_table (
+      update_type, end_day, start_day, record_count, last_update_time
+    ) VALUES (
+      'brokerage_report',
+      v_current_date,  -- Last processed date
+      @last_brokerage_update,
+      total_updated,
+      NOW()
+    );
+  END IF;
 
   -- Clean up the temporary table
   DROP TEMPORARY TABLE IF EXISTS temp_consensus_joined;

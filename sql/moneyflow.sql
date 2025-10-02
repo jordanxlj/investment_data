@@ -1,7 +1,16 @@
 /* Module 9: Update Moneyflow - Identify Missing and Update (Day by Day) */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2010l-01-01') FROM final_a_stock_comb_info);
-SET @start_date = '2025-09-01';
+SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2010-01-01') FROM final_a_stock_comb_info);
+SET @start_date = '2025-09-10';  /* Default start date */
 SET @debug = 0;
+
+/* Get the last moneyflow update time from the tracking table */
+SET @last_moneyflow_update = COALESCE(
+    (SELECT MAX(end_day) FROM update_record_table
+     WHERE update_type = 'moneyflow'),
+    @start_date
+);
+
+SELECT CONCAT('Last moneyflow update was on: ', @last_moneyflow_update) AS last_update_info;
 
 SELECT "Identify and print records from ts_a_stock_moneyflow that do not exist in final_a_stock_comb_info" as info;
 SELECT
@@ -9,7 +18,7 @@ SELECT
 FROM ts_a_stock_moneyflow ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @start_date
+WHERE ts_raw.trade_date >= @last_moneyflow_update
   AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
@@ -24,7 +33,7 @@ DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT trade_date
 FROM ts_a_stock_moneyflow
-WHERE trade_date >= @start_date
+WHERE trade_date >= @last_moneyflow_update
   AND trade_date > @max_tradedate
 ORDER BY trade_date;
 
@@ -41,6 +50,7 @@ CREATE PROCEDURE process_moneyflow_batch()
 BEGIN
   DECLARE v_current_date DATE;
   DECLARE processed_count INT DEFAULT 0;
+  DECLARE total_updated INT DEFAULT 0;
   DECLARE done INT DEFAULT FALSE;
   DECLARE date_cursor CURSOR FOR
     SELECT trade_date
@@ -74,7 +84,7 @@ BEGIN
     (ts_raw.buy_sm_amount + ts_raw.buy_md_amount + ts_raw.buy_lg_amount + ts_raw.buy_elg_amount) AS total_buy_amount
   FROM ts_a_stock_moneyflow ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @start_date
+  WHERE ts_raw.trade_date >= @last_moneyflow_update
     AND ts_raw.trade_date > @max_tradedate;
 
   -- Create index on the temporary table for better performance
@@ -104,8 +114,12 @@ BEGIN
       final.net_inflow_ratio = updates.net_inflow_ratio
     WHERE updates.tradedate = v_current_date;
 
+    /* Get rows updated for this date and accumulate */
+    SET @updated_for_date = ROW_COUNT();
+    SET total_updated = total_updated + @updated_for_date;
+
     /* Debug: Rows updated for this date */
-    SELECT ROW_COUNT() AS updated_for_date;
+    SELECT @updated_for_date AS updated_for_date;
 
     /* Remove processed date from temp table */
     DELETE FROM temp_dates_to_process WHERE trade_date = v_current_date;
@@ -121,6 +135,19 @@ BEGIN
   END LOOP read_loop;
 
   CLOSE date_cursor;
+
+  -- Record the update in tracking table
+  IF total_updated > 0 THEN
+    INSERT INTO update_record_table (
+      update_type, end_day, start_day, record_count, last_update_time
+    ) VALUES (
+      'moneyflow',
+      v_current_date,  -- Last processed date
+      @last_moneyflow_update,
+      total_updated,
+      NOW()
+    );
+  END IF;
 
   -- Clean up the temporary table
   DROP TEMPORARY TABLE IF EXISTS temp_moneyflow_joined;
