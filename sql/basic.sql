@@ -56,14 +56,16 @@ LIMIT 10;
 SET @actual_max_date = (SELECT MAX(tradedate) FROM final_a_stock_comb_info
                         WHERE industry IS NOT NULL);
 
-INSERT INTO update_record_table (
-    update_type, end_day, start_day, record_count, last_update_time
-) VALUES (
-    'basic_industry',
-    @actual_max_date,
-    @update_start,
-    @updated_records,
-    NOW()
-);
+IF @updated_records > 0 THEN
+    INSERT INTO update_record_table (
+        update_type, end_day, start_day, record_count, last_update_time
+    ) VALUES (
+        'basic_industry',
+        @actual_max_date,
+        @update_start,
+            @updated_records,
+            NOW()
+    );
+END IF;
 
 SELECT "Industry update completed successfully!" as info;

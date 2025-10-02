@@ -16,7 +16,7 @@ SELECT "Update final_a_stock_comb_info with consensus report data - use min_pric
 /* Debug: Check source data availability */
 SELECT MAX(eval_date) AS max_source_date, COUNT(*) AS source_rows
 FROM ts_a_stock_consensus_report
-WHERE eval_date >= @last_brokerage_update
+WHERE eval_date > @last_brokerage_update
   AND total_reports > 0;
 
 /* Create a temporary table to store dates to process */
@@ -24,7 +24,7 @@ DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT eval_date AS trade_date
 FROM ts_a_stock_consensus_report
-WHERE eval_date >= @last_brokerage_update
+WHERE eval_date > @last_brokerage_update
   AND total_reports > 0
 ORDER BY eval_date;
 
@@ -74,7 +74,7 @@ BEGIN
     END AS f_neg_ratio
   FROM ts_a_stock_consensus_report consensus
   LEFT JOIN ts_link_table ON consensus.ts_code = ts_link_table.link_symbol
-  WHERE consensus.eval_date >= @last_brokerage_update
+  WHERE consensus.eval_date > @last_brokerage_update
     AND consensus.total_reports > 0;
 
   -- Create index on the temporary table for better performance

@@ -17,7 +17,7 @@ SELECT
 FROM ts_a_stock_cost_pct ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
-WHERE ts_raw.trade_date >= @last_cost_update
+WHERE ts_raw.trade_date > @last_cost_update
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
@@ -31,7 +31,7 @@ DROP TEMPORARY TABLE IF EXISTS temp_dates_to_process;
 CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT trade_date
 FROM ts_a_stock_cost_pct
-WHERE trade_date >= @last_cost_update
+WHERE trade_date > @last_cost_update
 ORDER BY trade_date;
 
 /* Debug: Check if temp table has rows (reason for loop not entering) */
@@ -70,7 +70,7 @@ BEGIN
     ts_raw.winner_rate AS winner_rate
   FROM ts_a_stock_cost_pct ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @last_cost_update;
+  WHERE ts_raw.trade_date > @last_cost_update;
 
   -- Create index on the temporary table for better performance
   CREATE INDEX idx_temp_cost_pct_date ON temp_cost_pct_joined (tradedate);
