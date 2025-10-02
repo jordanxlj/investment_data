@@ -8,7 +8,7 @@
 
    ============================================================================ */
 
-SET @start_date = '2013-01-01';  /* Start date for data processing */
+SET @start_date = '2017-07-01';  /* Start date for data processing */
 SET @debug = 0;  /* Set to 1 to enable debug output */
 
 SELECT CONCAT('Basic Info Update: Processing data from: ', @start_date, ', debug = ', @debug) AS update_info;
@@ -28,10 +28,8 @@ SELECT "Updating industry field in final_a_stock_comb_info..." as info;
 UPDATE final_a_stock_comb_info target
 INNER JOIN ts_link_table link ON target.symbol = link.w_symbol
 INNER JOIN ts_a_stock_basic basic ON basic.ts_code = link.link_symbol
-SET target.industry = CAST(basic.industry_code AS SIGNED INTEGER)
-WHERE basic.industry_code IS NOT NULL
-  AND basic.industry_code REGEXP '^[0-9]+$'  /* Only update if industry_code is numeric */
-  AND target.tradedate > @update_start;  /* Only update records after last update */
+SET target.industry = CAST(COALESCE(basic.industry_code, '0') AS SIGNED INTEGER)
+WHERE target.tradedate > @update_start;  /* Only update records after last update */
 
 SET @updated_records = ROW_COUNT();
 
