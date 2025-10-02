@@ -100,7 +100,7 @@ def dump_all_to_qlib_source(
     )
 
     stock_df = pd.DataFrame()
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         print(f"Processing chunk {i} with {len(chunk)} rows")
         stock_df = pd.concat([stock_df, chunk], ignore_index=True)
 
