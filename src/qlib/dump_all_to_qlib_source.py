@@ -15,7 +15,7 @@ def dump_all_to_qlib_source(
     dbConnection = sqlEngine.raw_connection()
 
     # Export all fields from final_a_stock_comb_info
-    stock_df = pd.read_sql(
+    chunks = pd.read_sql(
         """
         SELECT
             tradedate,
@@ -96,7 +96,15 @@ def dump_all_to_qlib_source(
         ORDER BY symbol, tradedate
         """,
         dbConnection,
+        chunksize=100000
     )
+
+    stock_df = pd.DataFrame()
+    for chunk in chunks:
+        print(f"Processing chunk {i} with {len(chunk)} rows")
+        stock_df = pd.concat([stock_df, chunk], ignore_index=True)
+
+    stock_df.sort_values(['symbol', 'tradedate'], inplace=True)
 
     dbConnection.close()
     sqlEngine.dispose()
