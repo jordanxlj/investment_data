@@ -334,7 +334,7 @@ def aggregate_consensus_from_df(date_df: pd.DataFrame, ts_code: str, eval_date: 
 
         # Convert eval_date from string to DATE object for efficient storage and queries
         # This avoids SQL-level STR_TO_DATE() conversion and improves insertion performance
-        eval_date_obj = pd.to_datetime(eval_date, format='%Y%m%d').date()
+        eval_date_obj = parse_date_flexible(eval_date, return_datetime=True).date()
 
         result = {
             'ts_code': ts_code,
@@ -415,7 +415,7 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 logger.debug(f"Using brokerage report data for {ts_code} on {current_date}")
                 # If no annual data, proceed with brokerage
                 # Get all reports available up to current_date
-                current_date_dt = pd.to_datetime(current_date, format='%Y%m%d')
+                current_date_dt = parse_date_flexible(current_date, return_datetime=True)
                 date_df = bulk_df[bulk_df['report_date_dt'] < current_date_dt].copy()
 
                 if date_df.empty:
@@ -451,8 +451,9 @@ def process_stock_all_dates(engine: Any, ts_code: str, date_list: List[str], bat
                 if date_df.empty:
                     continue
 
-                # Aggregate consensus
-                result = aggregate_consensus_from_df(date_df, ts_code, current_date, fiscal_info)
+                # Aggregate consensus (convert date to YYYYMMDD format expected by function)
+                eval_date_ymd = parse_date_flexible(current_date, target_format="%Y%m%d")
+                result = aggregate_consensus_from_df(date_df, ts_code, eval_date_ymd, fiscal_info)
                 if result:
                     stock_results.append(result)
 

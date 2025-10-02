@@ -576,8 +576,10 @@ def test_groupby_performance_vs_filtering(sample_bulk_data):
     """Test groupby performance vs traditional filtering"""
     target_dates = sample_bulk_data['report_date'].unique()[:10]
 
+    # Warm up both methods
     grouped = sample_bulk_data.groupby('report_date')
 
+    # Test GroupBy method (only the access part, groupby creation is separate)
     start_time = time.perf_counter()
     groupby_results = {}
     for date in target_dates:
@@ -585,15 +587,17 @@ def test_groupby_performance_vs_filtering(sample_bulk_data):
             groupby_results[date] = grouped.get_group(date)
     groupby_time = time.perf_counter() - start_time
 
+    # Test Filter method
     start_time = time.perf_counter()
     filter_results = {}
     for date in target_dates:
         filter_results[date] = sample_bulk_data[sample_bulk_data['report_date'] == date]
     filter_time = time.perf_counter() - start_time
 
-    assert groupby_time <= filter_time * 3.0
+    # GroupBy should be significantly faster for multiple accesses
+    assert groupby_time <= filter_time * 1.5  # More reasonable expectation
 
-    logger.info(f"GroupBy time: {groupby_time:.6f}s, Filter time: {filter_time:.6f}s, "
+    logger.info(f"GroupBy access time: {groupby_time:.6f}s, Filter time: {filter_time:.6f}s, "
                 f"Ratio: {groupby_time/filter_time:.2f}x")
 
     for date in target_dates:
