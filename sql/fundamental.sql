@@ -1,5 +1,4 @@
 /* Update Fundamentals - Identify Missing and Update (Day by Day) */
-SET @max_tradedate = (SELECT COALESCE(MAX(tradedate), '2008-01-01') FROM final_a_stock_comb_info);
 SET @start_date = '2025-09-10';  /* Default start date */
 SET @debug = 1;  -- Enable debug for more outputs
 
@@ -19,12 +18,11 @@ FROM ts_a_stock_fundamental ts_raw
 LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
 LEFT JOIN final_a_stock_comb_info final ON ts_raw.trade_date = final.tradedate AND ts_link_table.w_symbol = final.symbol
 WHERE ts_raw.trade_date >= @last_fundamental_update
-  AND ts_raw.trade_date > @max_tradedate
   AND @debug = 1  /* Only show debug info when debug is enabled */
 AND final.tradedate IS NULL;
 
 /* Debug: Check source data availability */
-SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_fundamental WHERE trade_date > @max_tradedate;
+SELECT MAX(trade_date) AS max_source_date, COUNT(*) AS source_rows FROM ts_a_stock_fundamental WHERE trade_date > @last_fundamental_update;
 
 SELECT "Update existing records in final_a_stock_comb_info with data from ts_a_stock_fundamental (day by day)" as info;
 
@@ -34,7 +32,6 @@ CREATE TEMPORARY TABLE temp_dates_to_process AS
 SELECT DISTINCT trade_date
 FROM ts_a_stock_fundamental
 WHERE trade_date >= @last_fundamental_update
-  AND trade_date > @max_tradedate
 ORDER BY trade_date;
 
 /* Debug: Check if temp table has rows (reason for loop not entering) */
@@ -88,8 +85,7 @@ BEGIN
     ts_raw.circ_mv * 10000.0 AS circ_mv
   FROM ts_a_stock_fundamental ts_raw
   LEFT JOIN ts_link_table ON ts_raw.ts_code = ts_link_table.link_symbol
-  WHERE ts_raw.trade_date >= @last_fundamental_update
-    AND ts_raw.trade_date > @max_tradedate;
+  WHERE ts_raw.trade_date >= @last_fundamental_update;
 
   -- Create index on the temporary table for better performance
   CREATE INDEX idx_temp_fundamentals_date ON temp_fundamentals_joined (tradedate);
