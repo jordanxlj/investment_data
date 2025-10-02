@@ -105,15 +105,15 @@ BEGIN
 
     /* Pre-compute report ranges, including recent and prior reports per ts_code to handle gaps */
     CREATE TEMPORARY TABLE temp_report_ranges AS
-    SELECT ts_code, ann_date, next_ann_date, report_period, /* All metrics ... */ current_ratio, quick_ratio, cash_ratio, ca_turn, inv_turn, ar_turn, fa_turn, assets_turn, roic, roe_ttm, roa_ttm, grossprofit_margin_ttm, netprofit_margin_ttm, fcf_margin_ttm, debt_to_assets, debt_to_eqt, debt_to_ebitda, bps, eps_ttm, revenue_ps_ttm, cfps, fcff_ps, or_yoy, netprofit_yoy, basic_eps_yoy, equity_yoy, assets_yoy, ocf_yoy, roe_yoy, revenue_cagr_3y, netincome_cagr_3y, rd_exp_to_capex, goodwill
+    SELECT ts_code, ann_date, next_ann_date, report_period, current_ratio, quick_ratio, cash_ratio, ca_turn, inv_turn, ar_turn, fa_turn, assets_turn, roic, roe_ttm, roa_ttm, grossprofit_margin_ttm, netprofit_margin_ttm, fcf_margin_ttm, debt_to_assets, debt_to_eqt, debt_to_ebitda, bps, eps_ttm, revenue_ps_ttm, cfps, fcff_ps, or_yoy, netprofit_yoy, basic_eps_yoy, equity_yoy, assets_yoy, ocf_yoy, roe_yoy, revenue_cagr_3y, netincome_cagr_3y, rd_exp_to_capex, goodwill
     FROM (
         /* Recent reports (ann_date > @financial_update_start) */
-        SELECT ts_code, ann_date, LEAD(ann_date) OVER (PARTITION BY ts_code ORDER BY ann_date) AS next_ann_date, report_period, /* metrics */ 
+        SELECT ts_code, ann_date, LEAD(ann_date) OVER (PARTITION BY ts_code ORDER BY ann_date) AS next_ann_date, report_period, current_ratio, quick_ratio, cash_ratio, ca_turn, inv_turn, ar_turn, fa_turn, assets_turn, roic, roe_ttm, roa_ttm, grossprofit_margin_ttm, netprofit_margin_ttm, fcf_margin_ttm, debt_to_assets, debt_to_eqt, debt_to_ebitda, bps, eps_ttm, revenue_ps_ttm, cfps, fcff_ps, or_yoy, netprofit_yoy, basic_eps_yoy, equity_yoy, assets_yoy, ocf_yoy, roe_yoy, revenue_cagr_3y, netincome_cagr_3y, rd_exp_to_capex, goodwill
         FROM ts_a_stock_financial_profile
         WHERE ann_date > @financial_update_start AND ann_date <= @max_tradedate
         UNION ALL
         /* Most recent prior report per ts_code (ann_date <= @financial_update_start) */
-        SELECT f.ts_code, f.ann_date, (SELECT MIN(ann_date) FROM ts_a_stock_financial_profile WHERE ts_code = f.ts_code AND ann_date > f.ann_date) AS next_ann_date, f.report_period, /* metrics */ 
+        SELECT f.ts_code, f.ann_date, (SELECT MIN(ann_date) FROM ts_a_stock_financial_profile WHERE ts_code = f.ts_code AND ann_date > f.ann_date) AS next_ann_date, f.report_period, f.current_ratio, f.quick_ratio, f.cash_ratio, f.ca_turn, f.inv_turn, f.ar_turn, f.fa_turn, f.assets_turn, f.roic, f.roe_ttm, f.roa_ttm, f.grossprofit_margin_ttm, f.netprofit_margin_ttm, f.fcf_margin_ttm, f.debt_to_assets, f.debt_to_eqt, f.debt_to_ebitda, f.bps, f.eps_ttm, f.revenue_ps_ttm, f.cfps, f.fcff_ps, f.or_yoy, f.netprofit_yoy, f.basic_eps_yoy, f.equity_yoy, f.assets_yoy, f.ocf_yoy, f.roe_yoy, f.revenue_cagr_3y, f.netincome_cagr_3y, f.rd_exp_to_capex, f.goodwill
         FROM (
             SELECT ts_code, MAX(ann_date) AS max_prior_ann
             FROM ts_a_stock_financial_profile
@@ -121,8 +121,7 @@ BEGIN
             GROUP BY ts_code
         ) prior_max
         INNER JOIN ts_a_stock_financial_profile f ON f.ts_code = prior_max.ts_code AND f.ann_date = prior_max.max_prior_ann
-    ) AS combined
-    ORDER BY ts_code, ann_date;
+    ) AS combined;
 
     /* Handle the last range per ts_code */
     UPDATE temp_report_ranges SET next_ann_date = '2100-01-01' WHERE next_ann_date IS NULL;
@@ -131,8 +130,8 @@ BEGIN
     ALTER TABLE temp_report_ranges ADD INDEX idx_ts_code_ann_date (ts_code, ann_date);
 
     IF @debug = 1 THEN
-        SELECT 'Precomputed report ranges (including priors):' AS status;
-        SELECT * FROM temp_report_ranges WHERE ts_code = '000001.SZ' LIMIT 10;
+        SELECT 'Precomputed report ranges:' AS status;
+        SELECT * FROM temp_report_ranges LIMIT 10;
     END IF;
 
     /* Optionally disable keys for faster bulk updates (InnoDB limited effect) */
