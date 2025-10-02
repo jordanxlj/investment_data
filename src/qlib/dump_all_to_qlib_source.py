@@ -34,7 +34,7 @@ def dump_all_to_qlib_source(
             pb,
             ps,
             dv_ratio,
-            circ_mv,
+            circ_mv as market_cap,
             main_inflow_ratio,
             small_inflow_ratio,
             net_inflow_ratio,
@@ -52,7 +52,6 @@ def dump_all_to_qlib_source(
             f_pe,
             f_dv_ratio,
             f_roe,
-            fcff_ps,
             -- Liquidity ratios
             current_ratio,
             quick_ratio,
@@ -79,6 +78,7 @@ def dump_all_to_qlib_source(
             eps_ttm,
             revenue_ps_ttm,
             cfps,
+            fcff_ps,
             -- Growth metrics
             or_yoy,
             netprofit_yoy,
