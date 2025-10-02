@@ -117,7 +117,7 @@ BEGIN
         FROM (
             SELECT ts_code, MAX(ann_date) AS max_prior_ann
             FROM ts_a_stock_financial_profile
-            WHERE ann_date < @financial_update_start
+            WHERE ann_date <= @financial_update_start
             GROUP BY ts_code
         ) prior_max
         INNER JOIN ts_a_stock_financial_profile f ON f.ts_code = prior_max.ts_code AND f.ann_date = prior_max.max_prior_ann
@@ -163,14 +163,12 @@ BEGIN
             target.current_ratio = r.current_ratio,
             target.quick_ratio = r.quick_ratio,
             target.cash_ratio = r.cash_ratio,
-
             /* Turnover ratios */
             target.ca_turn = r.ca_turn,
             target.inv_turn = r.inv_turn,
             target.ar_turn = r.ar_turn,
             target.fa_turn = r.fa_turn,
             target.assets_turn = r.assets_turn,
-
             /* Profitability - Basic ratios that don't need TTM calculation */
             target.roic = r.roic,
             target.roe_ttm = r.roe_ttm,
@@ -178,19 +176,16 @@ BEGIN
             target.grossprofit_margin_ttm = r.grossprofit_margin_ttm,
             target.netprofit_margin_ttm = r.netprofit_margin_ttm,
             target.fcf_margin_ttm = r.fcf_margin_ttm,
-
             /* Leverage */
             target.debt_to_assets = r.debt_to_assets,
             target.debt_to_eqt = r.debt_to_eqt,
             target.debt_to_ebitda = r.debt_to_ebitda,
-
             /* Valuation */
             target.bps = r.bps,
             target.eps_ttm = r.eps_ttm,
             target.revenue_ps_ttm = r.revenue_ps_ttm,
             target.cfps = r.cfps,
             target.fcff_ps = r.fcff_ps,
-
             /* Growth */
             target.or_yoy = r.or_yoy,
             target.netprofit_yoy = r.netprofit_yoy,
@@ -201,7 +196,6 @@ BEGIN
             target.roe_yoy = r.roe_yoy,
             target.revenue_cagr_3y = r.revenue_cagr_3y,
             target.netincome_cagr_3y = r.netincome_cagr_3y,
-
             /* Other */
             target.rd_exp_to_capex = r.rd_exp_to_capex,
             target.goodwill = r.goodwill
