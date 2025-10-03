@@ -93,6 +93,7 @@ def dump_all_to_qlib_source(
             rd_exp_to_capex,
             goodwill
         FROM final_a_stock_comb_info
+        where tradedate >= '2018-01-01'
         ORDER BY symbol, tradedate
         """,
         dbConnection,
