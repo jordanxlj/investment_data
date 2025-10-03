@@ -14,7 +14,7 @@ INDEX_DIR="./temp_dir/qlib_index"
 SCRIPT_DIR="./src"
 
 mkdir -p $QLIB_DATA
-python3 ./src/qlib/dump_all_to_qlib_source.py --mysql_url="${MYSQL_URL}" --output_dir=$QLIB_DATA
+#python3 ./src/qlib/dump_all_to_qlib_source.py --mysql_url="${MYSQL_URL}" --output_dir=$QLIB_DATA
 
 export PYTHONPATH=`pwd`
 export PYTHONPATH=$PYTHONPATH:$WORKING_DIR/qlib_enhanced:$WORKING_DIR/qlib_enhanced/scripts
@@ -23,7 +23,7 @@ python3 $SCRIPT_DIR/qlib/normalize.py normalize_data --source_dir $QLIB_DATA --n
 python3 $WORKING_DIR/qlib_enhanced/scripts/dump_bin.py dump_all --csv_path $NORMALIZE_DIR --qlib_dir $WORKING_DIR/qlib_bin --date_field_name=tradedate --exclude_fields=tradedate,symbol
 
 mkdir -p $INDEX_DIR
-python3 $SCRIPT_DIR/qlib/dump_index_weight.py --mysql_url="${MYSQL_URL}"
+python3 $SCRIPT_DIR/qlib/dump_index_weight.py --mysql_url="${MYSQL_URL}" --output_dir=$INDEX_DIR
 python3 $SCRIPT_DIR/tushare_provider/dump_day_calendar.py --mysql_url="${MYSQL_URL}" --qlib_dir=$WORKING_DIR/qlib_bin/
 
 cp $INDEX_DIR/csi* $WORKING_DIR/qlib_bin/instruments/

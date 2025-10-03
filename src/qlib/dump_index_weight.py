@@ -5,7 +5,9 @@ import fire
 import os
 import datetime
 
-def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', skip_exists=False):
+def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investment_data', 
+                             output_dir='temp_dir/qlib_index',
+                             skip_exists=False):
   sqlEngine = create_engine(mysql_url, pool_recycle=3600)
   dbConnection = sqlEngine.raw_connection()
 
@@ -20,7 +22,7 @@ def dump_all_to_sqlib_source(mysql_url='mysql+pymysql://root:@127.0.0.1/investme
   script_path = os.path.dirname(os.path.realpath(__file__))
 
   for index_name, index_code in index_map.items():
-    filename = f'{script_path}/qlib_index/{index_name}.txt'
+    filename = os.path.join(output_dir, f'{index_name}.txt')
     if skip_exists and os.path.isfile(filename):
         continue
 
