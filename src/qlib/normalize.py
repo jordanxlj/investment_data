@@ -16,8 +16,7 @@ class CrowdSourceNormalize(yahoo_collector.YahooNormalizeCN1d):
   COLUMNS = ["open", "close", "high", "low", "vwap", "volume"]
   EXCLUDES = ['amount', 'turnover', 'volume_ratio', 'dividend_ratio', 'pe', 
               'pb', 'ps', 'market_cap', 'main_inflow_ratio', 'small_inflow_ratio', 
-              'net_inflow_ratio', 'cost_5pct', 'cost_15pct', 'cost_50pct', 'cost_85pct', 
-              'cost_95pct', 'weight_avg', 'winner_rate', 'f_pos_ratio', 'f_neg_ratio', 
+              'net_inflow_ratio', 'weight_avg', 'winner_rate', 'f_pos_ratio', 'f_neg_ratio', 
               'f_eps', 'f_pe', 'f_dv_ratio', 'f_roe', 'current_ratio', 'quick_ratio', 
               'cash_ratio', 'ca_turn', 'inv_turn', 'ar_turn', 'fa_turn', 'assets_turn', 
               'roic', 'roe_ttm', 'roa_ttm', 'grossprofit_margin_ttm', 'netprofit_margin_ttm', 
