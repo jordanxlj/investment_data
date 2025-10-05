@@ -19,8 +19,8 @@ mkdir -p $QLIB_DATA
 export PYTHONPATH=`pwd`
 export PYTHONPATH=$PYTHONPATH:$WORKING_DIR/qlib_enhanced:$WORKING_DIR/qlib_enhanced/scripts
 
-python3 $SCRIPT_DIR/qlib/normalize.py normalize_data --source_dir $QLIB_DATA --normalize_dir $NORMALIZE_DIR --max_workers=16 --date_field_name="tradedate"
-python3 $WORKING_DIR/qlib_enhanced/scripts/dump_bin.py dump_all --csv_path $NORMALIZE_DIR --qlib_dir $WORKING_DIR/qlib_bin --date_field_name=tradedate --exclude_fields=tradedate,symbol
+#python3 $SCRIPT_DIR/qlib/normalize.py normalize_data --source_dir $QLIB_DATA --normalize_dir $NORMALIZE_DIR --max_workers=16 --date_field_name="tradedate"
+python3 $WORKING_DIR/qlib_enhanced/scripts/dump_bin.py dump_aggregated -csv_path $NORMALIZE_DIR --qlib_dir $WORKING_DIR/qlib_bin --date_field_name=tradedate --exclude_fields=tradedate,symbol --max_workers=4
 
 mkdir -p $INDEX_DIR
 python3 $SCRIPT_DIR/qlib/dump_index_weight.py --mysql_url="${MYSQL_URL}" --output_dir=$INDEX_DIR
