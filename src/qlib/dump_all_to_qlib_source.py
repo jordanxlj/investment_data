@@ -29,7 +29,7 @@ def dump_all_to_qlib_source(
             adjclose,
             amount,
             amount/volume*10 as vwap,
-            turnover,
+            turnover_rate as turnover,
             volume_ratio,
             pe,
             pb,
