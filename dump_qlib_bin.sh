@@ -14,7 +14,7 @@ INDEX_DIR="./temp_dir/qlib_index"
 SCRIPT_DIR="./src"
 
 mkdir -p $QLIB_DATA
-#python3 ./src/qlib/dump_all_to_qlib_source.py --mysql_url="${MYSQL_URL}" --output_dir=$QLIB_DATA
+python3 ./src/qlib/dump_all_to_qlib_source.py --mysql_url="${MYSQL_URL}" --output_dir=$QLIB_DATA
 
 export PYTHONPATH=`pwd`
 export PYTHONPATH=$PYTHONPATH:$WORKING_DIR/qlib_enhanced:$WORKING_DIR/qlib_enhanced/scripts
