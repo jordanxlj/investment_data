@@ -13,8 +13,9 @@ except ImportError as e:
 
 class CrowdSourceNormalize(yahoo_collector.YahooNormalizeCN1d):
   # Add vwap so that vwap will be adjusted during normalization
-  COLUMNS = ["open", "close", "high", "low", "vwap", "volume"]
-  EXCLUDES = ['amount', 'turnover', 'volume_ratio', 'dividend_ratio', 'pe', 
+  COLUMNS = ["open", "close", "high", "low", "vwap", "volume", "f_target_price", 
+             "cost_5pct", "cost_15pct", "cost_50pct", "cost_85pct", "cost_95pct"]
+  EXCLUDES = ['amount', 'turnover', 'volume_ratio', 'dv_ratio', 'pe', 
               'pb', 'ps', 'market_cap', 'main_inflow_ratio', 'small_inflow_ratio', 
               'net_inflow_ratio', 'weight_avg', 'winner_rate', 'f_pos_ratio', 'f_neg_ratio', 
               'f_eps', 'f_pe', 'f_dv_ratio', 'f_roe', 'current_ratio', 'quick_ratio', 
@@ -24,7 +25,7 @@ class CrowdSourceNormalize(yahoo_collector.YahooNormalizeCN1d):
               'bps', 'eps_ttm', 'revenue_ps_ttm', 'cfps', 'fcff_ps', 'or_yoy', 
               'netprofit_yoy', 'basic_eps_yoy', 'equity_yoy', 'assets_yoy', 'ocf_yoy', 
               'roe_yoy', 'revenue_cagr_3y', 'netincome_cagr_3y', 'rd_exp_to_capex', 
-              'goodwill']
+              'goodwill', 'industry']
   def _manual_adj_data(self, df: pd.DataFrame) -> pd.DataFrame:
     # amount should be kept as original value, so that adjusted volume * adjust vwap = amount
     result_df = super()._manual_adj_data(df)
